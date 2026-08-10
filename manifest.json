@@ -1,0 +1,14 @@
+{
+    "schemaVersion": 1,
+    "version": "1.0.0",
+    "entry": "index.html",
+    "display_name": {
+        "zh-CN": "我的应用",
+        "en-US": "My App",
+        "ja-JP": "マイアプリ"
+    },
+    "mode": "inline",
+    "mount": { "type": "nav" },
+    "scopes": ["ui:notify"],
+    "sdkVersion": "1.0.0"
+}
