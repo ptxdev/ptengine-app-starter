@@ -1,0 +1,34 @@
+# 更新日志
+
+本脚手架的所有版本变更记录于此。版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
+
+> **关于版本号的归属**：这里记录的是**脚手架自身**的版本（对应 git tag 与
+> [Releases](https://github.com/ptxdev/ptengine-app-starter/releases)）。
+> `package.json` 与 `manifest.json` 里的 `version` 字段属于**你的应用**，
+> clone 之后由你自己维护，与本文件无关。
+
+## 兼容矩阵
+
+| 脚手架版本 | `@ptengine/app-sdk` | manifest `schemaVersion` | 说明 |
+|---|---|---|---|
+| v1.0.0 | `^0.2.0` | `1` | 首个版本 |
+
+选版本时以本表为准：脚手架版本决定了它依赖的 SDK 大版本，跨大版本升级请看下面对应条目的「升级指引」。
+
+## [1.0.0] - 2026-08-10
+
+首个公开版本。
+
+### 新增
+
+- Vite 7 + React 19 + TypeScript 项目骨架，`base: './'` 已按平台要求配好
+- `npm run package`：构建 + 打出可直接上传的 zip，并在打包前自检 zip 根级结构与
+  `manifest.entry` 是否与产物一致
+- `manifest.json` 模板，含多语言 `display_name` 与 `scopes` 权限声明
+- `src/pt-app.ts`：`getPtApp()` 安全取值封装（未经平台加载时返回 `null` 而非抛错）
+- `src/App.tsx`：可运行示例，演示 `context` / `ui.toast` / `ui.confirm` / `nav.push` /
+  `nav.syncRoute` 全部宿主能力
+- 本地开发接好 `installDevHost()`，脱离 Ptengine X 主站也能调试
+- `README.md` 开发文档、`CLAUDE.md`（供 AI 编码助手遵循平台约定）
+
+[1.0.0]: https://github.com/ptxdev/ptengine-app-starter/releases/tag/v1.0.0

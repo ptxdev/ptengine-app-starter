@@ -5,6 +5,16 @@
 
 ## 快速开始
 
+取一个正式版本（推荐，而不是直接 clone 主分支）：
+
+```bash
+git clone --branch v1.0.0 --depth 1 https://github.com/ptxdev/ptengine-app-starter.git my-app
+cd my-app && rm -rf .git && git init
+```
+
+最新版本号见 [Releases](https://github.com/ptxdev/ptengine-app-starter/releases)，
+也可以直接从 Release 页下载源码 zip。
+
 ```bash
 npm install
 npm run dev        # 本地开发（已接好 dev-host，window.PtApp 可用）
@@ -76,6 +86,28 @@ app?.nav.syncRoute('detail');          // 把内部路由同步到地址栏
 | `entry` 指向的文件 | 必须真实存在于包内 |
 | 文件类型 | 仅允许静态资源（html/js/css/图片/字体/json 等），不允许可执行文件 |
 | 包体积 | 单包与解压后总大小均有上限 |
+
+## 版本与升级
+
+脚手架自身走独立的语义化版本（git tag + [Releases](https://github.com/ptxdev/ptengine-app-starter/releases)），
+和 `@ptengine/app-sdk` 的版本号是两条线；两者的配套关系见
+[CHANGELOG 的兼容矩阵](./CHANGELOG.md#兼容矩阵)。
+
+注意区分三个 `version`：
+
+| 位置 | 属于谁 | 谁维护 |
+|---|---|---|
+| git tag / Release | **脚手架** | Ptengine |
+| `manifest.json` 的 `version` | **你的应用**（每次上传新版本必须递增） | 你 |
+| `package.json` 的 `version` | **你的应用**（npm 惯例，平台不读） | 你 |
+
+**已经在开发中的项目要不要升级脚手架？** 通常不需要 —— 脚手架是一次性起点，不是运行时依赖。
+只在两种情况下需要跟进：
+
+- **CHANGELOG 里出现 major 版本** —— 说明平台约定有破坏性变更，照该版本的「升级指引」改。
+- **想要新版本引入的示例或配置** —— 对照 Release 说明手工挪过来即可。
+
+日常保持最新的只有 `@ptengine/app-sdk`（`npm update @ptengine/app-sdk`），它才是真正的依赖。
 
 ## 常见问题
 

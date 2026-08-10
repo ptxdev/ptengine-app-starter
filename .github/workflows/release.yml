@@ -1,0 +1,45 @@
+name: Release
+
+# 推送 v* tag 时自动建 GitHub Release，说明取自 CHANGELOG.md 对应章节。
+# 发版流程见 RELEASING.md。
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    name: 创建 Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 从 CHANGELOG 抽取本版本说明
+        run: node scripts/changelog-section.mjs "${GITHUB_REF_NAME}" > release-notes.md
+
+      - name: 创建 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --notes-file release-notes.md
+
+  # 与 release 任务相互独立：构建回归失败不该卡住发版记录的创建，但红了要去看。
+  verify:
+    name: 构建回归
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - run: npm install
+
+      - name: 构建 + 打包（含 zip 结构自检）
+        run: npm run package
