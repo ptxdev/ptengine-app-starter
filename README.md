@@ -118,6 +118,14 @@ app?.nav.syncRoute('detail');          // 把内部路由同步到地址栏
 **`window.PtApp` 是 undefined？** 只有经平台加载时才会注入。本地开发请用 `npm run dev`
 （入口已调用 `installDevHost()`）；直接打开 `dist/index.html` 是拿不到的。
 
+**在平台内以本地开发模式加载（管理页「本地开发」指向本地 dev server）时，`window.PtApp`
+是异步就绪的**：此时 `installDevHost()` 是插入一个真正的 `<script>` 去加载平台 SDK，要等
+网络加载完才会挂上 `window.PtApp`（不同于纯本地 `npm run dev` 装假宿主是同步的，也不同于
+上传到平台后阻塞 script 注入、业务代码执行前就已就绪）。入口 `src/main.tsx` 已经处理了
+等待——用 `await installDevHost()` 等它 resolve 后再渲染，不需要你额外处理；但如果你改动
+了入口结构，务必保留这个等待，否则会永久卡在"未检测到 window.PtApp"提示页。需要
+`@ptengine/app-sdk` 0.3.0+。
+
 **换成 Vue / Svelte 可以吗？** 可以。本脚手架的关键约定只有三条（相对 `base`、
 根级 `manifest.json`、`entry` 一致），与框架无关，照 `vite.config.ts` 与
 `scripts/package.mjs` 迁移即可。

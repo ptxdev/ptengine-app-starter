@@ -39,6 +39,15 @@ window.PtApp = {
 它必须在渲染前执行（业务代码可能在首次渲染就读 context）。dev-host 的 `ui`/`nav`
 只打 `console.log`，不做真实交互。
 
+**在 Ptengine X 平台内以本地开发模式加载时（管理页「本地开发」指向本地 dev
+server），`window.PtApp` 是异步就绪的**：`installDevHost()` 会探测到真宿主，转而
+插入平台的真 SDK loader script，要等脚本网络加载完才挂上 `window.PtApp`。入口已
+处理等待——`installDevHost()` 返回 `Promise<void>`，`main.tsx` 用 `await` 等它
+resolve 后才渲染 `<App />`。若你改动入口逻辑，务必保留这个等待（或改成监听
+`pt-app-ready` 事件），否则 `App.tsx` 的 `useMemo(getPtApp, [])` 会在首次渲染读到
+`null` 且永不重算，页面永久停在"未检测到 window.PtApp"提示页——现象只在平台内
+dev 模式出现，独立 `npm run dev` 完全正常。此行为需要 `@ptengine/app-sdk` 0.3.0+。
+
 ## 命令
 
 - `npm run dev` — 本地开发
