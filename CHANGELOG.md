@@ -9,12 +9,36 @@
 
 ## 兼容矩阵
 
-| 脚手架版本 | `@ptengine/app-sdk` | manifest `schemaVersion` | 说明 |
-|---|---|---|---|
-| v1.0.1 | `^0.3.0` | `1` | 支持在 Ptengine X 平台内加载本地 dev server 联调 |
-| v1.0.0 | `^0.2.0` | `1` | 首个版本 |
+| 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
+|---|---|---|---|---|
+| v1.1.0 | `^0.3.0` | `^0.3.0` | `1` | 预装 UI 组件库 + Tailwind，暗色跟随平台主题 |
+| v1.0.1 | `^0.3.0` | — | `1` | 支持在 Ptengine X 平台内加载本地 dev server 联调 |
+| v1.0.0 | `^0.2.0` | — | `1` | 首个版本 |
 
 选版本时以本表为准：脚手架版本决定了它依赖的 SDK 大版本，跨大版本升级请看下面对应条目的「升级指引」。
+
+## [1.1.0] - 2026-08-11
+
+### 新增
+
+- **预装 UI 组件库 `@ptengine/design-components`**（基于 shadcn/ui + Radix + Tailwind），
+  用它写界面即与平台自身观感一致。随之接好四处配置：Tailwind preset、扫描组件库产物的
+  content glob、`tokens.css` 引入、根元素 `pt-ui` 作用域。四处的作用与"改错了会怎样"见
+  README 的「UI 组件库」一节 —— 它们出错时**都不报错**，只是样式不对，很难自查。
+- **暗色模式跟随平台主题**（`src/theme.ts`）：读 `window.PtApp.context.theme` 应用一次，
+  并订阅宿主后续下发；暗色 = 根元素加 `dark` 类。拿不到宿主时按亮色渲染。
+- `src/App.tsx` 改成组件库用法示例（Card / Button / Badge / Input / Alert / Separator），
+  可直接删改。原先的 `src/App.css` 已删除（样式改由 Tailwind + 设计 token 提供）。
+
+### 变更
+
+- 新增开发依赖 `tailwindcss` / `postcss` / `autoprefixer`，新增 `tailwind.config.js`、
+  `postcss.config.js`、`src/index.css`。
+
+### 升级指引（从 v1.0.x）
+
+已在开发中的项目不需要跟进（脚手架是起点、不是运行时依赖）。想把组件库接进老项目，
+照上面四处配置手工挪一遍即可，顺序无所谓，但**四处必须齐全**。
 
 ## [1.0.1] - 2026-08-11
 
