@@ -11,9 +11,48 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|
+| v1.0.1 | `^0.3.0` | `1` | 支持在 Ptengine X 平台内加载本地 dev server 联调 |
 | v1.0.0 | `^0.2.0` | `1` | 首个版本 |
 
 选版本时以本表为准：脚手架版本决定了它依赖的 SDK 大版本，跨大版本升级请看下面对应条目的「升级指引」。
+
+## [1.0.1] - 2026-08-11
+
+### 修复
+
+- **入口改为等待 `window.PtApp` 就绪后再渲染**（`src/main.tsx`）。
+
+  在 Ptengine X 平台内以「本地开发模式」加载本地 dev server 时，`window.PtApp` 是**异步**就绪的 ——
+  `installDevHost()` 会探测到自己运行在真宿主里，转而插入平台的真 SDK loader script，要等脚本网络
+  加载完才挂上 `window.PtApp`。而 `src/App.tsx` 用 `useMemo(getPtApp, [])` 只读一次、不会重算，
+  所以旧写法（同步调用后立即渲染）会读到 `null` 并**永久**停在「未检测到 `window.PtApp`」提示页。
+
+  该现象只在平台内 dev 模式出现，独立 `npm run dev` 完全正常，因此很难自查。
+
+### 变更
+
+- 依赖 `@ptengine/app-sdk` 升到 `^0.3.0`（异步就绪信号自该版本起提供）
+
+### 升级指引（从 v1.0.0）
+
+已在开发中的项目按需跟进即可，只有用到「平台内本地开发模式」时才必须改：
+
+1. `npm i @ptengine/app-sdk@^0.3.0`
+2. 把入口的 `installDevHost()` 改成等待完成后再渲染：
+
+   ```ts
+   async function bootstrap() {
+       if (import.meta.env.DEV) {
+           await installDevHost();
+       }
+       createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);
+   }
+   bootstrap();
+   ```
+
+   也可以不改入口，改为监听 `pt-app-ready` 事件后再读 `window.PtApp` —— 两种方式 SDK 都支持，
+   详见 [`@ptengine/app-sdk` README](https://www.npmjs.com/package/@ptengine/app-sdk) 的
+   「平台内 dev 模式下 `window.PtApp` 是异步就绪的」一节。
 
 ## [1.0.0] - 2026-08-10
 
@@ -31,4 +70,5 @@
 - 本地开发接好 `installDevHost()`，脱离 Ptengine X 主站也能调试
 - `README.md` 开发文档、`CLAUDE.md`（供 AI 编码助手遵循平台约定）
 
+[1.0.1]: https://github.com/ptxdev/ptengine-app-starter/releases/tag/v1.0.1
 [1.0.0]: https://github.com/ptxdev/ptengine-app-starter/releases/tag/v1.0.0
