@@ -43,3 +43,12 @@ jobs:
 
       - name: 构建 + 打包（含 zip 结构自检）
         run: npm run package
+
+      # 只提醒、不阻断：有意保留较旧的 @ptengine/* 区间发版是合理场景，硬失败会挡住正当发布。
+      # 平时的把关交给 deps-drift.yml 的定时任务。
+      - name: 依赖漂移提醒
+        continue-on-error: true
+        run: |
+          if ! node scripts/check-ptengine-deps.mjs; then
+            echo "::warning::@ptengine/* 依赖落后于 npm 最新版，新 clone 的客户会拿到旧版本；详见上面的日志"
+          fi

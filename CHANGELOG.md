@@ -11,12 +11,35 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|
+| v1.1.2 | `^0.4.0` | `^0.3.0` | `1` | 修复平台内本地联调拿到假上下文（**用平台内 dev 模式的必须升到这版**）|
 | v1.1.1 | `^0.3.0` | `^0.3.0` | `1` | AI 助手说明归一到 `AGENTS.md`（跨工具通用） |
 | v1.1.0 | `^0.3.0` | `^0.3.0` | `1` | 预装 UI 组件库 + Tailwind，暗色跟随平台主题 |
 | v1.0.1 | `^0.3.0` | — | `1` | 支持在 Ptengine X 平台内加载本地 dev server 联调 |
 | v1.0.0 | `^0.2.0` | — | `1` | 首个版本 |
 
 选版本时以本表为准：脚手架版本决定了它依赖的 SDK 大版本，跨大版本升级请看下面对应条目的「升级指引」。
+
+## [1.1.2] - 2026-08-11
+
+### 修复
+
+- **平台内「本地开发模式」不再拿到假上下文**：把 `@ptengine/app-sdk` 依赖升到 `^0.4.0`。
+
+  0.3.0 的 `installDevHost()` 用「宿主数据的内容」判断自己在不在平台内，而那份数据是异步到的 ——
+  读得早时会误判成「不在平台内」并装上假宿主，于是 `window.PtApp.context.sid` 是 `dev-sid`、
+  `ui`/`nav` 只打日志。现象很有欺骗性：页面在平台里正常渲染、控制台一条报错都没有，你以为在调
+  真环境，其实全是假数据。详见 [`@ptengine/app-sdk` CHANGELOG](https://www.npmjs.com/package/@ptengine/app-sdk) 的 0.4.0 条目。
+
+  只影响「在 Ptengine X 平台内加载本地 dev server」这一种用法；独立 `npm run dev` 不受影响。
+
+### 升级指引（从 v1.1.x）
+
+```bash
+npm i @ptengine/app-sdk@^0.4.0
+```
+
+代码无需改动。若你的 `manifest.json` 里写了 `icon`，注意 0.4.0 起它必须是**包内真实存在的**
+相对路径（空串不再合法，指向不存在的文件上传会报 `ICON_NOT_FOUND`）；不填 `icon` 仍然合法。
 
 ## [1.1.1] - 2026-08-11
 
@@ -111,5 +134,8 @@
 - 本地开发接好 `installDevHost()`，脱离 Ptengine X 主站也能调试
 - `README.md` 开发文档、`CLAUDE.md`（供 AI 编码助手遵循平台约定）
 
+[1.1.2]: https://github.com/ptxdev/ptengine-app-starter/releases/tag/v1.1.2
+[1.1.1]: https://github.com/ptxdev/ptengine-app-starter/releases/tag/v1.1.1
+[1.1.0]: https://github.com/ptxdev/ptengine-app-starter/releases/tag/v1.1.0
 [1.0.1]: https://github.com/ptxdev/ptengine-app-starter/releases/tag/v1.0.1
 [1.0.0]: https://github.com/ptxdev/ptengine-app-starter/releases/tag/v1.0.0

@@ -1,0 +1,27 @@
+name: 依赖漂移检查
+
+# `@ptengine/*` 包与本脚手架在**不同仓库**，发包的人很容易忘记回头更新这里；而它们都还在
+# 0.x，caret 对 0.x 只放行同 minor，所以每个 minor 都必须手动改（详见 scripts/check-ptengine-deps.mjs）。
+#
+# 为什么用定时任务而不是只挂在发版流程上：release.yml 只在推 v* tag 时触发 —— 那时你已经在
+# 发版了，发现漂移为时已晚。定时跑才能在平时就把它暴露出来。
+on:
+  schedule:
+    # 每周一 09:00 JST（= 00:00 UTC）。cron 只认 UTC。
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+jobs:
+  drift:
+    name: 检查 @ptengine/* 是否落后于 npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # 不装依赖：脚本只读 package.json + 查 npm 注册表，装依赖纯属浪费。
+      - name: 漂移检查
+        run: node scripts/check-ptengine-deps.mjs

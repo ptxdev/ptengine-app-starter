@@ -7,10 +7,11 @@
         "dev": "vite",
         "build": "tsc -b && vite build",
         "preview": "vite preview",
-        "package": "npm run build && node scripts/package.mjs"
+        "package": "npm run build && node scripts/package.mjs",
+        "check:deps": "node scripts/check-ptengine-deps.mjs"
     },
     "dependencies": {
-        "@ptengine/app-sdk": "^0.3.0",
+        "@ptengine/app-sdk": "^0.4.0",
         "@ptengine/design-components": "^0.3.0",
         "react": "^19.1.1",
         "react-dom": "^19.1.1"
