@@ -11,11 +11,28 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|
+| v1.1.1 | `^0.3.0` | `^0.3.0` | `1` | AI 助手说明归一到 `AGENTS.md`（跨工具通用） |
 | v1.1.0 | `^0.3.0` | `^0.3.0` | `1` | 预装 UI 组件库 + Tailwind，暗色跟随平台主题 |
 | v1.0.1 | `^0.3.0` | — | `1` | 支持在 Ptengine X 平台内加载本地 dev server 联调 |
 | v1.0.0 | `^0.2.0` | — | `1` | 首个版本 |
 
 选版本时以本表为准：脚手架版本决定了它依赖的 SDK 大版本，跨大版本升级请看下面对应条目的「升级指引」。
+
+## [1.1.1] - 2026-08-11
+
+### 变更
+
+- **AI 编码助手的说明归一到 `AGENTS.md`**（跨工具通用：Cursor / Claude Code / Copilot /
+  Codex / Gemini 都读它），`CLAUDE.md` 退化为指向它的一行指针。**内容只维护一份** ——
+  两处各写一份必然漂移，而漂移的那半条约定往往正是最容易出事的那条。
+  有意不用 symlink：客户下载源码 zip 或在 Windows 上 clone 时软链会失效。
+- 同时补齐了几条 AI 最容易写错、而报错又不直观的硬边界：**没有后端**（静态 bundle，
+  不要读平台 cookie/内部接口、不要把密钥写进前端）、**路由只能用 hash 或
+  `nav.syncRoute`**（入口不在 `/`，`BrowserRouter` 会跳出子应用）、**写界面前先读
+  `node_modules/@ptengine/design-components/llms.txt`**、**改完必须跑 `npm run package`
+  而不只是 `build`**、以及各条约定"改错了长什么样"的症状对照表。
+
+纯文档变更，无需改代码；已在开发中的项目想要这份说明，把 `AGENTS.md` 拷进项目根即可。
 
 ## [1.1.0] - 2026-08-11
 
