@@ -1,4 +1,6 @@
 node_modules/
+# 有意不锁依赖：脚手架是一次性起点，客户 clone 后应装到 @ptengine/* 与工具链的最新兼容版本。
+package-lock.json
 dist/
 *.zip
 .DS_Store

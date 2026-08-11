@@ -44,6 +44,44 @@ app?.nav.syncRoute('detail');          // 把内部路由同步到地址栏
 
 `src/App.tsx` 是一个可运行的示例，演示了全部能力，可直接替换成你的业务代码。
 
+## UI 组件库：@ptengine/design-components
+
+脚手架已预装 Ptengine 的 React 组件库（基于 shadcn/ui + Radix + Tailwind），**用它写界面
+就能和平台自身的观感一致**，不需要自己搭一套设计系统。
+
+```tsx
+import { Button, Card, CardContent, CardHeader, CardTitle } from '@ptengine/design-components';
+```
+
+`src/App.tsx` 是一个可直接删改的用法示例（Card / Button / Badge / Input / Alert / Separator）。
+组件清单与设计规范见包内的 `node_modules/@ptengine/design-components/llms.txt`
+（那份文件也是给 AI 编码助手看的，写业务时可以让它读）。
+
+### 三条使用规约
+
+1. **只从包入口 import**（`@ptengine/design-components`），不要深引 `dist/` 内部路径。
+2. **`className` 只做布局**（宽度 / 间距 / 对齐），不要用它改观感（颜色、圆角、阴影）——
+   观感由设计 token 决定，覆盖了就会和平台其它页面长得不一样。
+3. **不硬编码色值**，用语义类：`text-foreground` / `text-muted-foreground` / `bg-secondary` /
+   `bg-neutral-subtler` 等。
+
+### 已经配好的四处（改动前先看这里）
+
+| 位置 | 作用 | 改错了会怎样 |
+|---|---|---|
+| `tailwind.config.js` 的 `presets: [designPreset]` | 引入组件库的颜色 / 字阶 / 圆角 token 与 `state-layer` 插件 | 组件仍渲染，但掉成 Tailwind 默认观感，且**不报错** |
+| `tailwind.config.js` 的 content 里 `node_modules/@ptengine/design-components/dist/**` | 组件的 class 字符串在**编译后的库产物**里，必须让 Tailwind 扫到 | 组件"有结构、没样式" |
+| `src/main.tsx` 里 `import '@ptengine/design-components/styles/tokens.css'` | 提供 `--pt-*` 变量 | 所有颜色失效（变量未定义） |
+| `src/theme.ts` 的 `applyPtTheme()`（在 `<html>` 上挂 `pt-ui`） | 组件库的变量作用域在 `.pt-ui` 下，库**不写任何 `:root` 级样式** | 同上：没颜色。挂在 `#root` 上则「页面正常、一开弹窗就没样式」（Radix 浮层 portal 到 `body`） |
+
+### 暗色模式跟随平台
+
+`src/theme.ts` 的 `followPtTheme()` 读 `window.PtApp.context.theme` 应用一次，并订阅宿主后续
+下发（`PtApp.on` 当前是粗粒度的：宿主数据有任何变化都回调，payload 是整个 data，所以代码里
+自己从里面挑 `context.theme`）。暗色 = 在 `<html>` 上再加 `dark` 类。
+
+拿不到宿主时（直接打开 `dist/index.html`）按亮色渲染，保证是一个有样式的页面而不是裸 HTML。
+
 ## manifest.json
 
 项目根目录的 `manifest.json` 描述应用信息，`npm run package` 会自动把它放进 zip 根级。
@@ -107,13 +145,20 @@ app?.nav.syncRoute('detail');          // 把内部路由同步到地址栏
 - **CHANGELOG 里出现 major 版本** —— 说明平台约定有破坏性变更，照该版本的「升级指引」改。
 - **想要新版本引入的示例或配置** —— 对照 Release 说明手工挪过来即可。
 
-日常保持最新的只有 `@ptengine/app-sdk`（`npm update @ptengine/app-sdk`），它才是真正的依赖。
+日常保持最新的是两个真正的运行时依赖：`@ptengine/app-sdk`（平台契约）与
+`@ptengine/design-components`（UI 组件库），`npm update @ptengine/app-sdk @ptengine/design-components`。
 
 ## 常见问题
 
 **上传后左侧导航没出现应用？** 刷新页面；确认上传成功（有成功提示）。
 
 **点进去白屏？** 打开浏览器控制台看有没有资源 404 —— 多半是 `base` 被改成了绝对路径。
+
+**组件渲染出来没有样式？** 按上面「已经配好的四处」逐条对：多半是 `tailwind.config.js` 的
+content 漏了组件库 `dist` 那条，或者 `<html>` 上没挂 `pt-ui`（见 `src/theme.ts`）。
+
+**页面正常、一打开弹窗就没样式？** `pt-ui` 挂在 `#root` 上了。Radix 的浮层 portal 到
+`document.body`，必须挂在 `<html>`。
 
 **`window.PtApp` 是 undefined？** 只有经平台加载时才会注入。本地开发请用 `npm run dev`
 （入口已调用 `installDevHost()`）；直接打开 `dist/index.html` 是拿不到的。

@@ -1,7 +1,13 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { installDevHost } from '@ptengine/app-sdk';
+// 组件库的设计 token（--pt-* 变量，作用域在 .pt-ui 下）。必须在自己的样式之前引入，
+// 且不能省 —— 缺了它组件会渲染成"有结构、没颜色"，且不报任何错。
+import '@ptengine/design-components/styles/tokens.css';
+import './index.css';
 import App from './App';
+import { getPtApp } from './pt-app';
+import { applyPtTheme, followPtTheme } from './theme';
 
 /**
  * 本地开发时装一个假宿主，让 window.PtApp 可用。
@@ -26,6 +32,15 @@ async function bootstrap() {
         await installDevHost();
         // 也可以按需覆盖，模拟不同站点 / 语言 / 主题：
         // await installDevHost({ context: { sid: 'my-site', locale: 'en-US', theme: 'dark' } });
+    }
+
+    // 挂 .pt-ui 作用域 + 跟随平台明暗（见 theme.ts）。拿不到宿主时按亮色渲染，
+    // 保证独立打开产物也是有样式的页面而不是白底黑字的裸 HTML。
+    const app = getPtApp();
+    if (app) {
+        followPtTheme(app);
+    } else {
+        applyPtTheme('light');
     }
 
     createRoot(document.getElementById('root')!).render(

@@ -14,6 +14,25 @@
    `dist` 内部执行）。不要改成压缩 `dist` 目录本身，否则多一层前缀，平台报 `MANIFEST_MISSING`。
 3. **`manifest.entry` 与构建产物入口一致**（默认 `index.html`）—— 否则报 `ENTRY_NOT_FOUND`。
 
+## UI 组件库（@ptengine/design-components）
+
+界面一律用组件库，不要自己写基础控件、也不要引第三方 UI 库 —— 目标是与平台观感一致。
+只从包入口 import；`className` 只做布局，不改观感；不硬编码色值（用 `text-muted-foreground`
+/ `bg-secondary` 这类语义类）。组件清单与设计规范见 `node_modules/@ptengine/design-components/llms.txt`。
+
+四处接线改动前必读（错了都**不报错**，只是样式不对）：
+
+1. `tailwind.config.js` 的 `presets: [designPreset]` —— 掉了就变 Tailwind 默认观感。
+2. `tailwind.config.js` content 里 `node_modules/@ptengine/design-components/dist/**` ——
+   组件 class 在编译后的库产物里，漏了就"有结构没样式"。
+3. `src/main.tsx` 的 `import '@ptengine/design-components/styles/tokens.css'` —— 提供 `--pt-*` 变量。
+4. `src/theme.ts` 的 `applyPtTheme()` 在 **`<html>`** 上挂 `pt-ui`（库不写 `:root` 级样式）。
+   挂到 `#root` 的症状很有辨识度：页面正常，但 Radix 浮层（Dialog/Popover/Tooltip/DropdownMenu，
+   portal 到 `body`）一打开就没样式。
+
+暗色模式由 `followPtTheme()` 跟随 `window.PtApp.context.theme`（`<html>` 上加 `dark` 类）。
+`PtApp.on` 是粗粒度回调（payload 是整个宿主 data），所以代码自己从里面挑 `context.theme`。
+
 ## 平台契约
 
 宿主能力只通过 `window.PtApp` 提供，类型来自 `@ptengine/app-sdk`：
@@ -28,8 +47,8 @@ window.PtApp = {
 };
 ```
 
-- **不要**假设存在其它宿主全局变量（如 `window.$wujie`、`window.microApp`）：那是平台内部
-  实现细节，会随平台演进变化。只用 `window.PtApp`。
+- **不要**假设存在其它宿主全局变量（如 `window.microApp` 之类微前端框架注入的对象）：那是
+  平台内部实现细节，会随平台演进变化。只用 `window.PtApp`。
 - 读取用 `src/pt-app.ts` 的 `getPtApp()`，它在未经平台加载时返回 `null` 而不是抛错。
 - `nav.push` 只接受平台内部相对路径；传外部 URL 或伪协议会被平台拒绝执行。
 

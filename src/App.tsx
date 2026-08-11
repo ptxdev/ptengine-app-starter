@@ -1,73 +1,178 @@
 import { useMemo, useState } from 'react';
+import {
+    Alert,
+    AlertDescription,
+    AlertTitle,
+    Badge,
+    Button,
+    Card,
+    CardContent,
+    CardDescription,
+    CardHeader,
+    CardTitle,
+    Input,
+    Label,
+    Separator,
+    TooltipProvider
+} from '@ptengine/design-components';
 import { getPtApp } from './pt-app';
-import './App.css';
 
+/**
+ * 演示页：既演示 window.PtApp 的宿主能力，也演示 @ptengine/design-components 的用法。
+ *
+ * 组件库的使用规约（照抄一句：className 只做布局）：
+ * - 只从包入口 `@ptengine/design-components` import，不要深引 dist 内部路径。
+ * - `className` 只用来排布（宽度 / 间距 / 对齐），**不要**用它改观感（颜色、圆角、阴影）——
+ *   观感由设计 token 决定，覆盖了就会与平台其它页面不一致。
+ * - 不要硬编码色值：用 `text-muted-foreground`、`bg-secondary` 这类语义类。
+ *
+ * ⚠️ 浮层类组件（Tooltip / Dialog / Popover / DropdownMenu）需要在外层包一个
+ * `TooltipProvider` 之类的 Provider（各组件文档有说明），且它们 portal 到 body ——
+ * 这也是 `.pt-ui` 必须挂在 `<html>` 而不是 `#root` 的原因（见 theme.ts）。
+ */
 export default function App() {
     const app = useMemo(getPtApp, []);
     const [log, setLog] = useState<string[]>([]);
-    const push = (line: string) => setLog(prev => [`${new Date().toLocaleTimeString()}  ${line}`, ...prev]);
+    const [note, setNote] = useState('');
+    const push = (line: string) =>
+        setLog(prev => [`${new Date().toLocaleTimeString()}  ${line}`, ...prev]);
 
     if (!app) {
         return (
-            <main className="page">
-                <h1>My Ptengine App</h1>
-                <p className="warn">
-                    未检测到 <code>window.PtApp</code>。本页面需要由 Ptengine X 平台加载才能拿到宿主能力；
-                    本地开发请用 <code>npm run dev</code>（入口已接好 dev-host）。
-                </p>
+            <main className="mx-auto max-w-3xl p-6">
+                <h1 className="mb-4 text-lg font-semibold text-foreground">My Ptengine App</h1>
+                {/* Alert 只有 default / destructive 两个变体（0.3.0）；提示类用 default。 */}
+                <Alert>
+                    <AlertTitle>未检测到 window.PtApp</AlertTitle>
+                    <AlertDescription>
+                        本页面需要由 Ptengine X 平台加载才能拿到宿主能力；本地开发请用{' '}
+                        <code className="rounded-sm bg-secondary px-1">npm run dev</code>
+                        （入口已接好 dev-host）。
+                    </AlertDescription>
+                </Alert>
             </main>
         );
     }
 
     return (
-        <main className="page">
-            <h1>My Ptengine App</h1>
-            <p className="sub">
-                SDK v{app.version} 已就绪 —— 下面演示 <code>window.PtApp</code> 提供的全部能力。
-            </p>
+        <TooltipProvider>
+            <main className="mx-auto max-w-3xl space-y-5 p-6">
+                <header className="space-y-1">
+                    <div className="flex items-center gap-2">
+                        <h1 className="text-lg font-semibold text-foreground">My Ptengine App</h1>
+                        <Badge variant="secondary">SDK v{app.version}</Badge>
+                        <Badge variant="information">{app.context.theme}</Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                        下面演示 <code className="rounded-sm bg-secondary px-1">window.PtApp</code>{' '}
+                        提供的全部能力，UI 全部来自 @ptengine/design-components。
+                    </p>
+                </header>
 
-            <section>
-                <h2>平台注入的上下文</h2>
-                <pre>{JSON.stringify(app.context, null, 2)}</pre>
-                <p className="hint">
-                    用 <code>context.sid</code> 区分站点、<code>locale</code> 做多语言、
-                    <code>initialPath</code> 恢复深链接位置。
-                </p>
-            </section>
+                <Card>
+                    <CardHeader>
+                        <CardTitle>平台注入的上下文</CardTitle>
+                        <CardDescription>
+                            用 context.sid 区分站点、locale 做多语言、initialPath 恢复深链接位置。
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <pre className="overflow-auto rounded-md bg-secondary p-3 text-2xs text-foreground">
+                            {JSON.stringify(app.context, null, 2)}
+                        </pre>
+                    </CardContent>
+                </Card>
 
-            <section>
-                <h2>宿主能力</h2>
-                <div className="btns">
-                    <button onClick={() => { app.ui.toast('来自子应用的消息', 'success'); push('ui.toast'); }}>
-                        toast 提示
-                    </button>
-                    <button
-                        onClick={async () => {
-                            const ok = await app.ui.confirm({ title: '确认', message: '要执行这个操作吗？' });
-                            push(`ui.confirm → ${ok}`);
-                        }}
-                    >
-                        confirm 确认框
-                    </button>
-                    <button onClick={() => { app.nav.push('dashboard/default'); push('nav.push → 平台页面'); }}>
-                        跳转平台页面
-                    </button>
-                    <button onClick={() => { app.nav.syncRoute('detail'); push('nav.syncRoute → /detail'); }}>
-                        同步内部路由
-                    </button>
-                </div>
-                <p className="hint">
-                    <code>nav.syncRoute</code> 把子应用的内部路径写进浏览器地址栏，使刷新、分享链接、
-                    浏览器前进后退都能回到同一个内页（平台会把它作为 <code>context.initialPath</code> 回传）。
-                </p>
-            </section>
+                <Card>
+                    <CardHeader>
+                        <CardTitle>宿主能力</CardTitle>
+                        <CardDescription>
+                            nav.syncRoute 把子应用内部路径写进地址栏，使刷新 / 分享 / 前进后退都能回到
+                            同一个内页（平台会把它作为 context.initialPath 回传）。
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="flex flex-wrap gap-2">
+                            <Button
+                                onClick={() => {
+                                    app.ui.toast('来自子应用的消息', 'success');
+                                    push('ui.toast');
+                                }}
+                            >
+                                toast 提示
+                            </Button>
+                            <Button
+                                variant="secondary"
+                                onClick={async () => {
+                                    const ok = await app.ui.confirm({
+                                        title: '确认',
+                                        message: '要执行这个操作吗？'
+                                    });
+                                    push(`ui.confirm → ${ok}`);
+                                }}
+                            >
+                                confirm 确认框
+                            </Button>
+                            <Button
+                                variant="tertiary"
+                                onClick={() => {
+                                    app.nav.push('dashboard/default');
+                                    push('nav.push → 平台页面');
+                                }}
+                            >
+                                跳转平台页面
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                onClick={() => {
+                                    app.nav.syncRoute('detail');
+                                    push('nav.syncRoute → /detail');
+                                }}
+                            >
+                                同步内部路由
+                            </Button>
+                        </div>
 
-            {log.length > 0 && (
-                <section>
-                    <h2>调用记录</h2>
-                    <pre className="log">{log.join('\n')}</pre>
-                </section>
-            )}
-        </main>
+                        <Separator />
+
+                        {/* 表单控件示例：Label + Input 的搭配（htmlFor 关联，屏幕阅读器可用） */}
+                        <div className="space-y-2">
+                            <Label htmlFor="demo-note">随手记一条（组件库的 Input 示例）</Label>
+                            <div className="flex gap-2">
+                                <Input
+                                    id="demo-note"
+                                    value={note}
+                                    placeholder="输入点什么，然后按下按钮"
+                                    onChange={e => setNote(e.target.value)}
+                                />
+                                <Button
+                                    variant="secondary"
+                                    disabled={!note.trim()}
+                                    onClick={() => {
+                                        push(`note: ${note.trim()}`);
+                                        setNote('');
+                                    }}
+                                >
+                                    记录
+                                </Button>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                {log.length > 0 && (
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>调用记录</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <pre className="max-h-52 overflow-auto rounded-md bg-secondary p-3 text-2xs text-foreground">
+                                {log.join('\n')}
+                            </pre>
+                        </CardContent>
+                    </Card>
+                )}
+            </main>
+        </TooltipProvider>
     );
 }
