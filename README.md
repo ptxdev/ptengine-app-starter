@@ -23,6 +23,17 @@ npm run package    # 构建 + 打出可直接上传的 zip
 
 把 `npm run package` 产出的 zip 上传到 Ptengine X →「自定义应用管理」即可。
 
+## 用 AI 写这个应用？
+
+项目根的 [`AGENTS.md`](./AGENTS.md) 是给 AI 编码助手的说明（Cursor / Claude Code / Copilot /
+Codex / Gemini 都会自动读取；`CLAUDE.md` 是指向它的指针）。里面写清了平台的硬边界与
+"改错了长什么样"：三处不能改的约定、没有后端、路由只能用 hash 或 `nav.syncRoute`、
+UI 一律用组件库、改完必须跑 `npm run package`。
+
+**建议开工前让 AI 先读两份文件**：`AGENTS.md` 与
+`node_modules/@ptengine/design-components/llms.txt`（组件清单与设计规范）。
+不读后者，AI 会凭印象猜组件名、或干脆自己手搓一套按钮。
+
 ## 你的应用如何运行
 
 应用会被 Ptengine X 平台以微前端（iframe 沙箱）方式加载，平台在页面里注入
