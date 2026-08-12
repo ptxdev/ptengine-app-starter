@@ -112,6 +112,9 @@ import { Button, Card, CardContent, CardHeader, CardTitle } from '@ptengine/desi
 - `display_name` 是多语言展示名。它**不决定**平台内显示的名字 —— 平台显示的是你在工作区里给
   这个应用起的名字（创建时填，管理页可改）。本字段只在你点「从应用包同步」时被取用，并按当时
   的界面语言塌缩成一个名字
+- `icon` 指向的 `public/assets/icon.svg` 是脚手架自带的占位图（vite 会把 `public/` 原样拷进
+  `dist/`，打包后落在 zip 的 `assets/icon.svg`），换成你自己的图标即可，路径保持一致就不用改
+  `manifest.json`
 - `scopes` 声明应用所需权限，取值与含义见
   [`@ptengine/app-sdk` 的权限文档](https://www.npmjs.com/package/@ptengine/app-sdk#权限声明scopes)。
   请遵循最小权限原则；写了未定义的权限值会导致上传校验失败
