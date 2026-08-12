@@ -4,7 +4,8 @@
  * 平台对包结构的要求很严：manifest.json 与入口 HTML 必须在 **zip 根级**。
  * 如果在 Finder / 资源管理器里对 dist 文件夹右键压缩，zip 里会多一层 `dist/`，
  * 平台会因为找不到根级 manifest.json 而拒收（报 MANIFEST_MISSING）。
- * 本脚本用 `zip -j`（junk paths，不保留目录前缀）避免这个坑，并在打包前做几项自检。
+ * 本脚本从 dist/ 内部执行 `zip -r`（保留 assets/ 等子目录结构，只是不带 dist/ 这层前缀）
+ * 避免这个坑，并在打包前做几项自检。
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, copyFileSync, rmSync } from 'node:fs';
@@ -27,6 +28,15 @@ const entry = manifest.entry;
 if (!entry) fail('manifest.json 缺少 entry 字段');
 if (!existsSync(join(dist, entry))) {
     fail(`manifest.entry 指向 "${entry}"，但 dist/ 下没有这个文件。检查 entry 是否与构建产物一致。`);
+}
+
+// icon 是可选字段，但一旦声明就必须在产物里真实存在，否则本地全绿、上传平台才报 ICON_NOT_FOUND。
+if (manifest.icon && !existsSync(join(dist, manifest.icon))) {
+    fail(
+        `manifest.icon 指向 "${manifest.icon}"，但 dist/ 下没有这个文件。` +
+        `把图标放到 public/${manifest.icon}（vite 会把 public/ 下的内容原样拷到 dist/ 根），` +
+        `或改 manifest.json 里的 icon 路径与实际文件一致，再重新 npm run build。`
+    );
 }
 
 // 把 manifest 复制进 dist，使其与入口 HTML 同级 —— 打出的 zip 根级即两者并列。

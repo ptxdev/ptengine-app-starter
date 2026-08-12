@@ -11,6 +11,7 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|
+| v1.1.3 | `^0.4.0` | `^0.3.0` | `1` | 模板默认带 `icon` 占位图 + `npm run package` 新增 icon 自检 |
 | v1.1.2 | `^0.4.0` | `^0.3.0` | `1` | 修复平台内本地联调拿到假上下文（**用平台内 dev 模式的必须升到这版**）|
 | v1.1.1 | `^0.3.0` | `^0.3.0` | `1` | AI 助手说明归一到 `AGENTS.md`（跨工具通用） |
 | v1.1.0 | `^0.3.0` | `^0.3.0` | `1` | 预装 UI 组件库 + Tailwind，暗色跟随平台主题 |
@@ -18,6 +19,30 @@
 | v1.0.0 | `^0.2.0` | — | `1` | 首个版本 |
 
 选版本时以本表为准：脚手架版本决定了它依赖的 SDK 大版本，跨大版本升级请看下面对应条目的「升级指引」。
+
+## [1.1.3] - 2026-08-12
+
+### 新增
+
+- **模板 `manifest.json` 默认带 `icon: "assets/icon.svg"`**，并附了占位图
+  `public/assets/icon.svg`（vite 会把 `public/` 下的内容原样拷到 `dist/` 根，
+  所以产物里对应 `dist/assets/icon.svg`）。换成自己的图标时，把文件放进
+  `public/assets/`、再把 manifest 里的 `icon` 改成对应路径即可。
+- **`npm run package` 新增 icon 自检**：manifest 里声明了 `icon` 时，校验
+  `dist/` 下对应文件是否真实存在；不存在就报错并直接告诉你图标该放哪、
+  `public/` 会被拷到 dist 根这件事。`icon` 仍是可选字段，不声明不受影响。
+
+  没有这项自检之前，客户换了图标却忘改 `manifest.json`（或改了路径写错），
+  本地 `npm run build && npm run package` 会一路全绿，直到**上传到平台**才
+  撞上 `ICON_NOT_FOUND`——平台是唯一会告诉你出错的地方，反馈链很长。
+
+### 说明
+
+- `icon` 与 `display_name` 都**不会自动生效**：平台内实际显示的名称与图标，
+  由平台上的应用记录决定（创建应用时填/选，之后在管理页可改）；manifest
+  里的值只有在你点开平台管理页的「从应用包同步名称与图标」时才会被采用。
+- 本次是**描述与打包自检**的变化，**平台侧的上传校验规则本身没有变**——
+  `ICON_NOT_FOUND` 一直存在，只是现在脚手架能在本地就替你挡住它。
 
 ## [1.1.2] - 2026-08-11
 
@@ -134,6 +159,7 @@ npm i @ptengine/app-sdk@^0.4.0
 - 本地开发接好 `installDevHost()`，脱离 Ptengine X 主站也能调试
 - `README.md` 开发文档、`CLAUDE.md`（供 AI 编码助手遵循平台约定）
 
+[1.1.3]: https://github.com/ptxdev/ptengine-app-starter/releases/tag/v1.1.3
 [1.1.2]: https://github.com/ptxdev/ptengine-app-starter/releases/tag/v1.1.2
 [1.1.1]: https://github.com/ptxdev/ptengine-app-starter/releases/tag/v1.1.1
 [1.1.0]: https://github.com/ptxdev/ptengine-app-starter/releases/tag/v1.1.0
