@@ -103,12 +103,15 @@ import { Button, Card, CardContent, CardHeader, CardTitle } from '@ptengine/desi
     "version": "1.0.0",
     "entry": "index.html",
     "display_name": { "zh-CN": "我的应用", "en-US": "My App" },
+    "icon": "assets/icon.svg",
     "scopes": ["ui:notify"]
 }
 ```
 
 - `version` 每次上传新版本时**必须递增**（平台按内容判定是否建新版本）
-- `display_name` 是多语言展示名，决定左侧导航里显示的文字
+- `display_name` 是多语言展示名。它**不决定**平台内显示的名字 —— 平台显示的是你在工作区里给
+  这个应用起的名字（创建时填，管理页可改）。本字段只在你点「从应用包同步」时被取用，并按当时
+  的界面语言塌缩成一个名字
 - `scopes` 声明应用所需权限，取值与含义见
   [`@ptengine/app-sdk` 的权限文档](https://www.npmjs.com/package/@ptengine/app-sdk#权限声明scopes)。
   请遵循最小权限原则；写了未定义的权限值会导致上传校验失败

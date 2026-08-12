@@ -141,8 +141,9 @@ npm run package    # 构建 + 打 zip，并做结构自检（根级 manifest / e
 ## 应用图标（manifest.icon）
 
 `icon` 填**包内相对路径**（如 `assets/icon.svg`），文件必须真实存在于 zip 内（否则报
-`ICON_NOT_FOUND`），扩展名限 `.svg/.png/.jpg/.jpeg/.webp/.ico`。声明了它会**覆盖**站点
-管理员在平台创建界面手选的内置图标——图标随产物走，发新版即换图标。
+`ICON_NOT_FOUND`），扩展名限 `.svg/.png/.jpg/.jpeg/.webp/.ico`。它**不会自动生效**——平台
+内显示的图标始终是站点管理员在平台创建界面选的那个（创建时选，管理页可改）。填了
+`icon` 之后，可以在平台管理页点「从应用包同步名称与图标」，把包里这个文件取用为应用图标。
 
 ---
 
