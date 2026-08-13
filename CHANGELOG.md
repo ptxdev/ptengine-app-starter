@@ -11,7 +11,7 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|
-| v1.1.3 | `^0.4.0` | `^0.3.0` | `1` | 模板默认带 `icon` 占位图 + `npm run package` 新增 icon 自检 |
+| v1.1.3 | `^0.4.0` | `^0.3.0` | `1` | dev server 默认开 CORS（平台内 dev 模式）+ 模板默认带 `icon` 占位图 + `npm run package` 新增 icon 自检 |
 | v1.1.2 | `^0.4.0` | `^0.3.0` | `1` | 修复平台内本地联调拿到假上下文（**用平台内 dev 模式的必须升到这版**）|
 | v1.1.1 | `^0.3.0` | `^0.3.0` | `1` | AI 助手说明归一到 `AGENTS.md`（跨工具通用） |
 | v1.1.0 | `^0.3.0` | `^0.3.0` | `1` | 预装 UI 组件库 + Tailwind，暗色跟随平台主题 |
@@ -20,10 +20,15 @@
 
 选版本时以本表为准：脚手架版本决定了它依赖的 SDK 大版本，跨大版本升级请看下面对应条目的「升级指引」。
 
-## [1.1.3] - 2026-08-12
+## [1.1.3] - 2026-08-13
 
 ### 新增
 
+- **`vite.config.ts` 默认开启 dev server CORS（`server.cors: true`）**：在平台里用
+  「本地开发 / dev 模式」加载本地 dev server 时，是平台 app 的 origin 跨源 fetch
+  你本地 dev server 的入口，Vite 6+ 默认把 dev server 限制成同源、会挡掉这个请求。
+  开箱即用，无需再手动配。用反射 Origin 而非白名单，是因为同一个 dev server 会被
+  线上平台域与内部 dev 平台域分别 fetch；要收紧改成 `origin: [...]` 列平台域即可。
 - **模板 `manifest.json` 默认带 `icon: "assets/icon.svg"`**，并附了占位图
   `public/assets/icon.svg`（vite 会把 `public/` 下的内容原样拷到 `dist/` 根，
   所以产物里对应 `dist/assets/icon.svg`）。换成自己的图标时，把文件放进
