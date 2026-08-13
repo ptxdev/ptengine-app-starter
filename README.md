@@ -110,8 +110,8 @@ import { Button, Card, CardContent, CardHeader, CardTitle } from '@ptengine/desi
 
 - `version` 每次上传新版本时**必须递增**（平台按内容判定是否建新版本）
 - `display_name` 是多语言展示名。它**不决定**平台内显示的名字 —— 平台显示的是你在工作区里给
-  这个应用起的名字（创建时填，管理页可改）。本字段只在你点「从应用包同步」时被取用，并按当时
-  的界面语言塌缩成一个名字
+  这个应用起的名字（创建时填，管理页可改）。本字段只在你在应用的「编辑」里点「从应用包填入名称与
+  图标」时被取用，并按当时的界面语言塌缩成一个名字（按「保存」才生效）
 - `icon` 指向的 `public/assets/icon.svg` 是脚手架自带的占位图（vite 会把 `public/` 原样拷进
   `dist/`，打包后落在 zip 的 `assets/icon.svg`），换成你自己的图标即可，路径保持一致就不用改
   `manifest.json`
@@ -167,7 +167,9 @@ import { Button, Card, CardContent, CardHeader, CardTitle } from '@ptengine/desi
 
 ## 常见问题
 
-**上传后左侧导航没出现应用？** 刷新页面；确认上传成功（有成功提示）。
+**上传后左侧导航没出现应用？** 三个条件都要满足：这一版**已发布**（状态是「发布中」，草稿与
+已暂停都不进导航）、应用在「探索应用」页里是**已固定**状态（固定状态按浏览器保存，自己创建的
+默认已固定，别人分享给你的默认没固定）、以及你对它有访问权。都对了还没有就刷新页面。
 
 **点进去白屏？** 打开浏览器控制台看有没有资源 404 —— 多半是 `base` 被改成了绝对路径。
 
@@ -187,6 +189,16 @@ content 漏了组件库 `dist` 那条，或者 `<html>` 上没挂 `pt-ui`（见 
 等待——用 `await installDevHost()` 等它 resolve 后再渲染，不需要你额外处理；但如果你改动
 了入口结构，务必保留这个等待，否则会永久卡在"未检测到 window.PtApp"提示页。需要
 `@ptengine/app-sdk` 0.3.0+。
+
+**在平台内以本地开发模式加载时，本地 dev server 必须开 CORS，否则加载不出来**：这个加载
+是**平台 app 的 origin** 去 fetch 你本地 dev server 的入口 HTML（微前端跨源请求），而现代
+Vite（6+）默认把 dev server 限制成同源，会直接挡掉这个请求。脚手架已经在 `vite.config.ts`
+里配了 `server.cors: true`（反射请求 Origin，而不是列白名单——同一个本地 dev server 会被
+线上平台域、内部 dev 平台域分别 fetch，将来可能还有 staging，反射一份配置就都覆盖），开箱
+即用，不需要你额外配置。如果换了构建工具，或者想收紧，把等价配置改成显式列出平台域白名单
+（如 Vite 的 `server.cors.origin: ['https://<线上平台域>', 'https://<dev平台域>']`）——注意
+`cors: true` 期间理论上本机任何网站都能读到这个 dev server 的内容，但它只跑在本机、不暴露
+公网，这个取舍对临时联调通常可接受。
 
 **换成 Vue / Svelte 可以吗？** 可以。本脚手架的关键约定只有三条（相对 `base`、
 根级 `manifest.json`、`entry` 一致），与框架无关，照 `vite.config.ts` 与
