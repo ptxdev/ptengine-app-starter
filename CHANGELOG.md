@@ -11,7 +11,7 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|
-| v1.2.0 | `^0.6.0` | `^0.3.0` | `1` | 取数放开到 12 个 queryType + 参数改判别联合类型 + `PtApp.data.describe()`（**要用取数的必须升到这版**）|
+| v1.2.0 | `^0.6.0` | `^0.4.0` | `1` | 取数放开到 12 个 queryType + 参数改判别联合类型 + `PtApp.data.describe()`（**要用取数的必须升到这版**）|
 | v1.1.3 | `^0.4.0` | `^0.3.0` | `1` | dev server 默认开 CORS（平台内 dev 模式）+ 模板默认带 `icon` 占位图 + `npm run package` 新增 icon 自检 |
 | v1.1.2 | `^0.4.0` | `^0.3.0` | `1` | 修复平台内本地联调拿到假上下文（**用平台内 dev 模式的必须升到这版**）|
 | v1.1.1 | `^0.3.0` | `^0.3.0` | `1` | AI 助手说明归一到 `AGENTS.md`（跨工具通用） |
@@ -28,6 +28,10 @@
 - **`@ptengine/app-sdk` 升到 `^0.6.0`**（原 `^0.4.0`）。这一步必须手动做：`0.x` 的 caret
   只放行同 minor，`^0.4.0` 等价于 `>=0.4.0 <0.5.0`，**拿不到 0.5.0 / 0.6.0**。已在开发中的
   项目照下面的「升级指引」改。
+- **`@ptengine/design-components` 升到 `^0.4.0`**（原 `^0.3.0`），同样是 caret 跨不过 minor 的
+  问题。按组件库自身的发版规则，`0.x` 的 minor 是**向后兼容的扩展**（新增组件 / variant /
+  token / prop），major 才会破坏消费方代码 —— 所以升级不需要改你的代码，
+  `npm i @ptengine/design-components@^0.4.0` 即可。
 
 ### 新增（来自 app-sdk 0.5.0–0.6.0）
 
