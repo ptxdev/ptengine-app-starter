@@ -11,6 +11,7 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|
+| v1.2.0 | `^0.6.0` | `^0.3.0` | `1` | 取数放开到 12 个 queryType + 参数改判别联合类型 + `PtApp.data.describe()`（**要用取数的必须升到这版**）|
 | v1.1.3 | `^0.4.0` | `^0.3.0` | `1` | dev server 默认开 CORS（平台内 dev 模式）+ 模板默认带 `icon` 占位图 + `npm run package` 新增 icon 自检 |
 | v1.1.2 | `^0.4.0` | `^0.3.0` | `1` | 修复平台内本地联调拿到假上下文（**用平台内 dev 模式的必须升到这版**）|
 | v1.1.1 | `^0.3.0` | `^0.3.0` | `1` | AI 助手说明归一到 `AGENTS.md`（跨工具通用） |
@@ -19,6 +20,52 @@
 | v1.0.0 | `^0.2.0` | — | `1` | 首个版本 |
 
 选版本时以本表为准：脚手架版本决定了它依赖的 SDK 大版本，跨大版本升级请看下面对应条目的「升级指引」。
+
+## [1.2.0] - 2026-08-17
+
+### 变更
+
+- **`@ptengine/app-sdk` 升到 `^0.6.0`**（原 `^0.4.0`）。这一步必须手动做：`0.x` 的 caret
+  只放行同 minor，`^0.4.0` 等价于 `>=0.4.0 <0.5.0`，**拿不到 0.5.0 / 0.6.0**。已在开发中的
+  项目照下面的「升级指引」改。
+
+### 新增（来自 app-sdk 0.5.0–0.6.0）
+
+- **取数 `PtApp.data.query()` 可用的 queryType 从 3 个放开到 12 个**：原有
+  `page_insight` / `event_insight` / `funnel_insight`，新增 `traffic_insight`（站点 KPI）、
+  `path_insight`（路径流转）、`page_transitions`（页面单跳）、`page_block_metrics` /
+  `page_element_metrics`（区块与元素级）、`experience_search` / `experience_report` /
+  `experience_abtest_report` / `experiment_attributed_funnel`（实验相关）。
+  用户级（`user_*`）场景不开放。
+- **参数类型改为按 queryType 判别的联合**：写 `queryType: 'funnel_insight'` 时 IDE 会直接提示
+  该场景的 `steps` / `conversionWindow` 等参数，拼错在编译期就报，不必等运行时
+  `INVALID_PARAMS`。类型由平台的 schema 自动生成，随 SDK 发布。
+- **`PtApp.data.describe()`**：运行时查询当前平台放开了哪些 queryType 及其参数 schema。
+  平台以后放开新场景，不升级 SDK 也能发现。
+
+### 升级指引（已在开发中的项目）
+
+```bash
+npm i @ptengine/app-sdk@^0.6.0
+```
+
+改完可能要动两处代码：
+
+1. **`funnel_insight` 的 `steps` 参数**。0.5.0 及更早的契约文件把它错写成了 `string[]`，实际是
+   对象数组。如果你照旧契约写了 `steps: ['page_view', 'purchase']`，运行时会收到
+   `INVALID_PARAMS` —— 改成：
+
+   ```ts
+   steps: [{ event: 'page_view' }, { event: 'purchase' }]
+   ```
+
+2. **`params` 现在有确切形状**。原先 `params` 是 `Record<string, unknown>`，什么都能塞、编译
+   都过；现在按 queryType 收紧，缺必填项或多传字段会在编译期报错。按 IDE 提示补齐即可 ——
+   报错的地方通常本来就是运行时会被服务端拒掉的参数。
+
+另外注意：单次取数**最多返回 5000 行**。发生截断时 `metadata.truncated === true`、
+`metadata.totalRowCount` 是截断前的真实行数；未截断时这两个字段**不存在**。`rowCount` 永远
+等于本次返回的 `rows.length`，别拿它当总数算分母。
 
 ## [1.1.3] - 2026-08-13
 

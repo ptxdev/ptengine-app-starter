@@ -55,6 +55,37 @@ app?.nav.syncRoute('detail');          // 把内部路由同步到地址栏
 
 `src/App.tsx` 是一个可运行的示例，演示了全部能力，可直接替换成你的业务代码。
 
+### 取数：`PtApp.data`
+
+应用没有自己的后端，站点数据全部从这里拿。平台做中介执行，**profile 锁死在服务端**（取自会话），
+所以你不需要也无法指定查哪个站点：
+
+```ts
+const res = await app?.data.query({
+    queryType: 'funnel_insight',
+    params: {
+        timeRange: 'last_7_days',
+        steps: [{ event: 'page_view' }, { event: 'purchase' }]
+    }
+});
+// res = { columns, rows, rowCount, metadata }；rows 是二维数组，元素序 = columns 序
+```
+
+- 目前放开 **12 个 queryType**：`page_insight`（页面指标）、`event_insight`（事件）、
+  `funnel_insight`（漏斗）、`traffic_insight`（站点 KPI）、`path_insight`（路径流转）、
+  `page_transitions`（页面单跳）、`page_block_metrics` / `page_element_metrics`（区块与元素级）、
+  `experience_search` / `experience_report` / `experience_abtest_report` /
+  `experiment_attributed_funnel`（实验相关）。用户级（`user_*`）场景不开放。
+- **`params` 的形状由 `queryType` 决定**，类型是判别联合，IDE 会按场景提示该填什么。
+  `timeRange` 用字符串预设（`'last_7_days'` 等）或 `customStart` + `customEnd`。
+- **`await app?.data.describe()`** 可在运行时拿到当前平台放开的 queryType 及其参数 JSON Schema
+  —— 平台以后放开新场景，不升级 SDK 也能发现。
+- **单次最多返回 5000 行**。截断时 `metadata.truncated === true`、`metadata.totalRowCount` 是截断前
+  的真实行数；未截断时这两个字段不存在。`rowCount` 恒等于本次返回的 `rows.length`。
+
+每个 queryType 的完整参数说明在 SDK 包里：`node_modules/@ptengine/app-sdk/data-query.llms.txt`
+（人类与 AI 都可读）与 `data-query.schema.json`（JSON Schema），两份由平台自动生成、与线上服务端同源。
+
 ## UI 组件库：@ptengine/design-components
 
 脚手架已预装 Ptengine 的 React 组件库（基于 shadcn/ui + Radix + Tailwind），**用它写界面
