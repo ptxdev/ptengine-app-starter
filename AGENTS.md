@@ -81,7 +81,7 @@ import type { PtAppDataQueryRequest, PtAppDataResult } from '@ptengine/app-sdk';
 const res: PtAppDataResult = await window.PtApp.data.query({
     queryType: 'funnel_insight',
     params: {
-        timeRange: 'last_7_days',
+        timeRange: { key: 'lastDays', days: 7 },
         steps: [{ event: 'page_view' }, { event: 'purchase' }]
     }
 });
@@ -95,8 +95,11 @@ const res: PtAppDataResult = await window.PtApp.data.query({
    要什么。**拿不准就先跑一次 `window.PtApp.data.describe()`**，它返回当前平台放开的全部
    queryType 及其参数 JSON Schema（`{ queryTypes: string[], schema: Record<string, PtAppQueryTypeDoc> }`），
    照 schema 写，不要猜字段名。
-2. **`timeRange` 是字符串预设**（`'last_7_days'` / `'last_30_days'` / `'today'` …），
-   或用 `customStart` + `customEnd` 指定精确区间。**不是** `{ key: 'lastDays', days: 7 }` 这类对象。
+2. **`timeRange` 是对象且必填**（app-sdk 1.0.0 起）：`{ key: 'lastDays', days: 7 }` /
+   `{ key: 'custom', startTime: '2026/08/01', endTime: '2026/08/20' }` / `{ key: 'thisMonth' }`。
+   `key` 全部取值：`today` `yesterday` `thisWeek` `lastWeek` `thisMonth` `lastMonth` `lastDays`
+   `custom` `before` `after` `on`（`lastDays` 要 `days`；`custom` 要 `startTime`+`endTime`）。
+   ⚠️ 旧写法的字符串预设（`'last_7_days'`）服务端还兼容，但**类型层会报错**，不要再写。
 3. **别瞎造事件名 / 属性名**：用站点里真实存在的名字。猜错不会报错，**静默返回 0 行**，
    然后你会以为是取数坏了。
 4. **一个分析问题 = 一次查询**：用 `dimension` 一次拿回按维度分好组的整表，
@@ -106,12 +109,17 @@ const res: PtAppDataResult = await window.PtApp.data.query({
    的真实行数；**未截断时这两个字段不存在**（不是 `false`）。`rowCount` 永远等于本次返回的
    `rows.length` —— 别拿它当总数算分母。
 
-可用的 12 个 queryType（`page_insight` 页面指标 / `event_insight` 事件 / `funnel_insight` 漏斗 /
+可用的 18 个 queryType（`page_insight` 页面指标 / `event_insight` 事件 / `funnel_insight` 漏斗 /
 `traffic_insight` 站点 KPI / `path_insight` 路径 / `page_transitions` 页面单跳 /
 `page_block_metrics`、`page_element_metrics` 区块与元素 / `experience_*`、`experiment_attributed_funnel`
-实验相关）的完整说明与参数 schema，看 SDK 包里的
+实验相关 / `user_overview`、`user_timeline`、`user_journey`、`user_session_detail`、`user_list`、
+`user_benchmark` 用户级）的完整说明与参数 schema，看 SDK 包里的
 `node_modules/@ptengine/app-sdk/data-query.llms.txt` 与 `data-query.schema.json` —— 这两份
-**由平台自动生成、与线上服务端逐字同源**，比任何二手描述都可靠。用户级（`user_*`）场景不开放。
+**由平台自动生成、与线上服务端逐字同源**，比任何二手描述都可靠。
+
+⚠️ 用户级（`user_*`）场景 1.0.0 起才开放，返回的是**单个用户的明细**（可能含 email、跨会话
+轨迹）。只在应用确实要讲某个人的行为时用它；面向运营看的看板一律用聚合场景，并自己想清楚
+应用里谁该看到这些数据。
 
 ---
 

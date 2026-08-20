@@ -11,6 +11,7 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|
+| v2.0.0 | `^1.0.0` | `^0.4.0` | `1` | 宿主改真跨源 iframe + 桥换 postMessage；`on('change')` 移除、`timeRange` 改对象、取数放开到 18 个 queryType（**0.x 构建的应用必须重新构建上传**）|
 | v1.2.0 | `^0.6.0` | `^0.4.0` | `1` | 取数放开到 12 个 queryType + 参数改判别联合类型 + `PtApp.data.describe()`（**要用取数的必须升到这版**）|
 | v1.1.3 | `^0.4.0` | `^0.3.0` | `1` | dev server 默认开 CORS（平台内 dev 模式）+ 模板默认带 `icon` 占位图 + `npm run package` 新增 icon 自检 |
 | v1.1.2 | `^0.4.0` | `^0.3.0` | `1` | 修复平台内本地联调拿到假上下文（**用平台内 dev 模式的必须升到这版**）|
@@ -20,6 +21,82 @@
 | v1.0.0 | `^0.2.0` | — | `1` | 首个版本 |
 
 选版本时以本表为准：脚手架版本决定了它依赖的 SDK 大版本，跨大版本升级请看下面对应条目的「升级指引」。
+
+## [2.0.0] - 2026-08-20
+
+跟进 `@ptengine/app-sdk@1.0.0`。**这一版有破坏性变更**：用 0.x 构建并上传的应用在新宿主里
+不工作，必须用本版重新构建上传。
+
+### 变更
+
+- **`@ptengine/app-sdk` 升到 `^1.0.0`**（原 `^0.6.0`）。1.x 之后 caret 会自动吸收 minor，
+  以后不必每个小版本手动改依赖了。
+- **宿主改为真跨源 `<iframe>`，桥改成 postMessage RPC。** 子应用**再也读不到**主站的 cookie
+  与 localStorage —— 这正是这次变更的目的。你自己 origin 的 `localStorage` 仍可用，但在跨站
+  嵌入下**按顶级站点分区**，不要用它持久化业务数据。
+- **模板代码跟着改了三处**（clone 新项目无需操作，已在开发中的项目照「升级指引」改）：
+  `src/theme.ts` 改订阅 `on('context')`，并对「握手完成前 context 是空对象」做了兜底；
+  `src/App.tsx` 把上下文改成 state + `on('context')` 订阅（原来只在首帧读一次，托管模式下
+  会显示空白的 theme 且不报错）；`src/main.tsx` 补上就绪语义的说明。
+
+### 破坏性：`PtApp.on` 的事件收窄
+
+旧的粗粒度 `'change'`（回调整个 data）**已移除**，改为三个明确事件：`context`（locale / theme
+变化）、`route`（宿主前进后退）、`overlay.click`（用户点了宿主遮罩）。
+
+```diff
+- app.on('change', payload => { const theme = payload?.context?.theme; … });
++ app.on('context', ctx => { const theme = ctx.theme; … });
+```
+
+⚠️ 照旧写法**不会报错**，只是回调永远不触发 —— 主题静默不跟随。
+
+### 破坏性：`window.PtApp` 存在 ≠ `context` 就绪
+
+`context` 由桥握手下发，握手完成前 `app.context` 是**空对象**。只在首帧读一次
+`app.context.theme` / `.sid` 会拿到 `undefined`。要按上下文分支的逻辑必须订阅 `on('context')`。
+握手前调用 `ui.*` / `nav.*` 不会丢（SDK 内部排队，port 建立后 flush）。
+
+### 破坏性：`params.timeRange` 改为对象且必填
+
+```diff
+  await window.PtApp.data.query({
+      queryType: 'funnel_insight',
+-     params: { timeRange: 'last_7_days', steps: [{ event: 'page_view' }] }
++     params: { timeRange: { key: 'lastDays', days: 7 }, steps: [{ event: 'page_view' }] }
+  });
+```
+
+`key` 取值：`today` `yesterday` `thisWeek` `lastWeek` `thisMonth` `lastMonth` `lastDays`
+`custom` `before` `after` `on`（`lastDays` 要 `days`，`custom` 要 `startTime` + `endTime`，
+日期格式 `YYYY/MM/DD`）。旧的字符串预设服务端仍兼容，但**类型层会报错**。
+
+### 新增
+
+- **`PtApp.ui.overlay(theme)`**：请宿主铺一层全屏遮罩（`null` 撤除）。子应用在 iframe 里画不出
+  自己的区域，做全屏弹层只能让宿主铺遮罩、自己在 iframe 内画内容；用户点遮罩时宿主推
+  `overlay.click` 回来，由你决定是否关闭。
+- **取数放开到 18 个 queryType**：新增 6 个用户级场景 `user_overview` / `user_timeline` /
+  `user_journey` / `user_session_detail` / `user_list` / `user_benchmark`。它们返回**单个用户的
+  明细**（可能含 email、跨会话轨迹），与聚合场景走同一道鉴权与 profile 锁定 —— 但请自己想清楚
+  应用里谁该看到这些数据。
+
+### 升级指引（已在开发中的项目）
+
+```bash
+npm i @ptengine/app-sdk@^1.0.0
+```
+
+然后逐条过：
+
+1. 全局搜 `on('change'` → 改成 `on('context'`（payload 从整个 data 变成 `PtAppContext` 本身）。
+2. 搜 `PtApp.context` 的读取点：只在首帧读一次的，改成订阅 `on('context')`。
+3. 搜 `timeRange:` → 字符串预设改成对象。tsc 会把漏改的位置全指出来。
+4. 用了主站 cookie / localStorage 的逻辑（如果有）：跨源后一律拿不到，改走自己的后端或
+   `PtApp.data`。
+5. **重新 `npm run package` 并上传** —— 0.x 的产物在新宿主里不工作。
+
+---
 
 ## [1.2.0] - 2026-08-17
 

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
     Alert,
     AlertDescription,
@@ -32,10 +32,20 @@ import { getPtApp } from './pt-app';
  */
 export default function App() {
     const app = useMemo(getPtApp, []);
+    // context 由桥握手下发：`window.PtApp` 存在时它可能还是**空对象**，locale / theme 之后才到
+    // （app-sdk 1.0.0 起）。所以要订阅 on('context') 而不是只在首帧读一次 —— 只读一次的写法
+    // 在托管模式下会显示空白的 theme/sid，且不报任何错。
+    const [ctx, setCtx] = useState(() => app?.context);
     const [log, setLog] = useState<string[]>([]);
     const [note, setNote] = useState('');
     const push = (line: string) =>
         setLog(prev => [`${new Date().toLocaleTimeString()}  ${line}`, ...prev]);
+
+    useEffect(() => {
+        if (!app) return;
+        // 每次都换一个新对象，React 才会重渲染（宿主可能推来同一个引用）。
+        app.on('context', next => setCtx({ ...next }));
+    }, [app]);
 
     if (!app) {
         return (
@@ -61,7 +71,7 @@ export default function App() {
                     <div className="flex items-center gap-2">
                         <h1 className="text-lg font-semibold text-foreground">My Ptengine App</h1>
                         <Badge variant="secondary">SDK v{app.version}</Badge>
-                        <Badge variant="information">{app.context.theme}</Badge>
+                        <Badge variant="information">{ctx?.theme ?? '…'}</Badge>
                     </div>
                     <p className="text-xs text-muted-foreground">
                         下面演示 <code className="rounded-sm bg-secondary px-1">window.PtApp</code>{' '}
@@ -78,7 +88,7 @@ export default function App() {
                     </CardHeader>
                     <CardContent>
                         <pre className="overflow-auto rounded-md bg-secondary p-3 text-2xs text-foreground">
-                            {JSON.stringify(app.context, null, 2)}
+                            {JSON.stringify(ctx ?? {}, null, 2)}
                         </pre>
                     </CardContent>
                 </Card>

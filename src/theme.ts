@@ -22,21 +22,27 @@ export function applyPtTheme(theme: 'light' | 'dark'): void {
 /**
  * 跟随平台主题：先按当前 context 应用一次，再订阅宿主后续下发。
  *
- * `PtApp.on` 目前是**粗粒度**的（宿主 data 有任何变化都回调，payload 是整个 data），
- * 所以这里自己从 payload 里挑 `context.theme`，并且只在值真的变了时才写 DOM。
- * 返回值是"取消订阅"占位：`on` 尚未提供反注册，故返回一个把开关置死的函数。
+ * 两个 app-sdk 1.0.0 的要点：
+ * - 订阅的是 `on('context', ctx => …)`。旧的粗粒度 `'change'` 事件（回调整个 data）**已移除**，
+ *   还按它写不会报错，只是主题永远不跟随。
+ * - **握手完成前 `context` 是空对象**（`window.PtApp` 存在 ≠ context 已就绪），所以初值要兜底
+ *   成亮色，真正的主题由随后到达的 `context` 事件纠正；直接读 `context.theme` 会拿到
+ *   `undefined`，`colorScheme` 被写成空串。
+ *
+ * 只在值真的变了时才写 DOM。返回值是"取消订阅"占位：`on` 尚未提供反注册，
+ * 故返回一个把开关置死的函数。
  */
 export function followPtTheme(app: {
-    context: { theme: 'light' | 'dark' };
-    on(event: string, cb: (payload: unknown) => void): void;
+    context: { theme?: 'light' | 'dark' };
+    on(event: 'context', cb: (ctx: { theme?: 'light' | 'dark' }) => void): void;
 }): () => void {
     let active = true;
-    let current = app.context.theme;
+    let current: 'light' | 'dark' = app.context?.theme ?? 'light';
     applyPtTheme(current);
 
-    app.on('change', payload => {
+    app.on('context', ctx => {
         if (!active) return;
-        const next = (payload as { context?: { theme?: 'light' | 'dark' } })?.context?.theme;
+        const next = ctx?.theme;
         if (!next || next === current) return;
         current = next;
         applyPtTheme(next);

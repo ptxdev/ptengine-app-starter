@@ -26,6 +26,11 @@ import { applyPtTheme, followPtTheme } from './theme';
  *
  * 生产构建（上传到 Ptengine X 后）由平台在 index.html 注入阻塞 script，
  * window.PtApp 在业务代码执行前已就绪，这段 dev-only 代码也不会执行。
+ *
+ * ⚠️ 但 `window.PtApp` 就绪 ≠ `context` 就绪（app-sdk 1.0.0 起）：context 由桥握手下发，
+ * 握手完成前 `app.context` 是**空对象**。要按 sid / locale / theme 分支的逻辑必须订阅
+ * `app.on('context', …)`，不能只在首帧读一次（theme.ts 就是这么做的）。握手前调
+ * `ui.*` / `nav.*` 不会丢，SDK 内部排队。
  */
 async function bootstrap() {
     if (import.meta.env.DEV) {

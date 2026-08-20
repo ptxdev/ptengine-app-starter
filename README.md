@@ -64,20 +64,24 @@ app?.nav.syncRoute('detail');          // 把内部路由同步到地址栏
 const res = await app?.data.query({
     queryType: 'funnel_insight',
     params: {
-        timeRange: 'last_7_days',
+        timeRange: { key: 'lastDays', days: 7 },
         steps: [{ event: 'page_view' }, { event: 'purchase' }]
     }
 });
 // res = { columns, rows, rowCount, metadata }；rows 是二维数组，元素序 = columns 序
 ```
 
-- 目前放开 **12 个 queryType**：`page_insight`（页面指标）、`event_insight`（事件）、
+- 目前放开 **18 个 queryType**：`page_insight`（页面指标）、`event_insight`（事件）、
   `funnel_insight`（漏斗）、`traffic_insight`（站点 KPI）、`path_insight`（路径流转）、
   `page_transitions`（页面单跳）、`page_block_metrics` / `page_element_metrics`（区块与元素级）、
   `experience_search` / `experience_report` / `experience_abtest_report` /
-  `experiment_attributed_funnel`（实验相关）。用户级（`user_*`）场景不开放。
+  `experiment_attributed_funnel`（实验相关），以及 `user_overview` / `user_timeline` /
+  `user_journey` / `user_session_detail` / `user_list` / `user_benchmark`（用户级，1.0.0 起开放，
+  返回单个用户的明细 —— 请自行控制应用里谁能看到）。
 - **`params` 的形状由 `queryType` 决定**，类型是判别联合，IDE 会按场景提示该填什么。
-  `timeRange` 用字符串预设（`'last_7_days'` 等）或 `customStart` + `customEnd`。
+  `timeRange` 是必填的对象：`{ key: 'lastDays', days: 7 }`、
+  `{ key: 'custom', startTime: '2026/08/01', endTime: '2026/08/20' }`、`{ key: 'thisMonth' }` 等
+  （1.0.0 起；旧的字符串预设 `'last_7_days'` 服务端仍兼容，但类型层会报错）。
 - **`await app?.data.describe()`** 可在运行时拿到当前平台放开的 queryType 及其参数 JSON Schema
   —— 平台以后放开新场景，不升级 SDK 也能发现。
 - **单次最多返回 5000 行**。截断时 `metadata.truncated === true`、`metadata.totalRowCount` 是截断前
