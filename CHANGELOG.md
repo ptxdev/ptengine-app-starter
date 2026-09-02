@@ -10,7 +10,7 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/app-backend` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|---|
-| v3.0.0 | `^2.0.0` | 内联于脚手架 | `^0.5.0` | **2** | **新增后端运行时**：每个应用一个 Worker，前后端同包同版本。目录结构变化（前端移到 `web/`）|
+| v3.0.0 | `^2.0.0` | `file:../app-backend` | `^0.5.0` | **2** | **新增后端运行时**：每个应用一个 Worker，前后端同包同版本。目录结构变化（前端移到 `web/`）|
 | v2.0.0 | `^1.0.0` | — | `^0.4.0` | 1 | 宿主改真跨源 iframe + 桥换 postMessage；`on('change')` 移除、`timeRange` 改对象、取数放开到 18 个 queryType |
 | v1.2.0 | `^0.6.0` | — | `^0.4.0` | 1 | 取数放开到 12 个 queryType + 参数改判别联合类型 + `PtApp.data.describe()` |
 | v1.1.3 | `^0.4.0` | — | `^0.3.0` | 1 | dev server 默认开 CORS + 模板默认带 `icon` 占位图 |
