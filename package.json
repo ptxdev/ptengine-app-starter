@@ -12,6 +12,7 @@
         "ptx": "node scripts/ptx.mjs"
     },
     "dependencies": {
+        "@ptengine/app-backend": "file:../app-backend",
         "@ptengine/app-sdk": "^1.2.0",
         "@ptengine/design-components": "^0.5.0",
         "react": "^19.1.1",

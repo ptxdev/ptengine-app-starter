@@ -1,7 +1,7 @@
 /**
  * 你的后端业务代码写在这里。
  *
- * 运行时（`./runtime`）已经兜住了验签、路由、错误规范化、日志与健康探针 ——
+ * 运行时（`@ptengine/app-backend`）已经兜住了验签、路由、错误规范化、日志与健康探针 ——
  * 你只写 handler。`ctx` 上的每一样东西都是已经安全的：
  *   ctx.auth      已验签的调用者身份（userId / sid / workspaceId / scopes）
  *   ctx.db        你自己的数据库      ctx.kv   你自己的 KV
@@ -13,7 +13,7 @@
  * sid 是它们之间的隔离键。漏了它，A 站点会看到 B 站点的数据。
  */
 
-import { createApp } from './runtime';
+import { createApp } from '@ptengine/app-backend';
 import type { ApiRoutes, Order, OrdersResponse } from '../../shared/api';
 
 export default createApp<ApiRoutes>({

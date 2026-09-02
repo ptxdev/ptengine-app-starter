@@ -167,9 +167,23 @@ function checkBackend(root, manifest) {
         );
     }
 
-    const runtimeIndex = read(root, 'backend/src/runtime/index.ts');
-    if (runtimeIndex) ok('runtime 目录完整');
-    else bad('backend/src/runtime/ 缺失或不完整', 'createApp 来自这里');
+    // 运行时现在是 npm 依赖而不是内联目录。检查两件事：依赖在、且没有被 fork 回本地。
+    const pkg = JSON.parse(read(root, 'package.json'));
+    const hasDep = Boolean(pkg.dependencies?.['@ptengine/app-backend']);
+    if (hasDep) ok('依赖了 @ptengine/app-backend');
+    else {
+        bad(
+            'package.json 缺少 @ptengine/app-backend 依赖',
+            'createApp 来自这个包。npm i @ptengine/app-backend'
+        );
+    }
+    if (read(root, 'backend/src/runtime/index.ts')) {
+        warn(
+            '本地存在 backend/src/runtime/ —— 看起来把运行时 fork 回来了',
+            '运行时由平台维护并随包升级。本地 fork 会拿不到安全修复；' +
+            '有需求请提到平台侧，不要在应用里改它。'
+        );
+    }
 
     // 禁止项：DO 与 connect() —— outbound worker 拦不住这两条出站路径，
     // 平台层面不会给这些绑定，写了也只是线上直接报错。
