@@ -31,7 +31,7 @@ export interface Settings {
 /**
  * 路由表。键的形状是 `'<METHOD> <path>'`，path 里可以写 `:param`。
  *
- * 不要写 `/api` 前缀 —— 运行时会剥掉它（见 `backend/src/runtime/create-app.ts`）。
+ * 不要写 `/api` 前缀 —— 运行时会剥掉它（见 `@ptengine/app-backend`）。
  */
 export interface ApiRoutes {
     'GET /orders': {

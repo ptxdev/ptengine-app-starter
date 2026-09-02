@@ -168,7 +168,13 @@ function checkBackend(root, manifest) {
     }
 
     // 运行时现在是 npm 依赖而不是内联目录。检查两件事：依赖在、且没有被 fork 回本地。
-    const pkg = JSON.parse(read(root, 'package.json'));
+    //
+    // read() 在文件不存在时返回 null，而 JSON.parse(null) 得到的是 null ——
+    // 紧接着读 .dependencies 会抛 TypeError。doctor 的全部意义就是给出说得清的
+    // 诊断，让它自己崩在一个 TypeError 上最难看，所以先守一道。
+    const pkgRaw = read(root, 'package.json');
+    if (!pkgRaw) return bad('package.json 不存在', '这不像是脚手架的根目录');
+    const pkg = JSON.parse(pkgRaw);
     const hasDep = Boolean(pkg.dependencies?.['@ptengine/app-backend']);
     if (hasDep) ok('依赖了 @ptengine/app-backend');
     else {
