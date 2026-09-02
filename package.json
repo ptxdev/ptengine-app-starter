@@ -1,0 +1,33 @@
+{
+    "name": "ptengine-app-starter",
+    "private": true,
+    "version": "1.0.0",
+    "type": "module",
+    "scripts": {
+        "dev": "node scripts/ptx.mjs dev",
+        "build": "node scripts/ptx.mjs build",
+        "package": "node scripts/ptx.mjs package",
+        "deploy": "node scripts/ptx.mjs deploy",
+        "doctor": "node scripts/ptx.mjs doctor",
+        "ptx": "node scripts/ptx.mjs"
+    },
+    "dependencies": {
+        "@ptengine/app-sdk": "^1.2.0",
+        "@ptengine/design-components": "^0.5.0",
+        "react": "^19.1.1",
+        "react-dom": "^19.1.1"
+    },
+    "devDependencies": {
+        "@cloudflare/workers-types": "^5.20260902.0",
+        "@types/node": "^22.10.0",
+        "@types/react": "^19.1.0",
+        "@types/react-dom": "^19.1.0",
+        "@vitejs/plugin-react": "^5.0.0",
+        "autoprefixer": "^10.5.4",
+        "postcss": "^8.5.26",
+        "tailwindcss": "^3.4.19",
+        "typescript": "~5.9.3",
+        "vite": "^7.0.0",
+        "wrangler": "^4.128.0"
+    }
+}

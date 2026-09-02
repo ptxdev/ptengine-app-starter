@@ -1,0 +1,42 @@
+{
+    "$schema": "./node_modules/wrangler/config-schema.json",
+
+    // ⚠️ 这份配置**只服务本地开发**（`ptx dev` 起的 wrangler dev）。
+    //
+    // 线上不读它：平台在部署时用 Cloudflare API 直接 PUT 这个 worker，
+    // 并**由平台组装全部 bindings**（D1 / KV / secrets / service）。
+    // 你在这里加的 binding 不会出现在线上；线上有什么由 `manifest.json` 的
+    // `backend.resources` 与 `backend.secrets` 决定。
+    //
+    // 也因此：这里的 database_id / KV id 是**本地占位符**，不需要是真实资源。
+    "name": "ptengine-app-backend-dev",
+    "main": "src/index.ts",
+    "compatibility_date": "2026-09-01",
+    "compatibility_flags": ["nodejs_compat"],
+
+    "d1_databases": [
+        {
+            "binding": "DB",
+            "database_name": "ptapp-local",
+            "database_id": "local",
+            // 本地跑迁移：npx wrangler d1 migrations apply ptapp-local --local
+            // 线上不用这个 —— 平台的 Migrator 会按包内 _backend/migrations 的序号执行。
+            "migrations_dir": "migrations"
+        }
+    ],
+    "kv_namespaces": [
+        { "binding": "KV", "id": "local" }
+    ],
+
+    // 线上由平台以 json binding 注入；本地用 vars 模拟同样的形状。
+    "vars": {
+        "PT_APP": {
+            "appId": "local-dev",
+            "workspaceId": "local-ws",
+            "versionId": "local",
+            "env": "development"
+        },
+        "PT_TOKEN_AUD": "app:local-dev",
+        "PT_TOKEN_ISS": "https://auth.ptengine.io"
+    }
+}

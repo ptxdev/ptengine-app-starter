@@ -1,0 +1,10 @@
+node_modules
+web/dist
+backend/.out
+backend/.wrangler
+backend/.dev.vars
+web/.ptx-dev-key.json
+.ptengine/
+*.zip
+.DS_Store
+*.tsbuildinfo
