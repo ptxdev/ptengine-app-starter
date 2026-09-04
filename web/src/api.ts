@@ -6,7 +6,7 @@
  * 它内部做的事：取 App Token（缓存 + 自动续期）→ 拼 Authorization 头 →
  * **同源** `fetch('/api/...')` → 解开错误信封。
  *
- * 同源是设计出来的（线上前后端都在 `<appId>.app.ptengine.io`，本地由 vite proxy
+ * 同源是设计出来的（线上前后端都在 `<appId>.apps.ptengine.ai`，本地由 vite proxy
  * 代到 wrangler dev），所以这里没有任何 baseURL / CORS / 第三方 cookie 的处理 ——
  * 那些问题在架构层就消掉了。
  */

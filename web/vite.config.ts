@@ -77,7 +77,7 @@ export default defineConfig({
      * ⚠️ base 必须是相对路径 './'，不要改成 '/' 或某个绝对前缀。
      *
      * 前端产物由平台从 R2 提供，入口 HTML 的实际地址形如
-     *   https://<appId>.app.ptengine.io/v/<versionId>/index.html
+     *   https://<appId>.apps.ptengine.ai/v/<versionId>/index.html
      * 只有相对 base 产出的 `./assets/xxx.js` 才能正确解析回该目录；
      * 绝对 base 会让产物请求 `/assets/xxx.js` → 落到域名根 → 404 → 白屏。
      */
@@ -106,7 +106,7 @@ export default defineConfig({
         /**
          * 把 /api 代理到本地 wrangler dev。
          *
-         * 这样本地也是**同源**调用（跟线上 `<appId>.app.ptengine.io` 一致），
+         * 这样本地也是**同源**调用（跟线上 `<appId>.apps.ptengine.ai` 一致），
          * 不需要在前端代码里区分环境写不同的 baseURL，也不需要任何 CORS 配置。
          */
         proxy: {

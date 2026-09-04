@@ -16,7 +16,7 @@ const VALID_SCOPES = ['analytics:read', 'profile:read', 'user:read', 'ui:notify'
 const ICON_EXT = ['.svg', '.png', '.jpg', '.jpeg', '.webp', '.ico'];
 
 /** 出站白名单里不允许出现的域 —— 禁止租户绕过网关直接打平台接口。 */
-const FORBIDDEN_EGRESS = ['ptengine.com', 'ptengine.io', 'ptmind.com', 'localhost', '127.0.0.1'];
+const FORBIDDEN_EGRESS = ['ptengine.com', 'ptengine.io', 'ptengine.ai', 'ptmind.com', 'localhost', '127.0.0.1'];
 
 export function readManifest(root) {
     const path = join(root, 'manifest.json');

@@ -37,6 +37,6 @@
             "env": "development"
         },
         "PT_TOKEN_AUD": "app:local-dev",
-        "PT_TOKEN_ISS": "https://auth.ptengine.io"
+        "PT_TOKEN_ISS": "https://auth.ptengine.ai"
     }
 }
