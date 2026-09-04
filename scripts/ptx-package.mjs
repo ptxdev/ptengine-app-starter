@@ -21,7 +21,7 @@ import {
     readdirSync, rmSync, statSync, writeFileSync
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { readManifest, validateManifest, reportValidation } from './manifest.mjs';
 
 /** 看起来像密钥的字面量。命中只警告不阻断 —— 误报的代价比漏报的沉默更小。 */
@@ -59,7 +59,47 @@ export async function run(_args, root) {
     }
 
     const hasBackend = Boolean(manifest.backend);
+/**
+ * 产物新鲜度检查。
+ *
+ * 存在的理由：`ptx package` **不构建**，它只打包 web/dist 与 backend/.out。
+ * 原来只在产物**缺失**时报错，产物**陈旧**时静默打包 —— 于是你改完代码、
+ * 打包、发布、验收，看到的却是上一次的构建结果，而且没有任何提示。
+ * 这类问题最难查，因为每一步都"成功"了。
+ *
+ * 判据是最后修改时间：只要任一源文件比产物新，就拒绝打包。
+ */
+function assertFresh(root, outFile, srcDirs, label) {
+    if (!existsSync(outFile)) return;
+    const outAt = statSync(outFile).mtimeMs;
+    let newest = null;
+    const walk = dir => {
+        if (!existsSync(dir)) return;
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+            if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
+            const full = join(dir, e.name);
+            if (e.isDirectory()) walk(full);
+            else {
+                const m = statSync(full).mtimeMs;
+                if (m > outAt && (!newest || m > newest.at)) newest = { file: full, at: m };
+            }
+        }
+    };
+    for (const d of srcDirs) walk(join(root, d));
+    if (newest) {
+        throw new Error(
+            `${label}的产物比源文件旧 —— 打出来的包不是你刚改的代码。\n` +
+            `  产物  ${relative(root, outFile)}\n` +
+            `  更新的源文件  ${relative(root, newest.file)}\n` +
+            '先跑 `npm run build` 再 `npm run package`。'
+        );
+    }
+}
+
+    assertFresh(root, join(root, 'web', 'dist', 'index.html'), ['web/src', 'shared'], '前端');
+
     const bundleSrc = join(root, 'backend', '.out', 'index.js');
+    assertFresh(root, bundleSrc, ['backend/src', 'shared'], '后端');
     if (hasBackend && !existsSync(bundleSrc)) {
         throw new Error(
             '缺少 backend/.out/index.js。manifest 声明了 backend 段，' +

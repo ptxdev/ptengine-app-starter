@@ -17,7 +17,7 @@ import {
 } from '@ptengine/design-components';
 import { getPtApp } from './pt-app';
 import { api, ApiError } from './api';
-import type { OrdersResponse, Settings } from '../../shared/api';
+import type { OrdersResponse, PublicStatus, Settings } from '../../shared/api';
 
 /**
  * 演示页：宿主能力（window.PtApp）+ **自己的后端**（/api/*）+ 组件库用法。
@@ -46,18 +46,13 @@ export default function App() {
     }, [app]);
 
     if (!app) {
-        return (
-            <main className="mx-auto max-w-3xl p-6">
-                <h1 className="mb-4 text-lg font-semibold text-foreground">My Ptengine App</h1>
-                <Alert>
-                    <AlertTitle>未检测到 window.PtApp</AlertTitle>
-                    <AlertDescription>
-                        本页面需要由 Ptengine X 平台加载才能拿到宿主能力；本地开发请用{' '}
-                        <code className="rounded-sm bg-secondary px-1">npm run dev</code>。
-                    </AlertDescription>
-                </Alert>
-            </main>
-        );
+        // 直接在浏览器里打开（不经 Ptengine 托管）时走这里。
+        //
+        // ⚠️ 这里刻意**不是**一个死胡同页。原来只显示一句"未检测到 window.PtApp"，
+        //    结果是：应用地址打开后你完全看不出后端到底有没有部署成功 ——
+        //    验收和排障时分不清"鉴权在正常工作"还是"后端根本没起来"。
+        //    所以这里仍然跑一遍公开自检，并顺带演示鉴权边界。
+        return <StandaloneMode />;
     }
 
     return (
@@ -268,5 +263,145 @@ function BackendDemo({ onLog }: { onLog: (line: string) => void }) {
                 )}
             </CardContent>
         </Card>
+    );
+}
+
+/**
+ * 独立打开（不经 Ptengine 托管）时显示的自检面板。
+ *
+ * 它回答三个问题，每个都用一次真实请求回答，不靠文案声明：
+ *   1. 后端部署成功了吗           → GET /api/public/status（公开路由，不验签）
+ *   2. D1 / KV 通不通             → 同上，逐项探活
+ *   3. 鉴权真的在拦吗             → GET /api/settings 不带令牌，期望 401
+ *
+ * 第 3 项是刻意的：**看到 401 才说明鉴权在工作**。把它显示成"通过"而不是
+ * 报错，否则验收的人会以为出了问题。
+ */
+function StandaloneMode() {
+    const [status, setStatus] = useState<PublicStatus | null>(null);
+    const [statusErr, setStatusErr] = useState<string | null>(null);
+    const [authProbe, setAuthProbe] = useState<{ ok: boolean; detail: string } | null>(null);
+
+    useEffect(() => {
+        // 公开路由：直接 fetch，不走 api()（那会去取令牌）。
+        fetch('/api/public/status')
+            .then(async r => {
+                const body = await r.json();
+                if (!r.ok) throw new Error(body?.error?.code ?? `HTTP ${r.status}`);
+                setStatus(body as PublicStatus);
+            })
+            .catch(e => setStatusErr(String(e?.message ?? e)));
+
+        // 鉴权边界：故意不带令牌，期望被拒。
+        fetch('/api/settings')
+            .then(async r => {
+                const body = await r.json().catch(() => null);
+                const code = body?.error?.code ?? '';
+                setAuthProbe(
+                    r.status === 401
+                        ? { ok: true, detail: `401 ${code} —— 鉴权正常拦截` }
+                        : { ok: false, detail: `HTTP ${r.status} ${code} —— 期望 401，请检查` }
+                );
+            })
+            .catch(e => setAuthProbe({ ok: false, detail: String(e?.message ?? e) }));
+    }, []);
+
+    const dot = (s: 'ok' | 'unavailable' | 'error' | 'pending') => {
+        const map = {
+            ok: ['success', '正常'],
+            unavailable: ['secondary', '未声明'],
+            error: ['destructive', '故障'],
+            pending: ['secondary', '检测中…']
+        } as const;
+        const [variant, label] = map[s];
+        return <Badge variant={variant as never}>{label}</Badge>;
+    };
+
+    return (
+        <main className="mx-auto max-w-3xl space-y-5 p-6">
+            <header className="space-y-1">
+                <div className="flex items-center gap-2">
+                    <h1 className="text-lg font-semibold text-foreground">Custom App 自检</h1>
+                    <Badge variant="secondary">独立模式</Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                    这个页面没有由 Ptengine X 托管，所以拿不到宿主能力（window.PtApp）。
+                    但它仍然会真实调用自己的后端 —— 下面每一行都是一次实际请求的结果。
+                </p>
+            </header>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle>后端状态</CardTitle>
+                    <CardDescription>
+                        <code className="rounded-sm bg-secondary px-1">GET /api/public/status</code>
+                        {' '}—— 公开路由，不需要令牌
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                    {statusErr && (
+                        <Alert variant="destructive">
+                            <AlertTitle>后端没有响应</AlertTitle>
+                            <AlertDescription>{statusErr}</AlertDescription>
+                        </Alert>
+                    )}
+                    {!status && !statusErr && <p className="text-muted-foreground">检测中…</p>}
+                    {status && (
+                        <>
+                            <div className="grid grid-cols-2 gap-2">
+                                <span className="text-muted-foreground">应用 ID</span>
+                                <code>{status.appId ?? '—'}</code>
+                                <span className="text-muted-foreground">版本</span>
+                                <code>{status.versionId ?? '—'}</code>
+                                <span className="text-muted-foreground">服务端时间</span>
+                                <code>{status.serverTime}</code>
+                            </div>
+                            <Separator />
+                            <div className="flex items-center gap-3">
+                                <span className="text-muted-foreground w-24">D1 数据库</span>
+                                {dot(status.checks.database)}
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <span className="text-muted-foreground w-24">KV</span>
+                                {dot(status.checks.kv)}
+                            </div>
+                            <Separator />
+                            <div>
+                                <p className="mb-1 text-muted-foreground">已注册路由</p>
+                                <ul className="space-y-0.5">
+                                    {status.routes.map(r => (
+                                        <li key={r}><code className="text-xs">{r}</code></li>
+                                    ))}
+                                </ul>
+                            </div>
+                        </>
+                    )}
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle>鉴权边界</CardTitle>
+                    <CardDescription>
+                        <code className="rounded-sm bg-secondary px-1">GET /api/settings</code>
+                        {' '}不带令牌 —— <strong>被拒才是正确结果</strong>
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="text-sm">
+                    {!authProbe && <p className="text-muted-foreground">检测中…</p>}
+                    {authProbe && (
+                        <div className="flex items-center gap-3">
+                            {authProbe.ok ? dot('ok') : dot('error')}
+                            <code className="text-xs">{authProbe.detail}</code>
+                        </div>
+                    )}
+                    <p className="mt-3 text-xs text-muted-foreground">
+                        业务接口需要 App Token，而令牌由 Ptengine X 平台在 iframe 里下发。
+                        要看完整功能，把这个应用装进 Ptengine X；本地开发用{' '}
+                        <code className="rounded-sm bg-secondary px-1">npm run dev</code>。
+                    </p>
+                </CardContent>
+            </Card>
+        </main>
     );
 }

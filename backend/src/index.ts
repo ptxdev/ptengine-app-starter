@@ -14,9 +14,17 @@
  */
 
 import { createApp } from '@ptengine/app-backend';
-import type { ApiRoutes, Order, OrdersResponse } from '../../shared/api';
+import type { ApiRoutes, Order, OrdersResponse, PublicStatus } from '../../shared/api';
 
 export default createApp<ApiRoutes>({
+    /**
+     * 不验签的路由，逐条列出。默认所有路由都要 App Token。
+     *
+     * 这里只放了自检 —— 它不返回业务数据、不接受输入。
+     * 加新的之前先问：泄漏了什么？能被拿来做什么？
+     */
+    publicRoutes: ['GET /public/status'],
+
     routes: {
         /**
          * 示例：调第三方 API + KV 缓存。
@@ -27,6 +35,46 @@ export default createApp<ApiRoutes>({
          *   2. 本地在 backend/.dev.vars 写 SHOPIFY_TOKEN=xxx；
          *      线上在应用管理页填
          */
+        /**
+         * 公开自检。**不验签**（见上面的 publicRoutes）。
+         *
+         * 它逐项探活依赖，任何一项挂了都不影响整体返回 —— 目的就是
+         * 在出问题时告诉你「哪一项挂了」，而不是整个接口 500。
+         */
+        'GET /public/status': async (ctx): Promise<PublicStatus> => {
+            const checks: PublicStatus['checks'] = { database: 'unavailable', kv: 'unavailable' };
+
+            // ctx.db / ctx.kv 是 getter：manifest 没声明这个资源时它会抛
+            // MISSING_RESOURCE。所以「没绑定」和「绑了但坏了」都要接住，
+            // 且要分开报 —— 前者是配置问题，后者是运行时故障。
+            try {
+                await ctx.db.prepare('SELECT 1').first();
+                checks.database = 'ok';
+            } catch (e) {
+                checks.database =
+                    (e as { code?: string })?.code === 'MISSING_RESOURCE' ? 'unavailable' : 'error';
+            }
+            try {
+                const probe = '__status_probe';
+                await ctx.kv.put(probe, String(Date.now()), { expirationTtl: 60 });
+                checks.kv = (await ctx.kv.get(probe)) ? 'ok' : 'error';
+            } catch (e) {
+                checks.kv =
+                    (e as { code?: string })?.code === 'MISSING_RESOURCE' ? 'unavailable' : 'error';
+            }
+
+            return {
+                appId: ctx.app?.appId ?? null,
+                versionId: ctx.app?.versionId ?? null,
+                checks,
+                routes: [
+                    'GET /public/status', 'GET /orders', 'GET /orders/:id',
+                    'GET /settings', 'POST /settings'
+                ],
+                serverTime: new Date().toISOString()
+            };
+        },
+
         'GET /orders': async (ctx): Promise<OrdersResponse> => {
             const days = Number(ctx.query.days ?? '7');
             if (!Number.isFinite(days) || days < 1 || days > 365) {

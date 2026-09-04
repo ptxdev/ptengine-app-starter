@@ -29,6 +29,33 @@ export interface Settings {
 }
 
 /**
+ * 公开自检信息。
+ *
+ * 这条路由在 `publicRoutes` 里，**不验签** —— 它存在的理由是：
+ * 直接打开应用地址时能一眼看出后端到底有没有在跑、数据库通没通。
+ * 没有它的话，未登录访问只会看到 401，分不清是"鉴权正常工作"
+ * 还是"后端根本没起来"。
+ *
+ * ⚠️ 因此它只返回**自身状态**，不返回任何业务数据、不接受任何输入。
+ *    新增公开路由时照这个标准审：泄漏了什么？能被拿来做什么？
+ */
+export interface PublicStatus {
+    appId: string | null;
+    versionId: string | null;
+    /** 各依赖的连通性自检。 */
+    checks: {
+        /** D1 是否可查询。 */
+        database: 'ok' | 'unavailable' | 'error';
+        /** KV 是否可读写。 */
+        kv: 'ok' | 'unavailable' | 'error';
+    };
+    /** 已注册的路由键，用于确认部署的是哪一版代码。 */
+    routes: string[];
+    /** 服务端当前时间，用于确认不是缓存。 */
+    serverTime: string;
+}
+
+/**
  * 路由表。键的形状是 `'<METHOD> <path>'`，path 里可以写 `:param`。
  *
  * 不要写 `/api` 前缀 —— 运行时会剥掉它（见 `@ptengine/app-backend`）。
@@ -53,6 +80,10 @@ export interface ApiRoutes {
     'POST /settings': {
         body: Settings;
         response: { ok: true };
+    };
+    /** 公开自检。见 PublicStatus 的说明 —— 这条不验签。 */
+    'GET /public/status': {
+        response: PublicStatus;
     };
 }
 
