@@ -121,7 +121,7 @@ const data = await api('GET /orders', { query: { days: '7' } });
 
 它兜住了：取令牌、到期前自动续期、401 自动重试一次、解开错误信封。
 
-前后端**同源**（线上都在 `<appId>.apps.ptengine.ai`，本地由 vite proxy 代过去），
+前后端**同源**（线上都在 `<appId>.app.ptengine.ai`，本地由 vite proxy 代过去），
 所以没有 baseURL、没有 CORS、没有第三方 cookie 的事。
 
 ### 加一个新接口

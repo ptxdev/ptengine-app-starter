@@ -67,7 +67,7 @@
 
 ### 5. 路由只能用 hash 或 `nav.syncRoute`
 
-前端入口 HTML 的实际地址形如 `https://<appId>.apps.ptengine.ai/v/<versionId>/index.html`。
+前端入口 HTML 的实际地址形如 `https://<appId>.app.ptengine.ai/v/<versionId>/index.html`。
 
 - 用 `HashRouter`（或自己管 hash）；**不要**用 `BrowserRouter` / `history.pushState('/detail')`
 - 要把内部位置反映到浏览器地址栏，用 `window.PtApp.nav.syncRoute('detail')`，
@@ -132,7 +132,7 @@ const data = await api('GET /orders', { query: { days: '7' } });
 `api()` 已经兜住了：取 App Token、到期前自动续期、401 自动重试一次、解开错误信封。
 手写 fetch 会漏掉这些，而且**在本地也能跑通**（因为 token 还没过期），线上才出问题。
 
-前后端**同源**（线上都在 `<appId>.apps.ptengine.ai`，本地由 vite proxy 代到 wrangler dev），
+前后端**同源**（线上都在 `<appId>.app.ptengine.ai`，本地由 vite proxy 代到 wrangler dev），
 所以不需要任何 baseURL / CORS / 第三方 cookie 处理。
 
 ### 加一个新接口的正确顺序

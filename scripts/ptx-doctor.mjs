@@ -37,7 +37,7 @@ function checkViteBase(root) {
     bad(
         'vite base 不是相对路径',
         "必须是 './'。前端产物由平台从 R2 提供，入口地址形如 " +
-        '<appId>.apps.ptengine.ai/v/<versionId>/index.html；绝对 base 会让产物请求 ' +
+        '<appId>.app.ptengine.ai/v/<versionId>/index.html；绝对 base 会让产物请求 ' +
         '/assets/* 落到域名根 -> 404 -> 白屏，且控制台之外没有任何提示。'
     );
 }
