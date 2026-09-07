@@ -1,0 +1,12 @@
+/**
+ * Tailwind 入口。组件库的设计 token（--pt-* 变量）由 main.tsx 里 import 的
+ * `@ptengine/design-components/styles/tokens.css` 提供，两者缺一不可：
+ * 少了 token 文件，工具类会拿到未定义的变量、颜色全部失效。
+ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+    margin: 0;
+}

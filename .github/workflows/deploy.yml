@@ -1,0 +1,57 @@
+name: Deploy
+
+# 打一个 v* tag 就发布到线上 —— 前端与后端一起，同一个版本。
+#
+# 需要在仓库里配置：
+#   secrets.PTENGINE_TOKEN    部署凭据。用**按应用授权、可撤销**的令牌，
+#                             不要用账号级令牌 —— CI 里任何一个恶意依赖都能读到它。
+#   vars.PTENGINE_APP_ID      目标应用 id（应用管理页可见）
+#   vars.PTENGINE_API_BASE    可选，私有化/内部环境才需要
+on:
+  push:
+    tags: ['v*']
+  # 手动触发一次"只构建不发布"，用来验证流水线本身。
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: 构建并发布
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # doctor 放在 build 之前：它查的是"违反了不报错"的约定，
+      # 先拦下来比让构建产出一个坏包更省事。
+      - name: 体检
+        run: npx ptx doctor
+
+      - name: 构建（类型检查 + 前端 + 后端 bundle）
+        run: npx ptx build
+
+      - name: 打包（含结构自检）
+        run: npx ptx package
+
+      # tag 触发才真发布；手动触发只到打包为止，用于验证流水线。
+      - name: 上传并发布
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: npx ptx deploy --publish
+        env:
+          PTENGINE_TOKEN: ${{ secrets.PTENGINE_TOKEN }}
+          PTENGINE_APP_ID: ${{ vars.PTENGINE_APP_ID }}
+          PTENGINE_API_BASE: ${{ vars.PTENGINE_API_BASE }}
+
+      # 发布失败时把 zip 留下来，便于手工上传或排查。
+      - name: 保留产物
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-package
+          path: '*.zip'
+          if-no-files-found: warn

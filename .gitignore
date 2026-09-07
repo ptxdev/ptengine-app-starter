@@ -1,0 +1,14 @@
+node_modules
+web/dist
+backend/.out
+backend/.wrangler
+backend/.dev.vars
+web/.ptx-dev-key.json
+.ptengine/
+*.zip
+.DS_Store
+*.tsbuildinfo
+
+# ptx package 的暂存目录：<manifest.id>-<version>/，与同名 .zip 一起产出。
+# 只匹配脚手架根下带语义化版本后缀的目录，不会误伤 web/ backend/ shared/。
+/*-[0-9]*.[0-9]*.[0-9]*/

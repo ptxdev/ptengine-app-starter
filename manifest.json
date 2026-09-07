@@ -1,0 +1,30 @@
+{
+    "id": "my-app",
+    "schemaVersion": 2,
+    "version": "1.0.0",
+    "entry": "index.html",
+    "display_name": {
+        "zh-CN": "我的应用",
+        "en-US": "My App",
+        "ja-JP": "マイアプリ"
+    },
+    "icon": "assets/icon.svg",
+    "mode": "inline",
+    "mount": { "type": "nav" },
+    "scopes": ["analytics:read", "ui:notify"],
+    "sdkVersion": "2.0.0",
+
+    "backend": {
+        "entry": "_backend/worker.js",
+        "routes": ["/api/*"],
+        "resources": {
+            "database": true,
+            "kv": true,
+            "files": false
+        },
+        "migrations": "_backend/migrations",
+        "secrets": [],
+        "egress": [],
+        "compatibilityDate": "2026-09-01"
+    }
+}
