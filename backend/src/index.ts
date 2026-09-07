@@ -45,14 +45,14 @@ export default createApp<ApiRoutes>({
             const checks: PublicStatus['checks'] = { database: 'unavailable', kv: 'unavailable' };
 
             // ctx.db / ctx.kv 是 getter：manifest 没声明这个资源时它会抛
-            // MISSING_RESOURCE。所以「没绑定」和「绑了但坏了」都要接住，
+            // RESOURCE_NOT_DECLARED。所以「没绑定」和「绑了但坏了」都要接住，
             // 且要分开报 —— 前者是配置问题，后者是运行时故障。
             try {
                 await ctx.db.prepare('SELECT 1').first();
                 checks.database = 'ok';
             } catch (e) {
                 checks.database =
-                    (e as { code?: string })?.code === 'MISSING_RESOURCE' ? 'unavailable' : 'error';
+                    (e as { code?: string })?.code === 'RESOURCE_NOT_DECLARED' ? 'unavailable' : 'error';
             }
             try {
                 const probe = '__status_probe';
@@ -60,7 +60,7 @@ export default createApp<ApiRoutes>({
                 checks.kv = (await ctx.kv.get(probe)) ? 'ok' : 'error';
             } catch (e) {
                 checks.kv =
-                    (e as { code?: string })?.code === 'MISSING_RESOURCE' ? 'unavailable' : 'error';
+                    (e as { code?: string })?.code === 'RESOURCE_NOT_DECLARED' ? 'unavailable' : 'error';
             }
 
             return {

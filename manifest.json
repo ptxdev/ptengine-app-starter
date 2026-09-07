@@ -1,4 +1,5 @@
 {
+    "id": "my-app",
     "schemaVersion": 2,
     "version": "1.0.0",
     "entry": "index.html",

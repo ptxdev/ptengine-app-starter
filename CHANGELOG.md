@@ -10,6 +10,7 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/app-backend` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|---|
+| v3.0.1 | `^2.0.0` | `^0.1.0`（npm） | `^0.5.0` | **2** | `@ptengine/app-backend` 首发到公共 npm，脚手架改为依赖它；修示例错误码；manifest 加 `id` |
 | v3.0.0 | `^2.0.0` | `file:../app-backend` | `^0.5.0` | **2** | **新增后端运行时**：每个应用一个 Worker，前后端同包同版本。目录结构变化（前端移到 `web/`）|
 | v2.0.0 | `^1.0.0` | — | `^0.4.0` | 1 | 宿主改真跨源 iframe + 桥换 postMessage；`on('change')` 移除、`timeRange` 改对象、取数放开到 18 个 queryType |
 | v1.2.0 | `^0.6.0` | — | `^0.4.0` | 1 | 取数放开到 12 个 queryType + 参数改判别联合类型 + `PtApp.data.describe()` |
@@ -19,6 +20,20 @@
 | v1.1.0 | `^0.3.0` | — | `^0.3.0` | 1 | 预装 UI 组件库 + Tailwind，暗色跟随平台主题 |
 | v1.0.1 | `^0.3.0` | — | — | 1 | 支持在平台内加载本地 dev server 联调 |
 | v1.0.0 | `^0.2.0` | — | — | 1 | 首个版本 |
+
+## [3.0.1] - 2026-09-07
+
+### 变更
+
+- **`@ptengine/app-backend` 改为 npm 依赖 `^0.1.0`**（此前是 `file:../app-backend` 本地路径）。
+  运行时已发布到公共 npm，与 `@ptengine/app-sdk` 同政策。clone 后 `npm install` 即可，不再需要同级目录。
+- `manifest.json` 增加 `id` 字段（示例值 `my-app`）。`ptx package` 用它命名 zip
+  （`<id>-<version>.zip`），之前缺省时永远叫 `ptengine-app-<version>.zip`。
+
+### 修复
+
+- `backend/src/index.ts` 示例里 `/public/status` 比对的错误码 `MISSING_RESOURCE` 改为运行时
+  实际抛出的 `RESOURCE_NOT_DECLARED`。之前那个分支永远走不到，未声明的资源会被报成 `error` 而不是 `unavailable`。
 
 ## [3.0.0] - 2026-09-02
 
