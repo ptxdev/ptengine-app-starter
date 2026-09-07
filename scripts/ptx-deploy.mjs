@@ -10,13 +10,39 @@
  * 需要的环境变量：
  *   PTENGINE_TOKEN     部署凭据。**按 App 授权、可撤销**，别用账号级 token。
  *   PTENGINE_APP_ID    目标应用 id（在应用管理页可见）。
- *   PTENGINE_API_BASE  可选，默认线上。私有化/内部环境改这个。
+ *   PTENGINE_API_BASE  可选，覆盖默认域名。三套环境：
+ *                        production   https://xbackend.ptengine.com （默认）
+ *                        staging      https://stagingxbackend.ptengine.jp
+ *                        development  https://devxbackend.ptengine.cn
+ *
+ * `--stream` 时改走 NDJSON 流式发布端点，边发布边打印九步进度；不加则走同步 `/publish`，
+ * 跑完（约 20–40s，带后端时）一次性返回。
  */
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { readManifest } from './manifest.mjs';
 
-const DEFAULT_API_BASE = 'https://api.ptengine.io';
+const DEFAULT_API_BASE = 'https://xbackend.ptengine.com';
+
+// 错误信封 { error: { code, message, requestId } } -> 给用户看的话术。
+// 未命中的 code 打印 `code: message` 兜底。
+function describeError(body) {
+    const code = body?.error?.code;
+    const message = body?.error?.message;
+    switch (code) {
+        case 'DEPLOY_TOKEN_INVALID':
+            return 'PTENGINE_TOKEN 无效或已撤销：到 Ptengine X →「自定义应用管理」→ 部署令牌 重新生成';
+        case 'PUBLISH_BUSY':
+        case 'UPLOAD_BUSY':
+            return `平台繁忙（${code}），读 Retry-After 后重试`;
+        case 'PUBLISH_IN_PROGRESS':
+            return '该应用正在发布中';
+        case 'SECRET_NOT_SET':
+            return `${message}（到应用管理页的密钥管理页面补上）`;
+        default:
+            return code ? `${code}: ${message}` : (message ?? JSON.stringify(body));
+    }
+}
 
 function findZip(root, manifest) {
     const expected = `${manifest.id || 'ptengine-app'}-${manifest.version}.zip`;
@@ -47,17 +73,80 @@ async function callApi(base, path, token, init) {
         body = text;
     }
     if (!res.ok) {
-        const detail = typeof body === 'object' && body
-            ? (body.error?.message ?? body.message ?? JSON.stringify(body))
-            : String(body).slice(0, 400);
-        throw new Error(`${init?.method ?? 'GET'} ${path} -> ${res.status}\n      ${detail}`);
+        const retryAfter = res.headers.get('retry-after');
+        const detail = typeof body === 'object' && body?.error
+            ? describeError(body)
+            : (typeof body === 'object' && body ? (body.message ?? JSON.stringify(body)) : String(body).slice(0, 400));
+        const suffix = retryAfter ? `（Retry-After: ${retryAfter}s）` : '';
+        throw new Error(`${init?.method ?? 'GET'} ${path} -> ${res.status}\n      ${detail}${suffix}`);
     }
     return body;
+}
+
+/**
+ * 流式发布：POST .../publish/stream，逐行解析 NDJSON（begin/step/done/error）。
+ *
+ * ⚠️ 一旦开始写流，HTTP 状态码就定死 200 了——必须读完整个流才能判断真正成不成功，
+ * 不能只看请求本身有没有抛异常。
+ */
+async function publishStream(base, appId, versionId, token) {
+    const res = await fetch(
+        `${base}/api/custom-app/apps/${appId}/versions/${versionId}/publish/stream`,
+        { method: 'POST', headers: { authorization: `Bearer ${token}` } }
+    );
+    if (!res.ok) {
+        // 开流之前就失败（鉴权 / 并发闸 / 包未暂存等），状态码还是真的。
+        const text = await res.text();
+        let body;
+        try {
+            body = text ? JSON.parse(text) : null;
+        } catch {
+            body = text;
+        }
+        const retryAfter = res.headers.get('retry-after');
+        const detail = typeof body === 'object' && body?.error ? describeError(body) : String(body).slice(0, 400);
+        const suffix = retryAfter ? `（Retry-After: ${retryAfter}s）` : '';
+        throw new Error(`POST .../publish/stream -> ${res.status}\n      ${detail}${suffix}`);
+    }
+
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    let doneEvent = null;
+    let errorEvent = null;
+
+    for (;;) {
+        const { value, done: finished } = await reader.read();
+        if (finished) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop() ?? '';
+        for (const line of lines) {
+            if (!line.trim()) continue;
+            const ev = JSON.parse(line);
+            if (ev.type === 'step') {
+                console.log(`  [${ev.step}/9] ${ev.label}${ev.detail ? ` — ${ev.detail}` : ''}`);
+            } else if (ev.type === 'done') {
+                doneEvent = ev;
+            } else if (ev.type === 'error') {
+                errorEvent = ev;
+            }
+        }
+    }
+
+    if (errorEvent) {
+        throw new Error(describeError({ error: errorEvent }));
+    }
+    if (!doneEvent) {
+        throw new Error('流提前结束，发布结果未知（查服务端日志确认，或重新发起一次 --publish --stream）');
+    }
+    return doneEvent;
 }
 
 export async function run(args, root) {
     const dryRun = args.includes('--dry-run');
     const publish = args.includes('--publish');
+    const stream = args.includes('--stream');
 
     const manifest = readManifest(root);
     const zipPath = findZip(root, manifest);
@@ -73,7 +162,7 @@ export async function run(args, root) {
   后端        ${manifest.backend ? manifest.backend.entry : '（无）'}
   目标        ${base}
   应用 id     ${appId ?? '(未设置)'}
-  发布        ${publish ? '上传后立即发布' : '仅上传为草稿'}
+  发布        ${publish ? (stream ? '上传后立即发布（--stream 实时进度）' : '上传后立即发布') : '仅上传为草稿'}
 `);
 
     if (dryRun) {
@@ -118,10 +207,14 @@ export async function run(args, root) {
     }
 
     console.log('  -> 发布（含建资源、跑迁移、推后端、健康探针）');
-    await callApi(
-        base, `/api/custom-app/apps/${appId}/versions/${versionId}/publish`, token,
-        { method: 'POST' }
-    );
+    if (stream) {
+        await publishStream(base, appId, versionId, token);
+    } else {
+        await callApi(
+            base, `/api/custom-app/apps/${appId}/versions/${versionId}/publish`, token,
+            { method: 'POST' }
+        );
+    }
 
     console.log(`
 [ok] 已发布。前端与后端是同一个版本（${manifest.version} / ${versionId}）。
