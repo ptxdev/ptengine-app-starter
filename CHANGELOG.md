@@ -10,6 +10,7 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/app-backend` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|---|
+| v3.1.0 | `^1.2.0`（待 `2.0.0`） | `^0.1.0` | `^0.5.0` | **2** | `ptx deploy --stream`；`ptx doctor` 令牌泄漏检查；默认 API 域名改线上正式环境 |
 | v3.0.1 | `^2.0.0` | `^0.1.0`（npm） | `^0.5.0` | **2** | `@ptengine/app-backend` 首发到公共 npm，脚手架改为依赖它；修示例错误码；manifest 加 `id` |
 | v3.0.0 | `^2.0.0` | `file:../app-backend` | `^0.5.0` | **2** | **新增后端运行时**：每个应用一个 Worker，前后端同包同版本。目录结构变化（前端移到 `web/`）|
 | v2.0.0 | `^1.0.0` | — | `^0.4.0` | 1 | 宿主改真跨源 iframe + 桥换 postMessage；`on('change')` 移除、`timeRange` 改对象、取数放开到 18 个 queryType |
@@ -20,6 +21,26 @@
 | v1.1.0 | `^0.3.0` | — | `^0.3.0` | 1 | 预装 UI 组件库 + Tailwind，暗色跟随平台主题 |
 | v1.0.1 | `^0.3.0` | — | — | 1 | 支持在平台内加载本地 dev server 联调 |
 | v1.0.0 | `^0.2.0` | — | — | 1 | 首个版本 |
+
+## [3.1.0] - 2026-09-07
+
+### 新增
+
+- **`ptx deploy --publish --stream`**：改走 NDJSON 流式发布端点，九步各自完成时
+  立刻打印一行进度，不用像同步 `/publish` 那样干等 20–40 秒才看到结果。
+- **`ptx doctor` 新增「令牌没有进仓」检查**（体检项从 17 项增至 18 项）：对
+  `git ls-files` 列出的每个受版本控制文件扫部署令牌明文模式，命中直接报 bad。
+
+### 变更
+
+- 默认 API 域名改为线上正式环境 `https://xbackend.ptengine.com`（此前是占位域名，
+  从未真正指向过可用后端）；`PTENGINE_API_BASE` 可覆盖为 staging / development。
+- `@ptengine/app-backend` 确认为 `^0.1.0`（3.0.1 已改，本次未变）。
+
+### 说明
+
+- `@ptengine/app-sdk` 仍为 `^1.2.0`——`PtApp.auth.getAppToken()` 依赖的
+  `^2.0.0` 尚未发布，这是**已知阻塞项**。`2.0.0` 发布后再升级。
 
 ## [3.0.1] - 2026-09-07
 
