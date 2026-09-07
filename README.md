@@ -22,6 +22,8 @@ git clone --branch v3.0.0 --depth 1 https://github.com/ptxdev/ptengine-app-start
 cd my-app && rm -rf .git && git init
 ```
 
+> v3 分支在 GitLab 主仓维护，GitHub 是发布同步的镜像 —— 上面的 clone 地址不变。
+
 ```bash
 npm install
 npm run dev        # 同时起前端与后端，并签发真 token（鉴权链路本地跑通）
@@ -33,10 +35,9 @@ npm run package    # 组装可直接上传的 zip
 把 `npm run package` 产出的 zip 上传到 Ptengine X →「自定义应用管理」，
 或在 CI 里 `npx ptx deploy --publish`。
 
-> **⚠️ 平台前置依赖**：v3 的后端能力需要平台侧 App Runtime 已上线，
-> 且需要 `@ptengine/app-sdk` 提供 `PtApp.auth.getAppToken()`（^2.0.0）。
-> 在它们就绪之前，**`npm run dev` 的本地开发完全可用**，但上传后前端调
-> `/api/*` 会拿到一个说明性的错误。只要纯静态应用的话，把 `manifest.json` 的
+> **⚠️ 平台前置依赖**：上传/发布需要 Ptengine 后台已接入 App Runtime；
+> 未接入时 `ptx deploy` 会得到 404 或 401。**`npm run dev` 的本地开发不受影响，
+> 完全可用**。只要纯静态应用的话，把 `manifest.json` 的
 > `backend` 段删掉、`schemaVersion` 改回 `1` 即可。
 
 ## 用 AI 写这个应用？
@@ -237,8 +238,18 @@ jobs:
 
 先看看会做什么而不真发请求：`npx ptx deploy --dry-run`。
 
-> `PTENGINE_TOKEN` 请用**按应用授权、可撤销**的令牌，不要用账号级令牌 ——
-> CI 里任何一个恶意依赖都能读到它。
+要看实时进度（而不是等 20–40 秒一次性返回），加 `--stream`：
+
+```bash
+npx ptx deploy --publish --stream
+```
+
+> `PTENGINE_TOKEN` 在 Ptengine X →「自定义应用管理」→ 部署令牌 生成，
+> 按应用授权、可随时撤销；令牌只显示一次，请立刻存进 CI 的 secrets。
+> 不要用账号级令牌 —— CI 里任何一个恶意依赖都能读到它。
+>
+> **令牌绝不能进仓**——写死在代码、`.env` 提交、CI 配置文件明文都算。
+> `npx ptx doctor` 会扫已入库的文件，发现令牌明文会直接报 bad。
 
 ## ptx 命令
 
