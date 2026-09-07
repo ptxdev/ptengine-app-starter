@@ -40,7 +40,7 @@ function describeError(body) {
         case 'SECRET_NOT_SET':
             return `${message}（到应用管理页的密钥管理页面补上）`;
         default:
-            return code ? `${code}: ${message}` : (message ?? JSON.stringify(body));
+            return code ? (message ? `${code}: ${message}` : code) : (message ?? JSON.stringify(body));
     }
 }
 
@@ -115,23 +115,32 @@ async function publishStream(base, appId, versionId, token) {
     let doneEvent = null;
     let errorEvent = null;
 
+    const handleLine = (line) => {
+        if (!line.trim()) return;
+        const ev = JSON.parse(line);
+        if (ev.type === 'step') {
+            console.log(`  [${ev.step}/9] ${ev.label}${ev.detail ? ` — ${ev.detail}` : ''}`);
+        } else if (ev.type === 'done') {
+            doneEvent = ev;
+        } else if (ev.type === 'error') {
+            errorEvent = ev;
+        }
+    };
+
     for (;;) {
         const { value, done: finished } = await reader.read();
         if (finished) break;
         buf += dec.decode(value, { stream: true });
         const lines = buf.split('\n');
         buf = lines.pop() ?? '';
-        for (const line of lines) {
-            if (!line.trim()) continue;
-            const ev = JSON.parse(line);
-            if (ev.type === 'step') {
-                console.log(`  [${ev.step}/9] ${ev.label}${ev.detail ? ` — ${ev.detail}` : ''}`);
-            } else if (ev.type === 'done') {
-                doneEvent = ev;
-            } else if (ev.type === 'error') {
-                errorEvent = ev;
-            }
-        }
+        for (const line of lines) handleLine(line);
+    }
+
+    // reader 结束后 buf 里可能还剩最后一行（没有 trailing newline）——当成一行处理，
+    // 否则最后的 done/error 事件会被吞掉，误判成"流提前结束"。
+    if (buf.trim()) {
+        handleLine(buf);
+        buf = '';
     }
 
     if (errorEvent) {

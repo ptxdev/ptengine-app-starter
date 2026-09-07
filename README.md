@@ -300,7 +300,7 @@ npx ptx deploy --publish --stream
 `/__ptx/token` 端点需要 `ptx dev` 生成的密钥。它会返回 `PTX_DEV_KEY_MISSING` 说明这件事。
 
 **上线后调 `/api/*` 报"当前平台/SDK 还不支持 PtApp.auth"？** 平台侧 App Runtime
-或 `@ptengine/app-sdk@^2.0.0` 还没就绪，见页首的前置依赖说明。
+尚未接入，或 `@ptengine/app-sdk` 还是 ^1.2.0（需等待 2.0.0 发布后升级，见 CHANGELOG 3.1.0 阻塞项）。
 
 **后端报 `RESOURCE_NOT_DECLARED`？** `manifest.json` 的 `backend.resources` 里
 没把对应资源设为 `true`；本地还需要 `backend/wrangler.jsonc` 里有对应 binding。

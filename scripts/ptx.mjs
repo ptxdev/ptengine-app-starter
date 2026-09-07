@@ -37,6 +37,7 @@ ptx <command>
                需要环境变量 PTENGINE_TOKEN、PTENGINE_APP_ID
                可选 PTENGINE_API_BASE（默认线上）
                --publish  上传后立即发布
+               --stream   仅与 --publish 同用，流式打印九步进度
                --dry-run  只打印将要做什么，不实际发请求
   doctor     体检（改完代码、尤其是 AI 改完之后跑一次）
 `);
