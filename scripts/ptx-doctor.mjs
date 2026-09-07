@@ -13,6 +13,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { readManifest, validateManifest } from './manifest.mjs';
 import { parseJsonc } from './jsonc.mjs';
 
@@ -296,6 +297,42 @@ function checkGitignore(root) {
     );
 }
 
+/**
+ * 令牌没有进仓：部署令牌形如 `ptx_` + 43 位字符，一旦被 commit，撤销之前
+ * 谁拿到仓库历史都能拿它部署。对 `git ls-files` 列出的每个受版本控制的文件
+ * grep 这个模式——只查已入库的文件，不查 .gitignore 忽略掉的本地密钥文件
+ * （那些由 checkGitignore 另外兜底）。
+ */
+const TOKEN_RE = /\bptx_[A-Za-z0-9_-]{43}\b/;
+
+function checkTokenLeak(root) {
+    let files;
+    try {
+        const out = execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8' });
+        files = out.split('\n').filter(Boolean);
+    } catch (e) {
+        return warn('无法列出 git 追踪的文件，跳过令牌泄漏检查', '不是 git 仓库，或本机没有 git 可执行文件');
+    }
+
+    const hits = [];
+    for (const rel of files) {
+        let content;
+        try {
+            content = readFileSync(join(root, rel), 'utf8');
+        } catch {
+            continue; // 文件不存在（已删除未提交）或不是文本，跳过。
+        }
+        if (TOKEN_RE.test(content)) hits.push(rel);
+    }
+
+    if (hits.length === 0) return ok('没有在受版本控制的文件里发现部署令牌明文');
+    for (const rel of hits) {
+        bad(`文件 ${rel} 里出现了部署令牌明文，立即撤销并从历史里清掉`,
+            '到 Ptengine X →「自定义应用管理」→ 部署令牌 撤销旧令牌、生成新的，' +
+            '并把这个文件从 git 历史里清掉（不能只删掉这次改动，历史里还留着）');
+    }
+}
+
 // ─── 依赖漂移（需要网络，默认不查）──────────────────────────────────────
 
 async function checkDeps(root) {
@@ -364,6 +401,7 @@ export async function run(args, root) {
     checkBackend(root, manifest);
     checkScopeConsistency(root, manifest);
     checkGitignore(root);
+    checkTokenLeak(root);
 
     if (args.includes('--deps')) await checkDeps(root);
 
