@@ -350,6 +350,10 @@ npx ptx deploy --publish --stream
 
 `manifest.schemaVersion` 是**平台契约版本**，不是你的版本号。
 
+`ctx.vars` 需要 `@ptengine/app-backend` ≥ `0.2.0`：`0.x` 的 caret 不跨 minor，
+所以 `package.json` 里必须写 `^0.2.0`（写 `^0.1.0` 装到的运行时没有 `ctx.vars`）；
+改完区间要重跑一次 `npm install` 刷 `package-lock.json`。
+
 **已经在开发中的项目要不要升级脚手架？** 通常不需要 —— 脚手架是一次性起点，
 不是运行时依赖。只在两种情况下需要跟进：CHANGELOG 里出现 **major**
 （说明平台约定有破坏性变更，照该版本的「升级指引」改），或者想要新版本引入的能力
