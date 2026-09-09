@@ -89,8 +89,8 @@ PT_JWKS_JSON={"keys":[...]}
 
 - 这个文件**不需要你创建**：第一次 `npm run dev` 会生成它（里面先只有 `PT_JWKS_JSON`）。
   你自己加的行会被原样保留，`ptx dev` 只重写 `PT_` 开头的受管键
-- 值不要加引号（`API_BASE=https://a.test`，不是 `API_BASE="https://a.test"`）——
-  wrangler 会把引号也算进值里
+- 值一般不用加引号（`API_BASE=https://a.test` 即可）。wrangler 用 dotenv 规则解析：引号会被剥掉，所以 `API_BASE="https://a.test"` 也读到同一个值；
+  只有值里含空格或 `#`（未加引号时 `#` 之后会被当注释截掉）才需要用引号包住。
 - 改完要**重启 `npm run dev`** 才生效
 - `npm run doctor` 会把这个文件和 `manifest.json` 的声明对一遍：漏填必填项、
   或填了没声明的名字，都会给一条提醒
