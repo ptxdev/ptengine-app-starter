@@ -10,6 +10,7 @@
         "deploy": "node scripts/ptx.mjs deploy",
         "doctor": "node scripts/ptx.mjs doctor",
         "test": "node --test scripts/*.test.mjs",
+        "sync-rules": "node scripts/sync-rules.mjs",
         "ptx": "node scripts/ptx.mjs"
     },
     "dependencies": {

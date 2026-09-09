@@ -175,13 +175,22 @@ export default createApp<ApiRoutes>({
 "backend": {
     "resources": { "database": true, "kv": true, "files": false },
     "secrets": [{ "name": "SHOPIFY_TOKEN", "label": "Shopify Token", "required": true }],
+    "vars": [{ "name": "API_BASE", "required": false, "default": "https://api.shopify.com" }],
     "egress": ["api.shopify.com"]
 }
 ```
 
 - **`resources`** —— 平台代你创建 D1 / KV / R2 并挂上绑定，你不需要 Cloudflare 账号
 - **`secrets`** —— 只声明**名字**，值由你在应用管理页填。包里永远没有密钥
+- **`vars`** —— 非敏感配置项，同样只声明名字（可给 `default`），值在应用管理页填。
+  与 `secrets` **共用同一个环境变量命名空间**：同名会被判为冲突
 - **`egress`** —— 出站域名白名单。**缺省或空数组 = 完全禁止出站**
+
+> **校验规则从哪来。** `scripts/rules.json` 是 Ptengine 契约包的**生成快照**（名字正则、
+> `appId` 规则、各项上限、出站禁域表、合法 scope），由维护者跑
+> `PT_CONTRACT_DIR=../custom-app-contract npm run sync-rules` 更新，**不要手改**。
+> 好处是本地 `npm run doctor` 的判定与平台上传校验逐字一致。
+> 注意出站禁域表比早期版本更严：现在还包含 `ptmind.net` 与 `0.0.0.0`。
 
 ### 后端没有的能力
 

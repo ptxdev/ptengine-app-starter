@@ -7,16 +7,23 @@
  * 错误码与平台侧上传校验保持一致，方便对照文档。
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
 
-/** 平台目前认的 scope，写错会导致上传校验失败。 */
-const VALID_SCOPES = ['analytics:read', 'profile:read', 'user:read', 'ui:notify'];
+const require = createRequire(import.meta.url);
+/**
+ * 规则快照，由 `npm run sync-rules` 从 custom-app-contract 生成。**不要手改这个文件。**
+ *
+ * 以前 scope 表、出站禁域表、名字正则在这个脚本里各有一份字面量，与平台侧靠人眼同步 ——
+ * 于是本地校验通过、上传照样被拒。现在只有 contract 包这一份真相。
+ */
+export const RULES = require('./rules.json');
+
+const NAME_RE = new RegExp(RULES.name.pattern);
+const APP_ID_RE = new RegExp(RULES.appId.pattern);
 
 /** 图标扩展名白名单，与平台产物白名单一致。 */
 const ICON_EXT = ['.svg', '.png', '.jpg', '.jpeg', '.webp', '.ico'];
-
-/** 出站白名单里不允许出现的域 —— 禁止租户绕过网关直接打平台接口。 */
-const FORBIDDEN_EGRESS = ['ptengine.com', 'ptengine.io', 'ptengine.ai', 'ptmind.com', 'localhost', '127.0.0.1'];
 
 export function readManifest(root) {
     const path = join(root, 'manifest.json');
@@ -53,6 +60,16 @@ export function validateManifest(manifest, root) {
         fail('ENTRY_MISSING', 'manifest.entry 必填（默认 index.html）');
     }
 
+    // manifest.id 是可选的（平台在创建应用时也会分配），但写了就必须符合**创建**规则：
+    // 解析规则（RULES.appId.parsePattern，62 位）更宽，那是给边缘路由拆子域用的，不是创建口径。
+    if (manifest.id !== undefined) {
+        if (typeof manifest.id !== 'string' || !APP_ID_RE.test(manifest.id)) {
+            fail('APP_ID_INVALID', `manifest.id 必须匹配 ${RULES.appId.pattern}（最长 ${RULES.appId.maxLen} 字符）`);
+        } else if (RULES.appId.reserved.includes(manifest.id) || manifest.id.startsWith(RULES.appId.reservedPrefix)) {
+            fail('APP_ID_RESERVED', `"${manifest.id}" 是平台保留的应用标识（保留字或 "${RULES.appId.reservedPrefix}" 前缀）`);
+        }
+    }
+
     if (manifest.icon) {
         if (!ICON_EXT.some(ext => manifest.icon.toLowerCase().endsWith(ext))) {
             fail('ICON_EXT_INVALID',
@@ -68,9 +85,9 @@ export function validateManifest(manifest, root) {
             fail('SCOPES_INVALID', 'scopes 必须是数组');
         } else {
             for (const s of manifest.scopes) {
-                if (!VALID_SCOPES.includes(s)) {
+                if (!RULES.validScopes.includes(s)) {
                     fail('SCOPE_UNKNOWN',
-                        `scopes 里的 "${s}" 不是合法权限值。合法值：${VALID_SCOPES.join(' / ')}`);
+                        `scopes 里的 "${s}" 不是合法权限值。合法值：${RULES.validScopes.join(' / ')}`);
                 }
             }
             if (new Set(manifest.scopes).size !== manifest.scopes.length) {
@@ -106,31 +123,49 @@ export function validateManifest(manifest, root) {
             `backend.routes 当前只允许 ["/api/*"]，收到 ${JSON.stringify(be.routes)}`);
     }
 
-    // secrets：只声明名字，值由平台侧管理。名字必须是环境变量惯例，
-    // 因为它们最终会成为 worker env 上的键。
-    if (be.secrets) {
-        if (!Array.isArray(be.secrets)) {
-            fail('BACKEND_SECRETS_INVALID', 'backend.secrets 必须是数组');
-        } else {
-            for (const s of be.secrets) {
-                const name = typeof s === 'string' ? s : s?.name;
-                if (!name || !/^[A-Z][A-Z0-9_]*$/.test(name)) {
-                    fail('BACKEND_SECRET_NAME_INVALID',
-                        `密钥名 ${JSON.stringify(name)} 不合法，必须匹配 ^[A-Z][A-Z0-9_]*$`);
-                }
-                if (name && name.startsWith('PT_')) {
-                    fail('BACKEND_SECRET_NAME_RESERVED',
-                        `密钥名 ${name} 使用了平台保留前缀 PT_`);
-                }
+    // secrets / vars：都只声明名字（vars 可以带 default），值在产品内配置。
+    // 两者最终都会成为 worker env 上的键，所以名字规则与命名空间是同一套。
+    /** 两种写法归一：`"NAME"` 与 `{ name, required, default }`。 */
+    const declaredOf = items => (Array.isArray(items) ? items : []).map(s => (typeof s === 'string' ? { name: s, required: true } : { name: s?.name, required: s?.required !== false }));
+
+    /** 同名冲突两边都能看见，只报一次（同一处问题报两遍会让人以为有两个错）。 */
+    const conflictsReported = new Set();
+    const checkNames = (items, kind, otherNames) => {
+        const c = kind === 'var'
+            ? { invalid: 'BACKEND_VAR_NAME_INVALID', reserved: 'BACKEND_VAR_NAME_RESERVED', dup: 'BACKEND_VAR_DUPLICATED', many: 'BACKEND_VARS_TOO_MANY', max: RULES.limits.vars, label: '配置项' }
+            : { invalid: 'BACKEND_SECRET_NAME_INVALID', reserved: 'BACKEND_SECRET_NAME_RESERVED', dup: 'BACKEND_SECRET_DUPLICATED', many: 'BACKEND_SECRETS_TOO_MANY', max: RULES.limits.secrets, label: '密钥' };
+        if (items.length > c.max) fail(c.many, `${c.label}最多声明 ${c.max} 个，收到 ${items.length} 个`);
+        const seen = new Set();
+        for (const { name } of items) {
+            if (!name || !NAME_RE.test(name)) {
+                fail(c.invalid, `${c.label}名 ${JSON.stringify(name)} 不合法，必须匹配 ${RULES.name.pattern}`);
+                continue;
             }
+            if (name.startsWith(RULES.name.reservedPrefix)) fail(c.reserved, `${c.label}名 ${name} 使用了平台保留前缀 ${RULES.name.reservedPrefix}`);
+            if (seen.has(name)) fail(c.dup, `${c.label}名 ${name} 重复`);
+            if (otherNames.has(name) && !conflictsReported.has(name)) {
+                conflictsReported.add(name);
+                fail('BACKEND_VAR_CONFLICTS_SECRET', `${name} 同时被声明成配置项与密钥，它们是同一个环境变量命名空间`);
+            }
+            seen.add(name);
         }
-    }
+    };
+
+    if (be.secrets !== undefined && !Array.isArray(be.secrets)) fail('BACKEND_SECRETS_INVALID', 'backend.secrets 必须是数组');
+    if (be.vars !== undefined && !Array.isArray(be.vars)) fail('BACKEND_VARS_INVALID', 'backend.vars 必须是数组');
+    const secretsDeclared = declaredOf(be.secrets);
+    const varsDeclared = declaredOf(be.vars);
+    checkNames(secretsDeclared, 'secret', new Set(varsDeclared.map(v => v.name)));
+    checkNames(varsDeclared, 'var', new Set(secretsDeclared.map(s => s.name)));
 
     // egress：缺省或空数组 = 完全禁止出站（默认拒绝，不是默认允许）。
     if (be.egress !== undefined) {
         if (!Array.isArray(be.egress)) {
             fail('BACKEND_EGRESS_INVALID', 'backend.egress 必须是数组');
         } else {
+            if (be.egress.length > RULES.limits.egress) {
+                fail('BACKEND_EGRESS_TOO_MANY', `egress 最多 ${RULES.limits.egress} 条，收到 ${be.egress.length} 条`);
+            }
             for (const host of be.egress) {
                 if (typeof host !== 'string' || !host) {
                     fail('BACKEND_EGRESS_INVALID', `egress 项必须是非空字符串：${JSON.stringify(host)}`);
@@ -144,7 +179,7 @@ export function validateManifest(manifest, root) {
                     fail('BACKEND_EGRESS_TOO_BROAD', 'egress 不允许通配全部域名');
                 }
                 const bare = host.startsWith('*.') ? host.slice(2) : host;
-                if (FORBIDDEN_EGRESS.some(f => bare === f || bare.endsWith(`.${f}`))) {
+                if (RULES.forbiddenEgress.some(f => bare === f || bare.endsWith(`.${f}`))) {
                     fail('BACKEND_EGRESS_FORBIDDEN',
                         `egress 不允许包含平台自身或本机地址："${host}"`);
                 }

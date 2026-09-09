@@ -1,0 +1,50 @@
+{
+    "contractVersion": "0.1.0",
+    "appId": {
+        "pattern": "^[a-z0-9][a-z0-9-]{0,49}$",
+        "parsePattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+        "maxLen": 50,
+        "reserved": [
+            "www",
+            "api",
+            "admin",
+            "auth",
+            "app",
+            "apps",
+            "console",
+            "jwks",
+            "static",
+            "cdn",
+            "mail",
+            "ptengine"
+        ],
+        "reservedPrefix": "pt-"
+    },
+    "name": {
+        "pattern": "^[A-Z][A-Z0-9_]*$",
+        "reservedPrefix": "PT_"
+    },
+    "limits": {
+        "vars": 64,
+        "secrets": 64,
+        "egress": 32,
+        "configValueBytes": 4096
+    },
+    "forbiddenEgress": [
+        "ptengine.com",
+        "ptengine.io",
+        "ptengine.ai",
+        "ptmind.com",
+        "ptmind.net",
+        "localhost",
+        "127.0.0.1",
+        "0.0.0.0"
+    ],
+    "minCompatibilityDate": "2026-09-01",
+    "validScopes": [
+        "analytics:read",
+        "profile:read",
+        "user:read",
+        "ui:notify"
+    ]
+}
