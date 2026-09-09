@@ -329,6 +329,64 @@ export function checkMigrationsAdditive(root, manifest, results) {
     if (hits === 0) results.push({ level: 'ok', msg: `迁移只增不减（检查了 ${files.length} 个文件）` });
 }
 
+// ─── 配置项（vars / secrets 与本地 .dev.vars）───────────────────────────
+
+/**
+ * 配置项体检。
+ *
+ * 收录理由（符合本文件的收录标准：违反后不报错、现象不直观）：
+ *   · manifest 声明了必填 var 但 .dev.vars 没有 → `ptx dev` 起得来，第一个请求才 500，
+ *     报的是 VAR_NOT_DECLARED，指不到"你还没在本地填值"。
+ *   · .dev.vars 里有 manifest 没声明的名字 → **本地能跑、线上必挂**：线上只注入声明过的。
+ *
+ * 只给 warn 不给 bad：本地不填值是完全正常的中间状态（还没开始调那个接口），
+ * 而**发布**并不依赖 .dev.vars —— 线上的值在应用管理页填。
+ *
+ * 返回 { level, msg, why } 而不是直接打印，是为了能单测。
+ */
+export function checkVars(root, manifest) {
+    if (!manifest?.backend) return { level: 'ok', msg: '没有后端，跳过配置检查' };
+
+    /** 两种写法归一：`"NAME"` 与 `{ name, required, default }`。字符串 = 必填。 */
+    const normalize = items => (Array.isArray(items) ? items : []).map(v => (typeof v === 'string' ? { name: v, required: true } : { name: v?.name, required: v?.required !== false, default: v?.default }));
+    const declared = normalize(manifest.backend.vars);
+    // 密钥也写在同一个 .dev.vars 里，所以判"多余的名字"时它们同样算声明过。
+    const secrets = normalize(manifest.backend.secrets);
+
+    const path = join(root, 'backend', '.dev.vars');
+    const text = existsSync(path) ? readFileSync(path, 'utf8') : '';
+    const present = new Set(
+        text.split('\n')
+            .map(l => l.trim())
+            .filter(l => l && !l.startsWith('#'))
+            .map(l => l.split('=')[0]?.trim())
+            .filter(Boolean)
+    );
+
+    const missing = declared.filter(d => d.required && d.default === undefined && !present.has(d.name)).map(d => d.name);
+    // PT_JWKS_JSON 是 ptx dev 自己写进去的受管键，PT_ 整个前缀都归平台，不算"多余的名字"。
+    const declaredNames = new Set([...declared, ...secrets].map(d => d.name));
+    const extra = [...present].filter(n => !declaredNames.has(n) && !n.startsWith('PT_'));
+
+    if (missing.length) {
+        return {
+            level: 'warn',
+            msg: `backend/.dev.vars 缺少必填配置：${missing.join('、')}`,
+            why: `本地跑起来后第一个用到它的请求会以 VAR_NOT_DECLARED 500。在 backend/.dev.vars 里补上 ` +
+                 `${missing.map(n => `${n}=…`).join(' / ')}（与密钥同一个文件）。线上的值另在应用管理页的「配置」页签填。`
+        };
+    }
+    if (extra.length) {
+        return {
+            level: 'warn',
+            msg: `backend/.dev.vars 里有 manifest 没声明的名字：${extra.join('、')}`,
+            why: `线上**只注入 manifest 声明过的**名字，${extra.join('、')} 只在本地存在 —— 典型症状是"本地好好的，` +
+                 '上线就 VAR_NOT_DECLARED / SECRET_NOT_DECLARED"。把它们加进 manifest.backend.vars（非敏感）或 backend.secrets（敏感）。'
+        };
+    }
+    return { level: 'ok', msg: `配置项声明与 backend/.dev.vars 对得上（${declared.length} 项配置、${secrets.length} 项密钥）` };
+}
+
 // ─── 密钥与忽略项 ───────────────────────────────────────────────────────
 
 function checkGitignore(root) {
@@ -445,6 +503,7 @@ export async function run(args, root) {
     checkPtUiScope(root);
     checkRouting(root);
     checkBackend(root, manifest);
+    results.push(checkVars(root, manifest));
     checkScopeConsistency(root, manifest);
     checkMigrationsAdditive(root, manifest, results);
     checkGitignore(root);

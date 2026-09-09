@@ -30,6 +30,7 @@ test('规则来自 rules.json，不是脚本里另抄一份', () => {
     assert.equal(RULES.appId.parsePattern, '^[a-z0-9][a-z0-9-]{0,62}$');  // 解析规则，starter 不用它校验 manifest.id
     assert.equal(RULES.appId.reservedPrefix, 'pt-');
     assert.equal(RULES.limits.vars, 64);
+    assert.ok(RULES.name.reservedBindingNames.includes('DB'));   // Task 8.5 新增字段
     assert.equal(RULES.name.pattern, '^[A-Z][A-Z0-9_]*$');
 });
 
@@ -38,10 +39,13 @@ test('vars：字符串与对象两种形态都收', () => {
     assert.deepEqual(validateManifest(m, rootWith(m)).errors, []);
 });
 
-test('vars：名字非法 / PT_ 保留 / 重复 / 与 secrets 同名', () => {
+test('vars：名字非法 / PT_ 保留 / 内建 binding 名 / 重复 / 与 secrets 同名', () => {
     const bad = [
         [{ vars: ['api_base'] }, 'BACKEND_VAR_NAME_INVALID'],
         [{ vars: ['PT_ENV'] }, 'BACKEND_VAR_NAME_RESERVED'],
+        // DB / KV / FILES 既匹配名字正则、又不带 PT_ 前缀，只有 reservedBindingNames 能拦住它们。
+        [{ vars: ['DB'] }, 'BACKEND_VAR_NAME_RESERVED'],
+        [{ secrets: ['FILES'] }, 'BACKEND_SECRET_NAME_RESERVED'],
         [{ vars: ['A', 'A'] }, 'BACKEND_VAR_DUPLICATED'],
         [{ vars: ['TOKEN'], secrets: ['TOKEN'] }, 'BACKEND_VAR_CONFLICTS_SECRET']
     ];

@@ -10,6 +10,13 @@
  *
  * 刻意不做的事：不在 dev 下让后端跳过验签。跳过的话鉴权代码第一次真正被执行
  * 就是在线上，那是最难查的一类问题。
+ *
+ * 本地配置怎么注入的：**这里不做任何注入**。`wrangler dev` 原生读配置文件同目录下的
+ * `.dev.vars`，把每一行 `KEY=VALUE` 当成一个 env 变量绑上去（启动日志里那句
+ * "Using secrets defined in .dev.vars"）。下面 start('worker', …) 的 cwd 是 `backend/`，
+ * 而且**不传 `--var` 也不传 `--config`**，所以 `backend/.dev.vars` 一定会被读到 ——
+ * 密钥与普通配置共用这一个文件。已实测（wrangler 4.128.0）。
+ * 若哪天加了 `--config` 指到别处，就要在这里显式读 `.dev.vars` 并逐条 `--var NAME:VALUE` 补回来。
  */
 import { spawn } from 'node:child_process';
 import { generateDevKeys } from './dev-keys.mjs';
@@ -94,7 +101,8 @@ export async function run(args, root) {
             aud = ${aud}
 
   想模拟别的站点 / 权限：改 web/.ptx-dev-key.json 的 sid / scopes 后重启。
-  你自己的密钥（如 SHOPIFY_TOKEN）写在 backend/.dev.vars，ptx 不会覆盖它们。
+  密钥与普通配置都写在 backend/.dev.vars（一个文件，一行一个 KEY=VALUE），ptx 不会覆盖它们。
+  线上只注入 manifest.backend.secrets / backend.vars 声明过的名字。
 `);
 
     const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';

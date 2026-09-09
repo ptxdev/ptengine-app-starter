@@ -21,6 +21,8 @@ export const RULES = require('./rules.json');
 
 const NAME_RE = new RegExp(RULES.name.pattern);
 const APP_ID_RE = new RegExp(RULES.appId.pattern);
+/** `name.reservedBindingNames` 是较新的规则字段；老快照没有它时退化成空集合，不报错。 */
+const RESERVED_BINDINGS = new Set(RULES.name.reservedBindingNames ?? []);
 
 /** 图标扩展名白名单，与平台产物白名单一致。 */
 const ICON_EXT = ['.svg', '.png', '.jpg', '.jpeg', '.webp', '.ico'];
@@ -142,6 +144,10 @@ export function validateManifest(manifest, root) {
                 continue;
             }
             if (name.startsWith(RULES.name.reservedPrefix)) fail(c.reserved, `${c.label}名 ${name} 使用了平台保留前缀 ${RULES.name.reservedPrefix}`);
+            // worker 自带的 binding 名（DB / KV / FILES / PT_GATEWAY …）。DB 这类既匹配名字正则、
+            // 又不带 PT_ 前缀，上面两条都拦不住；不单独保留的话，发布期会为同一个名字生成两个
+            // binding（d1 + plain_text），把资源**遮掉** —— 表现是 ctx.db 突然变成一个字符串。
+            else if (RESERVED_BINDINGS.has(name)) fail(c.reserved, `${c.label}名 ${name} 是 worker 内建 binding 名，已被平台占用，必须改名`);
             if (seen.has(name)) fail(c.dup, `${c.label}名 ${name} 重复`);
             if (otherNames.has(name) && !conflictsReported.has(name)) {
                 conflictsReported.add(name);

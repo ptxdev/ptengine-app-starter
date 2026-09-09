@@ -22,7 +22,17 @@
     },
     "name": {
         "pattern": "^[A-Z][A-Z0-9_]*$",
-        "reservedPrefix": "PT_"
+        "reservedPrefix": "PT_",
+        "reservedBindingNames": [
+            "DB",
+            "KV",
+            "FILES",
+            "PT_APP",
+            "PT_JWKS_URL",
+            "PT_TOKEN_ISS",
+            "PT_TOKEN_AUD",
+            "PT_GATEWAY"
+        ]
     },
     "limits": {
         "vars": 64,

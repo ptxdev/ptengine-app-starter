@@ -70,8 +70,37 @@ npm run dev
 `aud` 不匹配、令牌过期、scope 不足这些线上才会遇到的问题，**本地就会现形**。
 
 - 想模拟别的站点 / 权限：改 `web/.ptx-dev-key.json` 的 `sid` / `scopes` 后重启
-- 自己的密钥（如 `SHOPIFY_TOKEN`）写在 `backend/.dev.vars`，`ptx dev` **不会覆盖**它们
+- **密钥与普通配置**都写在 `backend/.dev.vars`，`ptx dev` **不会覆盖**它们
 - 这两个文件都在 `.gitignore` 里，**绝不要提交**
+
+### 本地怎么填配置：`backend/.dev.vars`
+
+一个文件、一行一个 `KEY=VALUE`，**密钥和普通配置放在一起**（它们最终都是 worker
+`env` 上的键，本来就是同一个命名空间）：
+
+```
+# 你自己的（对应 manifest 的 backend.secrets / backend.vars）
+SHOPIFY_TOKEN=shpat_xxx
+API_BASE=https://api.example.com
+
+# --- 以下由 ptx dev 自动生成，请勿手改 ---
+PT_JWKS_JSON={"keys":[...]}
+```
+
+- 这个文件**不需要你创建**：第一次 `npm run dev` 会生成它（里面先只有 `PT_JWKS_JSON`）。
+  你自己加的行会被原样保留，`ptx dev` 只重写 `PT_` 开头的受管键
+- 值不要加引号（`API_BASE=https://a.test`，不是 `API_BASE="https://a.test"`）——
+  wrangler 会把引号也算进值里
+- 改完要**重启 `npm run dev`** 才生效
+- `npm run doctor` 会把这个文件和 `manifest.json` 的声明对一遍：漏填必填项、
+  或填了没声明的名字，都会给一条提醒
+
+> **本地是怎么注入的（已实测，不要再重跑一遍）。** `ptx dev` **自己不做任何注入**：
+> 它把 `wrangler dev` 的 cwd 设在 `backend/`，既不传 `--var` 也不传 `--config`，
+> 于是 wrangler 原生读同目录的 `.dev.vars`，逐行绑成 env 变量 —— 启动日志里那句
+> `Using secrets defined in .dev.vars` 就是它。想自己确认：
+> `printf 'PTX_SMOKE=hello\n' >> backend/.dev.vars`，加一个读 `env.PTX_SMOKE` 的
+> 路由，`npm run dev` 后请求它，拿到 `hello`。（wrangler 4.128.0 实测通过。）
 
 本地跑数据库迁移（在 `backend/` 下）：
 
@@ -183,14 +212,43 @@ export default createApp<ApiRoutes>({
 - **`resources`** —— 平台代你创建 D1 / KV / R2 并挂上绑定，你不需要 Cloudflare 账号
 - **`secrets`** —— 只声明**名字**，值由你在应用管理页填。包里永远没有密钥
 - **`vars`** —— 非敏感配置项，同样只声明名字（可给 `default`），值在应用管理页填。
-  与 `secrets` **共用同一个环境变量命名空间**：同名会被判为冲突
-- **`egress`** —— 出站域名白名单。**缺省或空数组 = 完全禁止出站**
+  与 `secrets` **共用同一个环境变量命名空间**：同名会被判为冲突。名字要匹配
+  `^[A-Z][A-Z0-9_]*$`，不能用 `PT_` 前缀，也不能占用 worker 内建 binding 名
+  （`DB` / `KV` / `FILES` / `PT_GATEWAY` …）—— 占了会在发布期生成两个同名 binding，
+  把资源**遮掉**（`ctx.db` 突然变成一个字符串）。两者各最多 64 条
+- **`egress`** —— 出站域名白名单。**缺省或空数组 = 完全禁止出站**，**最多 32 条**
 
 > **校验规则从哪来。** `scripts/rules.json` 是 Ptengine 契约包的**生成快照**（名字正则、
 > `appId` 规则、各项上限、出站禁域表、合法 scope），由维护者跑
 > `PT_CONTRACT_DIR=../custom-app-contract npm run sync-rules` 更新，**不要手改**。
 > 好处是本地 `npm run doctor` 的判定与平台上传校验逐字一致。
 > 注意出站禁域表比早期版本更严：现在还包含 `ptmind.net` 与 `0.0.0.0`。
+
+### 密钥 vs 配置
+
+`backend.secrets` 与 `backend.vars` 声明方式几乎一样、在 worker 里也都从
+`env` / `ctx` 上读，但它们是**两种东西**，选错了会踩坑：
+
+|  | `secrets`（密钥） | `vars`（配置项） |
+|---|---|---|
+| 值存在哪 | Cloudflare **Secrets Store** | 平台数据库 |
+| 填完能读回吗 | **不能**，管理页只显示"已设置" | 能，管理页能看到当前值 |
+| 改完何时生效 | **立即**（下一个请求就是新值） | **要重新发布**才生效 |
+| 适合放什么 | token、私钥、数据库口令 | 接口地址、开关、超时时间、ID |
+
+第三行是最容易踩的一条：配置项在**发布时**被当作 `plain_text` 值**拷进 worker**，
+所以它在管理页改完之后，线上跑的还是发布那一刻的值 —— 必须重新发布一版。
+密钥不是拷贝，是运行时从 Secrets Store 取，所以改了立即生效。
+
+推论：**别把要热改的东西放 `vars`**（比如一个想随时关掉的功能开关，走
+`vars` 得重新发一版）；也**别把密钥放 `vars`** —— `vars` 的值能被读回，
+而且会明文出现在 worker 配置里。
+
+`vars` 可以带 `default`，此时它是可选的（用户不填就用默认值）：
+
+```json
+"vars": [{ "name": "API_BASE", "required": false, "default": "https://api.example.com", "label": "第三方接口地址" }]
+```
 
 ### 后端没有的能力
 
@@ -217,10 +275,17 @@ user worker 不支持它，`triggers.crons` 会被**静默丢弃**（无报错�
 - **`schemaVersion` 有 `backend` 段就必须是 `2`**。写成 1 会让平台**静默忽略**后端，
   跑出一个"前端正常、所有 API 404"的应用 —— `npm run package` 会拦下这种情况
 - `version` 每次上传新版本**必须递增**
+- `id` 是**可选的**（平台创建应用时也会分配）。但写了就会被按创建口径校验：
+  匹配 `^[a-z0-9][a-z0-9-]{0,49}$`（**最长 50 字符**）、不能是保留字
+  （`www` / `api` / `admin` / `app` / `console` / `ptengine` …），也不能用
+  `pt-` 前缀（那是平台自己的官方应用命名空间）。完整名单见 `scripts/rules.json`
 - `scopes` 合法值只有四个：`analytics:read`、`profile:read`、`user:read`、`ui:notify`
 - `icon` 指向包内相对路径，文件必须真实存在（放 `web/public/assets/`）
 - `display_name` 只在你点「从应用包填入名称与图标」时被取用；平台显示的名字
   是你在工作区里给这个应用起的那个
+- 各项声明有上限：`backend.vars` / `backend.secrets` 各 64 条、
+  **`backend.egress` 32 条**（超了上传被拒，报 `BACKEND_EGRESS_TOO_MANY`）。
+  上限与出站禁域表一样来自 `scripts/rules.json`，`npm run doctor` 会先拦下来
 
 ## 自动化部署
 
@@ -316,6 +381,15 @@ npx ptx deploy --publish --stream
 
 **后端报 `SECRET_NOT_DECLARED`？** 密钥名没写进 `manifest.backend.secrets`，
 或本地没写进 `backend/.dev.vars`。
+
+**后端报 `VAR_NOT_DECLARED`？** 同一件事的配置项版本，按顺序查三处：
+
+1. 名字写进 `manifest.json` 的 `backend.vars` 了吗（**声明才会注入**）
+2. 线上：应用管理页的「**配置**」页签填了值吗（没 `default` 的必填项不填就没有值）；
+   刚改完值的话，注意**配置要重新发布才生效**（见「密钥 vs 配置」）
+3. 本地：`backend/.dev.vars` 里有这一行吗
+
+`npm run doctor` 会把 1 和 3 对一遍，直接告诉你缺哪个名字。
 
 **换成 Vue / Svelte 可以吗？** 前端可以，关键约定与框架无关（相对 `base`、
 根级 `manifest.json`、`entry` 一致）。后端固定是 Cloudflare Worker。

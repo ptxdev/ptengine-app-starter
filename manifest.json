@@ -24,6 +24,7 @@
         },
         "migrations": "_backend/migrations",
         "secrets": [],
+        "vars": [{ "name": "API_BASE", "required": false, "default": "https://api.example.com", "label": "第三方接口地址" }],
         "egress": [],
         "compatibilityDate": "2026-09-01"
     }
