@@ -9,6 +9,7 @@
         "package": "node scripts/ptx.mjs package",
         "deploy": "node scripts/ptx.mjs deploy",
         "doctor": "node scripts/ptx.mjs doctor",
+        "test": "node --test scripts/*.test.mjs",
         "ptx": "node scripts/ptx.mjs"
     },
     "dependencies": {

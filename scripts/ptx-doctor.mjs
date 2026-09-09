@@ -11,7 +11,7 @@
  *   npx ptx doctor            本地检查
  *   npx ptx doctor --deps     额外检查 @ptengine/* 依赖是否落后于 npm 最新版（需要网络）
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { readManifest, validateManifest } from './manifest.mjs';
@@ -283,6 +283,52 @@ function checkScopeConsistency(root, manifest) {
     );
 }
 
+/**
+ * 迁移必须**可加**（只增不减）。
+ *
+ * 平台的迁移只进不退：回滚会把前端与后端一起切回旧版本，但**数据库结构留在新的位置**。
+ * 所以一个 DROP COLUMN 会让「回滚到上个版本」变成「旧代码读一个已经不存在的列」——
+ * 而这在发布当时一切正常，只有真出事要回滚的那一刻才炸。
+ *
+ * 只给 warn 不给 bad：确实存在必须删列的场合（改名 = 新增 + 双写 + 删除，最后一步不可避免），
+ * 但那必须是**跨两次发布**、且明确接受"删列之后不能再回滚过去"的决定。
+ */
+const DESTRUCTIVE = [
+    [/\bDROP\s+TABLE\b/i, 'DROP TABLE'],
+    [/\bDROP\s+COLUMN\b/i, 'DROP COLUMN'],
+    [/\bALTER\s+TABLE\b[\s\S]*?\bRENAME\b/i, 'ALTER TABLE … RENAME']
+];
+
+/** 去掉 `--` 行注释与 SQL 块注释，避免把注释里的 DROP 当真。 */
+function stripSqlComments(sql) {
+    return sql.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ');
+}
+
+export function checkMigrationsAdditive(root, manifest, results) {
+    if (!manifest?.backend?.migrations) return;
+    const dir = join(root, 'backend', 'migrations');
+    if (!existsSync(dir)) return;   // 目录缺失由 validateManifest 报，别重复
+    const files = readdirSync(dir).filter(f => f.endsWith('.sql')).sort();
+    let hits = 0;
+    for (const f of files) {
+        const sql = stripSqlComments(readFileSync(join(dir, f), 'utf8'));
+        for (const [re, label] of DESTRUCTIVE) {
+            if (re.test(sql)) {
+                hits++;
+                results.push({
+                    level: 'warn',
+                    msg: `迁移 ${f} 里有 ${label}`,
+                    why: '迁移只进不退：平台回滚会把前端与后端切回旧版本，数据库结构留在新的位置。' +
+                         '删列/删表/改名之后，回滚到更早的版本就等于让旧代码读一个已经不存在的东西 —— ' +
+                         '发布当时一切正常，只有真要回滚那一刻才炸。要删就分两次发布做（先停止使用、下个版本再删），' +
+                         '并接受"删了之后回不去"。'
+                });
+            }
+        }
+    }
+    if (hits === 0) results.push({ level: 'ok', msg: `迁移只增不减（检查了 ${files.length} 个文件）` });
+}
+
 // ─── 密钥与忽略项 ───────────────────────────────────────────────────────
 
 function checkGitignore(root) {
@@ -400,6 +446,7 @@ export async function run(args, root) {
     checkRouting(root);
     checkBackend(root, manifest);
     checkScopeConsistency(root, manifest);
+    checkMigrationsAdditive(root, manifest, results);
     checkGitignore(root);
     checkTokenLeak(root);
 
