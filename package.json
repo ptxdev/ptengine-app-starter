@@ -15,7 +15,7 @@
     },
     "dependencies": {
         "@ptengine/app-backend": "^0.2.0",
-        "@ptengine/app-sdk": "^1.2.0",
+        "@ptengine/app-sdk": "^2.2.0",
         "@ptengine/design-components": "^0.5.0",
         "react": "^19.1.1",
         "react-dom": "^19.1.1"

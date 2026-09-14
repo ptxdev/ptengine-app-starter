@@ -11,6 +11,7 @@
  * 分区、且 XSS 可读。也**永不放进 URL**（会进日志、Referer、浏览器历史）。
  */
 
+import type { PtAppAuth } from '@ptengine/app-sdk';
 import { getPtApp } from './pt-app';
 
 /** 平台签发的 TTL 是 5 分钟；提前 60 秒续期，避免请求正好卡在过期边界。 */
@@ -58,16 +59,20 @@ async function mint(): Promise<string> {
         );
     }
 
-    // ⚠️ `PtApp.auth` 是本脚手架要求的平台新能力（@ptengine/app-sdk ^2.0.0）。
-    // 在它上线之前，这里会走到这个分支 —— 报一个说得清的错，而不是
-    // 让业务代码撞上 `undefined is not a function`。
-    const auth = (app as unknown as { auth?: { getAppToken?: () => Promise<string> } }).auth;
+    // ⚠️ 类型上 `PtApp.auth` 自 @ptengine/app-sdk 2.0.0 起是**必填**字段，但运行时注入
+    // `window.PtApp` 的是平台，不是这个包 —— 老版本平台注入的对象上可能根本没有 `auth`。
+    // 所以类型说「一定有」不等于真的有，这里仍要运行时兜底，报一个说得清的错，
+    // 而不是让业务代码撞上 `undefined is not a function`。
+    const auth: Partial<PtAppAuth> | undefined = app.auth;
     if (typeof auth?.getAppToken !== 'function') {
         throw new Error(
             '当前平台/SDK 还不支持 PtApp.auth.getAppToken()（需要 @ptengine/app-sdk ^2.0.0 ' +
             '与已上线 App Runtime 的平台版本）。在它可用之前，后端只能用 `ptx dev` 在本地联调。'
         );
     }
+    // 失败码见 `PT_BRIDGE_ERRORS`：`PT_AUTH_UNSUPPORTED`（应用没有后端，重试无用）、
+    // `PT_CONSENT_REQUIRED`（manifest.scopes 还没被工作区管理员同意，**可重试** ——
+    // 宿主会弹授权框，同意后再调一次即可）、`PT_HOST_UNAVAILABLE`（不在平台里）。
     return auth.getAppToken();
 }
 

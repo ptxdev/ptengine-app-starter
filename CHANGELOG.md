@@ -10,6 +10,7 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/app-backend` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|---|
+| 未发布 | `^2.2.0` | `^0.2.0` | `^0.5.0` | **2** | `@ptengine/app-sdk` 升到 2.x（`PtApp.auth.getAppToken()` 可用）；`@ptengine/app-backend` 升到 0.2.x（`ctx.vars`）|
 | v3.1.0 | `^1.2.0`（待 `2.0.0`） | `^0.1.0` | `^0.5.0` | **2** | `ptx deploy --stream`；`ptx doctor` 令牌泄漏检查；默认 API 域名改线上正式环境 |
 | v3.0.1 | `^2.0.0` | `^0.1.0`（npm） | `^0.5.0` | **2** | `@ptengine/app-backend` 首发到公共 npm，脚手架改为依赖它；修示例错误码；manifest 加 `id` |
 | v3.0.0 | `^2.0.0` | `file:../app-backend` | `^0.5.0` | **2** | **新增后端运行时**：每个应用一个 Worker，前后端同包同版本。目录结构变化（前端移到 `web/`）|
@@ -21,6 +22,37 @@
 | v1.1.0 | `^0.3.0` | — | `^0.3.0` | 1 | 预装 UI 组件库 + Tailwind，暗色跟随平台主题 |
 | v1.0.1 | `^0.3.0` | — | — | 1 | 支持在平台内加载本地 dev server 联调 |
 | v1.0.0 | `^0.2.0` | — | — | 1 | 首个版本 |
+
+## [未发布]
+
+### 变更
+
+- **`@ptengine/app-sdk` 区间升到 `^2.2.0`**（此前 `^1.2.0`）。`2.0.0` 起 `PtApp.auth.getAppToken()`
+  与 manifest 的 `backend` 段进入契约 —— 这正是本脚手架 `web/src/pt-auth.ts` 与 `manifest.json`
+  一直在用、却只能靠类型断言绕过去的两件事。3.1.0 记的那条「已知阻塞项」到此解除。
+  2.x 对本脚手架的**唯一破坏性变更**是 `PtApp` 新增必填字段 `auth`，只影响自己实现 `PtApp`
+  类型的代码；本脚手架只消费 `window.PtApp`，不受影响。2.1.0 / 2.2.0 是纯加法
+  （`PT_CONSENT_REQUIRED` 错误码、`data-query` 契约补字段）。
+- **`package-lock.json` 刷新**：`@ptengine/app-sdk` 锁到 `2.2.0`，`@ptengine/app-backend`
+  锁到 `0.2.0`。后者的区间在 3.1.0 之后就改成了 `^0.2.0`，但当时 `0.2.0` 还没发到 npm，
+  锁文件一直停在 `0.1.0`（装出来的运行时没有 `ctx.vars`）。
+- `web/src/pt-auth.ts` 去掉 `PtApp.auth` 的 `as unknown as` 断言，改用 SDK 导出的 `PtAppAuth`
+  类型。**运行时兜底保留** —— 注入 `window.PtApp` 的是平台而不是这个包，类型说「必填」不等于
+  老版本平台真的注入了 `auth`。同时补注释说明 `getAppToken()` 的三个失败码，其中
+  `PT_CONSENT_REQUIRED`（scopes 未经管理员同意）是**可重试**的。
+- 文档与注释里「contract 仓」的说法统一改为「monorepo 的 `packages/contract`」，
+  `PT_CONTRACT_DIR` 的示例路径相应改为 `../custom-app-platform/packages/contract`
+  （`scripts/sync-rules.mjs`、`scripts/manifest.mjs`、`README.md`；纯注释，无行为变化）。
+
+### 说明
+
+- **`manifest.json` 的 `sdkVersion` 保持 `"2.0.0"`，不跟着依赖区间走。** 这个字段声明的是
+  「这个应用需要的 SDK 契约下限」，不是开发时装到的精确版本：`packages/contract` 里没有任何
+  规则读它，`@ptengine/app-sdk` 的 schema 也只写了 `{"type": "string"}`、TS 侧是可选的
+  `sdkVersion?: string` —— 没有消费方，写精确版本只会误导「这个应用需要 2.2.0 的新能力」。
+  本脚手架用到的是 `PtApp.auth` 与 manifest `backend` 段，二者都是 2.0.0 引入的。
+  将来真用上 2.1+ 的新契约（比如按 `PT_CONSENT_REQUIRED` 分支、或热图查询传 `experienceId`）
+  时再抬这个下限。
 
 ## [3.1.0] - 2026-09-07
 

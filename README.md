@@ -220,7 +220,7 @@ export default createApp<ApiRoutes>({
 
 > **校验规则从哪来。** `scripts/rules.json` 是 Ptengine 契约包的**生成快照**（名字正则、
 > `appId` 规则、各项上限、出站禁域表、合法 scope），由维护者跑
-> `PT_CONTRACT_DIR=../custom-app-contract npm run sync-rules` 更新，**不要手改**。
+> `PT_CONTRACT_DIR=../custom-app-platform/packages/contract npm run sync-rules` 更新，**不要手改**。
 > 好处是本地 `npm run doctor` 的判定与平台上传校验逐字一致。
 > 注意出站禁域表比早期版本更严：现在还包含 `ptmind.net` 与 `0.0.0.0`。
 

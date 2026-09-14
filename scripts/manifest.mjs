@@ -12,7 +12,7 @@ import { join } from 'node:path';
 
 const require = createRequire(import.meta.url);
 /**
- * 规则快照，由 `npm run sync-rules` 从 custom-app-contract 生成。**不要手改这个文件。**
+ * 规则快照，由 `npm run sync-rules` 从 monorepo 的 `packages/contract` 生成。**不要手改这个文件。**
  *
  * 以前 scope 表、出站禁域表、名字正则在这个脚本里各有一份字面量，与平台侧靠人眼同步 ——
  * 于是本地校验通过、上传照样被拒。现在只有 contract 包这一份真相。
