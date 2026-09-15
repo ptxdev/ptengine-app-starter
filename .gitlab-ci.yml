@@ -1,0 +1,39 @@
+# ptengine-app-starter —— GitLab CI（脚手架仓自检）
+#
+# 这份 CI 检查的是**脚手架本身**能不能跑通：doctor / test / build / package。
+# `.github/workflows/deploy.yml` 不是本仓的 CI，而是给用户生成出来的应用用的部署模板
+# （打 v* tag 发布到线上），需要用户自己配 PTENGINE_TOKEN，这里不跑它。
+#
+# GitLab 是开发主仓，GitHub（ptxdev/ptengine-app-starter）是 push mirror 的公开镜像，
+# README 里的 `git clone --branch v3.0.0 https://github.com/...` 依赖镜像与 tag 同步。
+
+stages: [verify]
+
+default:
+  image: node:22
+  cache:
+    key:
+      files: [package-lock.json]
+    paths: [.npm/]
+
+verify:
+  stage: verify
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_TAG
+  script:
+    - node --version && npm --version
+    # 用 npm ci 而非 install：package.json 与 lockfile 不一致时必须让 CI 红
+    - npm ci --cache .npm --prefer-offline --no-audit --no-fund
+    # doctor 查的是「违反了也不报错」的约定（manifest 声明、.dev.vars 不进包等），放最前
+    - npm run doctor
+    - npm test
+    - npm run build
+    - npm run package
+    # 打出来的包里不得有本地密钥文件 / 源码目录
+    - ZIP=$(ls *.zip | head -1); echo "package: $ZIP"; unzip -l "$ZIP"
+    - '! unzip -l "$ZIP" | grep -E "\.dev\.vars|node_modules/|backend/src/"'
+  artifacts:
+    paths: ['*.zip']
+    expire_in: 1 week
