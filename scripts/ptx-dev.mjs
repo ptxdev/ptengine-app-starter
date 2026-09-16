@@ -5,6 +5,9 @@
  *   2. 起 wrangler dev（backend/）:8787 —— 本地 D1/KV 由 miniflare 模拟
  *   3. 起 vite dev（web/）:5173 —— /api 代理到 8787，/__ptx/token 用私钥签 token
  *
+ * 上面三步只在**有后端**时发生。轻应用（manifest.json 里没有 backend 段）只起 vite，
+ * 不生成密钥、不起 wrangler、也不配 /api 代理 —— 见 planDev()。
+ *
  * 于是前端拿到的是**真 token**、后端做的是**真验签**：aud 不匹配、过期、
  * scope 不足这些线上才会遇到的问题，本地就会现形。
  *
@@ -20,6 +23,7 @@
  */
 import { spawn } from 'node:child_process';
 import { generateDevKeys } from './dev-keys.mjs';
+import { readManifest, requireBackendResolution } from './manifest.mjs';
 
 /**
  * 端口可通过环境变量覆盖 —— 5173 被别的项目占着是很常见的情况，
@@ -36,12 +40,14 @@ const API_PORT = process.env.PTX_API_PORT || '8787';
 const children = [];
 let shuttingDown = false;
 
-function start(name, command, cmdArgs, cwd) {
+function start(name, command, cmdArgs, cwd, hasBackend = true) {
     const child = spawn(command, cmdArgs, {
         cwd,
         stdio: ['ignore', 'pipe', 'pipe'],
         shell: process.platform === 'win32',
-        env: { ...process.env, PTX_API_PORT: API_PORT, PTX_WEB_PORT: WEB_PORT }
+        // PTX_HAS_BACKEND 让 web/vite.config.ts 知道要不要配 /api 代理：
+        // 没有后端时配了代理，对 /api 的请求会变成一串 ECONNREFUSED 噪音。
+        env: { ...process.env, PTX_API_PORT: API_PORT, PTX_WEB_PORT: WEB_PORT, PTX_HAS_BACKEND: hasBackend ? '1' : '0' }
     });
 
     const prefix = `[${name}]`.padEnd(9);
@@ -88,10 +94,58 @@ function shutdown(code) {
 process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));
 
-export async function run(args, root) {
-    const { kid, aud, iss } = generateDevKeys(root);
+/**
+ * 这次 dev 要起哪些进程 —— 纯函数，不 spawn 任何东西，方便测。
+ *
+ * 轻应用（manifest 里没有 backend 段）只起 vite：没有 wrangler dev，
+ * 也就不需要 `.dev.vars` 与那对临时签名密钥。以前这里无条件起 wrangler，
+ * 删掉 backend/ 之后第一句话就是 `ENOENT backend/wrangler.jsonc`。
+ *
+ * @returns {{ hasBackend: boolean, procs: Array<{name,command,args,cwd}> }}
+ */
+export function planDev(manifest, root, { webPort = WEB_PORT, apiPort = API_PORT, extraArgs = [] } = {}) {
+    const { enabled: hasBackend } = requireBackendResolution(manifest, root);
+    const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+    const procs = [];
 
-    console.log(`
+    if (hasBackend) {
+        procs.push({
+            name: 'worker',
+            command: npx,
+            args: ['wrangler', 'dev', '--port', apiPort, '--local', ...extraArgs],
+            cwd: `${root}/backend`
+        });
+    } else if (extraArgs.length > 0) {
+        console.log(`  [!] 纯前端应用，没有 wrangler dev，忽略透传参数：${extraArgs.join(' ')}`);
+    }
+
+    procs.push({
+        name: 'web',
+        command: npx,
+        args: ['vite', '--port', webPort, '--strictPort'],
+        cwd: `${root}/web`
+    });
+
+    return { hasBackend, procs };
+}
+
+export async function run(args, root) {
+    const manifest = readManifest(root);
+    const { hasBackend, procs } = planDev(manifest, root, { extraArgs: args });
+
+    if (!hasBackend) {
+        console.log(`
+  本地开发已就绪（纯前端模式 —— 这个应用没有后端）
+
+    前端    http://localhost:${WEB_PORT}
+
+  manifest.json 里没有 backend 段，所以不起 wrangler dev、也不生成本地签名密钥。
+  /api 没有人接（vite 不会为它配代理），前端请直接用 PtApp 的宿主能力。
+  想加后端：恢复 backend/ 目录，并在 manifest.json 里补回 backend 段 + schemaVersion: 2。
+`);
+    } else {
+        const { kid, aud, iss } = generateDevKeys(root);
+        console.log(`
   本地开发已就绪（鉴权是真的，不是绕过的）
 
     前端    http://localhost:${WEB_PORT}
@@ -104,11 +158,7 @@ export async function run(args, root) {
   密钥与普通配置都写在 backend/.dev.vars（一个文件，一行一个 KEY=VALUE），ptx 不会覆盖它们。
   线上只注入 manifest.backend.secrets / backend.vars 声明过的名字。
 `);
+    }
 
-    const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-
-    start('worker', npx, ['wrangler', 'dev', '--port', API_PORT, '--local', ...args],
-        `${root}/backend`);
-    start('web', npx, ['vite', '--port', WEB_PORT, '--strictPort'],
-        `${root}/web`);
+    for (const p of procs) start(p.name, p.command, p.args, p.cwd, hasBackend);
 }

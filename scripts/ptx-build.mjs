@@ -10,9 +10,24 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { readManifest } from './manifest.mjs';
+import { readManifest, requireBackendResolution } from './manifest.mjs';
 
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+
+/**
+ * `tsc -b` 要构建哪些 project。
+ *
+ * 根 `tsconfig.json` 的 references 里写着 `./backend`，轻应用把 backend/ 删掉之后
+ * `tsc -b` 会以 `TS5083: Cannot read file .../backend/tsconfig.json` 直接失败 ——
+ * 而这跟用户改的任何一行代码都无关。与其让用户去改 tsconfig.json（那是
+ * "脚手架要求你维护它自己的内部文件"，很糟），不如在没有后端时显式只构建 web：
+ * `tsc -b web` 不读根 tsconfig，自然也就不碰那条 backend 引用。
+ *
+ * web/tsconfig.json 的 include 已经含 `../shared/**\/*.ts`，所以 shared 仍然被检查。
+ */
+export function typeCheckArgs(hasBackend) {
+    return hasBackend ? ['tsc', '-b'] : ['tsc', '-b', 'web'];
+}
 
 function step(label, fn) {
     console.log(`  -> ${label}`);
@@ -22,10 +37,10 @@ function step(label, fn) {
 export async function run(_args, root) {
     console.log('');
     const manifest = readManifest(root);
-    const hasBackend = Boolean(manifest.backend);
+    const { enabled: hasBackend } = requireBackendResolution(manifest, root);
 
-    step('类型检查（web + backend + shared）', () => {
-        execFileSync(npx, ['tsc', '-b'], { cwd: root, stdio: 'inherit' });
+    step(hasBackend ? '类型检查（web + backend + shared）' : '类型检查（web + shared）', () => {
+        execFileSync(npx, typeCheckArgs(hasBackend), { cwd: root, stdio: 'inherit' });
     });
 
     step('构建前端', () => {
@@ -33,7 +48,7 @@ export async function run(_args, root) {
     });
 
     if (!hasBackend) {
-        console.log('  -> 跳过后端（manifest.json 里没有 backend 段）');
+        console.log('  -> 跳过后端（manifest.json 里没有 backend 段，纯前端应用）');
         console.log('\n[ok] 构建完成。接下来跑 `npm run package`。\n');
         return;
     }

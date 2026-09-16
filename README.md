@@ -37,8 +37,7 @@ npm run package    # 组装可直接上传的 zip
 
 > **⚠️ 平台前置依赖**：上传/发布需要 Ptengine 后台已接入 App Runtime；
 > 未接入时 `ptx deploy` 会得到 404 或 401。**`npm run dev` 的本地开发不受影响，
-> 完全可用**。只要纯静态应用的话，把 `manifest.json` 的
-> `backend` 段删掉、`schemaVersion` 改回 `1` 即可。
+> 完全可用**。只要纯静态应用的话，见下面的 [轻应用（只要前端）](#轻应用只要前端)。
 
 ## 用 AI 写这个应用？
 
@@ -257,6 +256,45 @@ export default createApp<ApiRoutes>({
 「后端**没有**的能力」。其中 Cron 特别值得注意：Workers for Platforms 的
 user worker 不支持它，`triggers.crons` 会被**静默丢弃**（无报错、定时永不触发）。
 定时能力要等平台侧调度器。
+
+## 轻应用（只要前端）
+
+不少应用根本不需要后端 —— 数据从 `PtApp.data.query()` 取，交互用 `PtApp.ui`。
+这种情况**删两个东西就行，其余命令照常**：
+
+```bash
+rm -rf backend/
+```
+
+然后改 `manifest.json`：删掉整个 `backend` 段，`schemaVersion` 改回 `1`。
+
+```jsonc
+{
+    "id": "my-app",
+    "schemaVersion": 1,        // 2 是"带后端"的 schema，纯前端回 1 可兼容更老的平台版本
+    "version": "1.0.0",
+    "entry": "index.html",
+    // ... 其余不变，不要有 "backend": { ... }
+}
+```
+
+**不需要改 `tsconfig.json`、`package.json` 或任何 `scripts/` 下的文件。**
+`npm run dev` / `doctor` / `build` / `package` / `deploy` 全部照常跑，会自动切成纯前端模式：
+
+| 命令 | 有后端 | 轻应用 |
+|---|---|---|
+| `npm run dev` | vite + `wrangler dev` + 本地签发真 token，`/api` 代理到 8787 | **只起 vite**；不生成密钥、不配 `/api` 代理，横幅会写「纯前端模式」 |
+| `npm run build` | `tsc -b`（web + backend + shared）+ vite build + wrangler bundle | `tsc -b web`（web + shared）+ vite build |
+| `npm run package` | zip 里含 `_backend/` | zip 只有前端产物 |
+
+判定源**只有 `manifest.json`**（有没有 `backend` 段），`backend/` 目录在不在只用来对账：
+
+- manifest 有 `backend` 段、目录却不在 → 直接报错（不然你只会看到一句
+  `ENOENT backend/wrangler.jsonc`，指不到真正原因）；
+- manifest 没有 `backend` 段、目录还在 → 警告并按纯前端继续。这通常是改了一半：
+  代码还在，但上传后所有 `/api` 请求都会 404。
+
+反过来，给轻应用加回后端：恢复 `backend/` 目录，并把 `backend` 段与 `schemaVersion: 2` 写回 manifest。
 
 ## manifest.json
 

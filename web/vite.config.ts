@@ -108,8 +108,12 @@ export default defineConfig({
          *
          * 这样本地也是**同源**调用（跟线上 `<appId>.app.ptengine.ai` 一致），
          * 不需要在前端代码里区分环境写不同的 baseURL，也不需要任何 CORS 配置。
+         *
+         * 轻应用（manifest.json 里没有 backend 段）根本没有 wrangler dev 可代理，
+         * `ptx dev` 会传 PTX_HAS_BACKEND=0 —— 此时不配代理，免得每个 /api 请求
+         * 都变成一条 ECONNREFUSED 噪音，掩盖真正的错误。
          */
-        proxy: {
+        proxy: process.env.PTX_HAS_BACKEND === '0' ? undefined : {
             '/api': {
                 // 端口由 ptx dev 通过 env 传进来（PTX_API_PORT），
                 // 保证代理指向的就是真正起起来的那个 wrangler dev。

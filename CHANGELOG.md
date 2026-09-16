@@ -10,7 +10,7 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/app-backend` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|---|
-| 未发布 | `^2.2.0` | `^0.2.0` | `^0.5.0` | **2** | `@ptengine/app-sdk` 升到 2.x（`PtApp.auth.getAppToken()` 可用）；`@ptengine/app-backend` 升到 0.2.x（`ctx.vars`）|
+| 未发布 | `^2.2.0` | `^0.2.0` | `^0.5.0` | **2**（轻应用 1）| `@ptengine/app-sdk` 升到 2.x（`PtApp.auth.getAppToken()` 可用）；`@ptengine/app-backend` 升到 0.2.x（`ctx.vars`）；轻应用（无后端）零改动可用 |
 | v3.1.0 | `^1.2.0`（待 `2.0.0`） | `^0.1.0` | `^0.5.0` | **2** | `ptx deploy --stream`；`ptx doctor` 令牌泄漏检查；默认 API 域名改线上正式环境 |
 | v3.0.1 | `^2.0.0` | `^0.1.0`（npm） | `^0.5.0` | **2** | `@ptengine/app-backend` 首发到公共 npm，脚手架改为依赖它；修示例错误码；manifest 加 `id` |
 | v3.0.0 | `^2.0.0` | `file:../app-backend` | `^0.5.0` | **2** | **新增后端运行时**：每个应用一个 Worker，前后端同包同版本。目录结构变化（前端移到 `web/`）|
@@ -25,7 +25,28 @@
 
 ## [未发布]
 
+### 修复
+
+- **轻应用（只有前端、没有后端）现在零改动可用**。删掉 `backend/` 目录、去掉 `manifest.json`
+  的 `backend` 段之后，此前 `npm run build` 会挂在 `TS5083: Cannot read file .../backend/tsconfig.json`
+  （根 `tsconfig.json` 的 `references` 仍引用 `./backend`），`npm run dev` 会挂在
+  `ENOENT backend/wrangler.jsonc`（无条件起 `wrangler dev`）。两个报错都与用户写的代码无关，
+  而且修法是「去改脚手架自己的内部文件」——最糟的那种要求。现在：
+  - `ptx build` 无后端时跑 `tsc -b web`（不读根 tsconfig，自然绕开那条 `./backend` 引用；
+    `web/tsconfig.json` 的 `include` 已含 `../shared`，共享类型照样被检查），
+    **用户不需要改 `tsconfig.json`**；
+  - `ptx dev` 无后端时只起 vite，不生成本地签名密钥、不写 `.dev.vars`、不起 wrangler，
+    并通过 `PTX_HAS_BACKEND=0` 让 `web/vite.config.ts` 跳过 `/api` 代理
+    （否则每个 `/api` 请求都是一条 ECONNREFUSED 噪音）。启动横幅区分「纯前端模式」与带鉴权的完整模式。
+
 ### 变更
+
+- **「有没有后端」的判定收敛到一个函数**：`scripts/manifest.mjs` 的 `resolveBackend()`，
+  `ptx build` / `ptx dev` / `ptx doctor` 共用。**唯一判定源是 `manifest.json` 的 `backend` 段
+  （且 `schemaVersion: 2`）**——manifest 是与平台的合同，`backend/` 目录只是残留物。
+  目录只做一致性检查：manifest 有 backend 而目录不在 → 报错并说清两条修法；
+  manifest 没 backend 而目录还在 → 警告并按纯前端继续（这是「轻应用改了一半」的典型现场，
+  上传后所有 `/api` 会 404）。
 
 - **`@ptengine/app-sdk` 区间升到 `^2.2.0`**（此前 `^1.2.0`）。`2.0.0` 起 `PtApp.auth.getAppToken()`
   与 manifest 的 `backend` 段进入契约 —— 这正是本脚手架 `web/src/pt-auth.ts` 与 `manifest.json`

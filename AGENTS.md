@@ -11,6 +11,12 @@
 
 前后端**打在同一个 zip 里、同一个版本号、一起发布一起回滚**。
 
+**也可以没有后端**（「轻应用」）：删掉 `backend/` 目录、去掉 `manifest.json` 的 `backend` 段、
+`schemaVersion` 改回 `1` —— 就这两步，`tsconfig.json` 与 `scripts/` 都不用动，
+`dev` / `doctor` / `build` / `package` / `deploy` 全部照常，会自动切成纯前端模式
+（`dev` 只起 vite、没有 `/api`；`build` 只跑 `tsc -b web`）。判定源只有 `manifest.json`，
+`backend/` 目录在不在只用来对账（少了报错、多了警告）。详见 README 的「轻应用（只要前端）」。
+
 在这里写代码前，先把下面「硬边界」看完 —— 违反它们的失败现象大多**不报错**
 （白屏、没样式、上传被拒、线上 401），靠试很难收敛。
 
@@ -258,6 +264,7 @@ const res = await window.PtApp.data.query({
 
 ```bash
 npm run dev        # 同时起 vite（前端）与 wrangler dev（后端），并签发真 token
+                   # 轻应用（manifest 无 backend 段）只起 vite，横幅会写「纯前端模式」
 ```
 
 端口冲突时：`PTX_WEB_PORT=5273 PTX_API_PORT=8887 npm run dev`

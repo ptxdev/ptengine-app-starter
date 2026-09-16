@@ -40,6 +40,66 @@ export function readManifest(root) {
 }
 
 /**
+ * 这个项目到底有没有后端 —— **唯一判定源是 manifest.json**。
+ *
+ * 为什么不看 `backend/` 目录：目录是"残留物"，manifest 才是平台的合同。
+ * 只要 manifest 里没有 backend 段，平台就不会为这个应用起 worker，`/api/*`
+ * 一律 404；此时本地还去 tsc/wrangler 编译一个根本不会被部署的目录，
+ * 只会带来"本地报错但其实无关"的噪音。
+ *
+ * 目录只用来做**一致性检查**，两种不一致各有各的坑：
+ *   - manifest 有 backend、目录没了 → 直接报错。继续走下去会是一句
+ *     `ENOENT backend/wrangler.jsonc`，指不到真正原因。
+ *   - manifest 没 backend、目录还在 → 只警告并忽略。这是"轻应用"改造改了一半
+ *     的典型现场：代码还在，但上传后所有 API 都会 404。
+ *
+ * @returns {{ enabled: boolean, declared: boolean, dirExists: boolean,
+ *             errors: string[], warnings: string[] }}
+ */
+export function resolveBackend(manifest, root) {
+    const declared = Boolean(manifest?.backend);
+    const dirExists = existsSync(join(root, 'backend'));
+    const errors = [];
+    const warnings = [];
+
+    if (declared && manifest.schemaVersion !== 2) {
+        // 与 validateManifest 的 BACKEND_REQUIRES_SCHEMA_2 同一口径。
+        errors.push(
+            'manifest.json 声明了 backend 段，但 schemaVersion 不是 2 —— ' +
+            '旧平台会静默忽略后端，跑出一个"前端正常、所有 API 404"的应用。' +
+            '要么把 schemaVersion 改成 2，要么删掉 backend 段（轻应用）。'
+        );
+    }
+    if (declared && !dirExists) {
+        errors.push(
+            'manifest.json 声明了 backend 段，但 backend/ 目录不存在。' +
+            '如果这是一个只有前端的轻应用，把 manifest.json 里的 backend 段删掉、' +
+            'schemaVersion 改回 1；否则把 backend/ 恢复回来。'
+        );
+    }
+    if (!declared && dirExists) {
+        warnings.push(
+            '存在 backend/ 目录，但 manifest.json 里没有 backend 段 —— ' +
+            '按纯前端应用处理，backend/ 不会被构建也不会被打包。' +
+            '如果确实不要后端了，把 backend/ 删掉；如果要，补回 manifest.backend 并把 schemaVersion 设为 2。'
+        );
+    }
+
+    return { enabled: declared && errors.length === 0, declared, dirExists, errors, warnings };
+}
+
+/**
+ * resolveBackend 的命令行外壳：打印警告，有错误就抛。
+ * ptx build / ptx dev 共用，保证两个命令的口径与文案完全一致。
+ */
+export function requireBackendResolution(manifest, root) {
+    const res = resolveBackend(manifest, root);
+    for (const w of res.warnings) console.log(`  [!] ${w}`);
+    if (res.errors.length > 0) throw new Error(res.errors.join('\n    '));
+    return res;
+}
+
+/**
  * 校验 manifest 自身的自洽性（不依赖构建产物）。
  *
  * @returns {{ errors: string[], warnings: string[] }}

@@ -14,7 +14,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { readManifest, validateManifest } from './manifest.mjs';
+import { readManifest, resolveBackend, validateManifest } from './manifest.mjs';
 import { parseJsonc } from './jsonc.mjs';
 
 const results = [];
@@ -151,9 +151,15 @@ function checkRouting(root) {
 // ─── 后端边界 ───────────────────────────────────────────────────────────
 
 function checkBackend(root, manifest) {
+    // 判定源只有 manifest（与 ptx build / ptx dev 同一个函数，口径不会漂）。
+    const be = resolveBackend(manifest, root);
+    for (const e of be.errors) bad(e, 'manifest 与目录结构不一致，ptx build / ptx dev 会直接失败');
+    for (const w of be.warnings) warn(w, '改了一半的轻应用：上传后所有 /api 请求都会 404');
+
     if (!manifest.backend) {
-        return ok('没有 backend 段（纯静态应用）');
+        return be.warnings.length > 0 ? undefined : ok('没有 backend 段（纯静态应用）');
     }
+    if (!be.dirExists) return;
 
     const idx = read(root, 'backend/src/index.ts');
     if (!idx) return bad('backend/src/index.ts 不存在', 'manifest 声明了后端但没有代码');
