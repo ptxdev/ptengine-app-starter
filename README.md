@@ -18,7 +18,7 @@ my-app/
 取一个正式版本（推荐，而不是直接 clone 主分支）：
 
 ```bash
-git clone --branch v3.0.0 --depth 1 https://github.com/ptxdev/ptengine-app-starter.git my-app
+git clone --branch v3.2.0 --depth 1 https://github.com/ptxdev/ptengine-app-starter.git my-app
 cd my-app && rm -rf .git && git init
 ```
 
