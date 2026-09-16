@@ -325,7 +325,7 @@ function StandaloneMode() {
                     <Badge variant="secondary">独立模式</Badge>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                    这个页面没有由 Ptengine X 托管，所以拿不到宿主能力（window.PtApp）。
+                    这个页面没有由 Ptengine 托管，所以拿不到宿主能力（window.PtApp）。
                     但它仍然会真实调用自己的后端 —— 下面每一行都是一次实际请求的结果。
                 </p>
             </header>
@@ -396,8 +396,8 @@ function StandaloneMode() {
                         </div>
                     )}
                     <p className="mt-3 text-xs text-muted-foreground">
-                        业务接口需要 App Token，而令牌由 Ptengine X 平台在 iframe 里下发。
-                        要看完整功能，把这个应用装进 Ptengine X；本地开发用{' '}
+                        业务接口需要 App Token，而令牌由 Ptengine 平台在 iframe 里下发。
+                        要看完整功能，把这个应用装进 Ptengine；本地开发用{' '}
                         <code className="rounded-sm bg-secondary px-1">npm run dev</code>。
                     </p>
                 </CardContent>

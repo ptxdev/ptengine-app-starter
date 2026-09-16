@@ -33,7 +33,7 @@ ptx <command>
   dev        本地开发（vite + wrangler dev + 本地令牌签发）
   build      类型检查 + 构建前端与后端
   package    组装 zip（含结构自检）
-  deploy     上传到 Ptengine X
+  deploy     上传到 Ptengine
                需要环境变量 PTENGINE_TOKEN、PTENGINE_APP_ID
                可选 PTENGINE_API_BASE（默认线上）
                --publish  上传后立即发布

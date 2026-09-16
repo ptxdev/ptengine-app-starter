@@ -93,7 +93,7 @@ export default defineConfig({
         /**
          * ⚠️ 必须开 CORS，否则平台的「本地开发 / dev 模式」加载不出来。
          *
-         * 该模式下是 Ptengine X **平台 app 的 origin** 去 fetch 本地 dev server 的入口
+         * 该模式下是 Ptengine **平台 app 的 origin** 去 fetch 本地 dev server 的入口
          * HTML（微前端 iframe 加载），端口/域不同即为跨源；Vite 6+ 默认把 dev server
          * 限制成同源，会直接挡掉。用 `true`（反射请求 Origin）而不是列白名单：
          * 同一个 dev server 会被线上平台域、内部 dev 平台域分别 fetch，反射一份就都覆盖。

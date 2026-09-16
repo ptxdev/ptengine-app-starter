@@ -1,5 +1,5 @@
 /**
- * ptx deploy —— 把打好的 zip 上传到 Ptengine X，可选立即发布。
+ * ptx deploy —— 把打好的 zip 上传到 Ptengine，可选立即发布。
  *
  * 这是"整个过程自动化"的最后一环：CI 里打个 tag，线上就更新了，前后端一起。
  *
@@ -31,7 +31,7 @@ function describeError(body) {
     const message = body?.error?.message;
     switch (code) {
         case 'DEPLOY_TOKEN_INVALID':
-            return 'PTENGINE_TOKEN 无效或已撤销：到 Ptengine X →「自定义应用管理」→ 部署令牌 重新生成';
+            return 'PTENGINE_TOKEN 无效或已撤销：到 Ptengine →「自定义应用管理」→ 部署令牌 重新生成';
         case 'PUBLISH_BUSY':
         case 'UPLOAD_BUSY':
             return `平台繁忙（${code}），读 Retry-After 后重试`;

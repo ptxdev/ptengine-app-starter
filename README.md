@@ -1,132 +1,100 @@
 # Ptengine App Starter
 
-开发 **Ptengine X 自定义应用**（Custom App）的官方脚手架。**v3 起同时带前端与后端** ——
-克隆下来就能写业务代码，构建、打包、部署所需的约定都已配好。
+> [English](README.md) | [中文](README.zh-CN.md)
 
-```
-my-app/
-├── manifest.json        应用声明（schemaVersion 2，含 backend 段）
-├── web/                 前端：静态产物，平台以 iframe 加载
-├── backend/             后端：一个 Cloudflare Worker，只服务 /api/*
-└── shared/api.ts        前后端共享的类型 —— 唯一真相来源
-```
+[![latest tag](https://img.shields.io/github/v/tag/ptxdev/ptengine-app-starter)](https://github.com/ptxdev/ptengine-app-starter/tags)
+[![Node](https://img.shields.io/badge/node-%3E%3D%2020-brightgreen)](https://nodejs.org)
 
-前后端打在**同一个 zip、同一个版本号**，一起发布、一起回滚。
+The official scaffold for building a **Ptengine Custom App**: a front end that the platform loads in a cross-origin iframe, plus an optional Cloudflare Worker backend — built, versioned and shipped as **one zip with one version number**, released and rolled back together.
 
-## 快速开始
+## Quick Start
 
-取一个正式版本（推荐，而不是直接 clone 主分支）：
+Clone a released tag rather than the default branch:
 
 ```bash
 git clone --branch v3.2.0 --depth 1 https://github.com/ptxdev/ptengine-app-starter.git my-app
 cd my-app && rm -rf .git && git init
 ```
 
-> v3 分支在 GitLab 主仓维护，GitHub 是发布同步的镜像 —— 上面的 clone 地址不变。
-
 ```bash
 npm install
-npm run dev        # 同时起前端与后端，并签发真 token（鉴权链路本地跑通）
-npm run doctor     # 体检：约定有没有被改坏
-npm run build      # 类型检查 + 构建前端 + 打包后端
-npm run package    # 组装可直接上传的 zip
+npm run dev        # front end + backend, with real tokens signed locally
+npm run doctor     # health check: did anything break the platform conventions?
+npm run build      # type-check + build the front end + bundle the backend
+npm run package    # assemble an uploadable zip
 ```
 
-把 `npm run package` 产出的 zip 上传到 Ptengine X →「自定义应用管理」，
-或在 CI 里 `npx ptx deploy --publish`。
+Upload the zip from `npm run package` on the Ptengine **Custom App management** page, or run `npx ptx deploy --publish` from CI.
 
-> **⚠️ 平台前置依赖**：上传/发布需要 Ptengine 后台已接入 App Runtime；
-> 未接入时 `ptx deploy` 会得到 404 或 401。**`npm run dev` 的本地开发不受影响，
-> 完全可用**。只要纯静态应用的话，见下面的 [轻应用（只要前端）](#轻应用只要前端)。
+> **Platform prerequisite** — uploading and publishing require App Runtime to be enabled on your Ptengine backend; without it `ptx deploy` returns 404 or 401. **Local `npm run dev` is unaffected.**
 
-## 用 AI 写这个应用？
+## Build it with AI
 
-项目根的 [`AGENTS.md`](./AGENTS.md) 是给 AI 编码助手的说明（Cursor / Claude Code /
-Copilot / Codex / Gemini 都会自动读取；`CLAUDE.md` 是指向它的指针）。里面写清了
-平台的硬边界与"改错了长什么样"。
-
-**建议开工前让 AI 先读三份文件**：
-`AGENTS.md`、`node_modules/@ptengine/design-components/llms.txt`（组件清单与设计规范）、
-`node_modules/@ptengine/app-sdk/data-query.llms.txt`（取数场景与参数）。
-
-**改完让它跑 `npm run doctor`** —— 这个命令就是为此存在的：它把 AGENTS.md 里
-那些"违反了不报错"的约定变成一条可执行的检查。
-
-## 本地开发
+Install the Ptengine skills so your coding agent knows the platform:
 
 ```bash
-npm run dev
-# 端口冲突时：PTX_WEB_PORT=5273 PTX_API_PORT=8887 npm run dev
+npx skills add ptxdev/ptengine-skills          # most agents
+/plugin marketplace add ptxdev/ptengine-skills # Claude Code
 ```
 
-它做三件事：
+Then describe what you want — *"a dashboard of the last 7 days of funnel conversion, with a detail drawer per step"* — and let the agent build it. Before it writes code, have it read:
 
-1. 生成一对临时 **Ed25519** 密钥 —— 公钥进 `backend/.dev.vars`，私钥给 vite
-2. 起 `wrangler dev`（后端），本地 D1 / KV 由 miniflare 模拟
-3. 起 `vite`（前端），`/api` 代理到后端，并挂一个 `/__ptx/token` 端点签发令牌
+| File | What it gives the agent |
+|---|---|
+| [`AGENTS.md`](./AGENTS.md) | The hard boundaries of the platform, and what breaking them looks like |
+| `node_modules/@ptengine/design-components/llms.txt` | Component inventory and design rules |
+| `node_modules/@ptengine/app-sdk/data-query.llms.txt` | The 18 analytics query types and their parameters |
 
-**本地的鉴权是真的，不是绕过的。** 前端拿到真 token、后端做真验签，所以
-`aud` 不匹配、令牌过期、scope 不足这些线上才会遇到的问题，**本地就会现形**。
+When it is done, make it run `npm run doctor` — that command exists to turn the conventions in `AGENTS.md` into an executable check, because most violations fail *silently*.
 
-- 想模拟别的站点 / 权限：改 `web/.ptx-dev-key.json` 的 `sid` / `scopes` 后重启
-- **密钥与普通配置**都写在 `backend/.dev.vars`，`ptx dev` **不会覆盖**它们
-- 这两个文件都在 `.gitignore` 里，**绝不要提交**
+## What's inside
 
-### 本地怎么填配置：`backend/.dev.vars`
+| Path | What it is |
+|---|---|
+| `web/` | Front end. Static build output; the platform loads it in an iframe and injects `window.PtApp` |
+| `backend/` | Backend. One Cloudflare Worker, serving `/api/*` only. Optional |
+| `shared/api.ts` | The API contract shared by both sides — the single source of truth |
+| `manifest.json` | App declaration: version, entry, scopes, backend resources, secrets, egress |
+| `scripts/ptx*.mjs` | The `ptx` CLI: `dev` / `build` / `package` / `deploy` / `doctor` |
 
-一个文件、一行一个 `KEY=VALUE`，**密钥和普通配置放在一起**（它们最终都是 worker
-`env` 上的键，本来就是同一个命名空间）：
+## Two kinds of apps
 
-```
-# 你自己的（对应 manifest 的 backend.secrets / backend.vars）
-SHOPIFY_TOKEN=shpat_xxx
-API_BASE=https://api.example.com
+|  | Front end only | With a backend |
+|---|---|---|
+| `manifest.schemaVersion` | `1` | `2` |
+| `backend/` directory | removed | present |
+| `manifest.backend` section | absent | present |
+| Where data comes from | `PtApp.data.query()` | that, plus your own `/api/*` |
+| Good for | dashboards, in-app tools | third-party APIs, your own storage, secrets |
 
-# --- 以下由 ptx dev 自动生成，请勿手改 ---
-PT_JWKS_JSON={"keys":[...]}
-```
+Plenty of apps need no backend at all. To go front-end only: `rm -rf backend/`, drop the `backend` section from `manifest.json`, and set `schemaVersion` back to `1`. **Nothing else changes** — no edits to `tsconfig.json`, `package.json` or anything under `scripts/`. Since v3.2.0 every command branches on the manifest automatically: `dev` starts vite alone, `build` runs `tsc -b web`, `package` produces a front-end-only zip. Details in [`AGENTS.md`](./AGENTS.md#轻应用只有前端).
 
-- 这个文件**不需要你创建**：第一次 `npm run dev` 会生成它（里面先只有 `PT_JWKS_JSON`）。
-  你自己加的行会被原样保留，`ptx dev` 只重写 `PT_` 开头的受管键
-- 值一般不用加引号（`API_BASE=https://a.test` 即可）。wrangler 用 dotenv 规则解析：引号会被剥掉，所以 `API_BASE="https://a.test"` 也读到同一个值；
-  只有值里含空格或 `#`（未加引号时 `#` 之后会被当注释截掉）才需要用引号包住。
-- 改完要**重启 `npm run dev`** 才生效
-- `npm run doctor` 会把这个文件和 `manifest.json` 的声明对一遍：漏填必填项、
-  或填了没声明的名字，都会给一条提醒
+## `ptx` commands
 
-> **本地是怎么注入的（已实测，不要再重跑一遍）。** `ptx dev` **自己不做任何注入**：
-> 它把 `wrangler dev` 的 cwd 设在 `backend/`，既不传 `--var` 也不传 `--config`，
-> 于是 wrangler 原生读同目录的 `.dev.vars`，逐行绑成 env 变量 —— 启动日志里那句
-> `Using secrets defined in .dev.vars` 就是它。想自己确认：
-> `printf 'PTX_SMOKE=hello\n' >> backend/.dev.vars`，加一个读 `env.PTX_SMOKE` 的
-> 路由，`npm run dev` 后请求它，拿到 `hello`。（wrangler 4.128.0 实测通过。）
+| Command (also `npx ptx <command>`) | What it does |
+|---|---|
+| `npm run dev` | vite + `wrangler dev` + a local token endpoint. `PTX_WEB_PORT` / `PTX_API_PORT` move the ports |
+| `npm run doctor` | Checks conventions and manifest consistency. `--deps` also reports dependency drift |
+| `npm run build` | Type-check (web + backend + shared) + vite build + wrangler bundle |
+| `npm run package` | Assemble the zip and self-check its structure |
+| `npm run deploy` | Upload. `--publish` releases immediately, `--stream` streams progress, `--dry-run` only prints |
 
-本地跑数据库迁移（在 `backend/` 下）：
+## Local development
 
-```bash
-npx wrangler d1 migrations apply ptapp-local --local
-```
+**Local auth is real, not bypassed.** `npm run dev` generates a throwaway Ed25519 key pair: the public key goes into `backend/.dev.vars` so the worker really verifies signatures, the private key signs real tokens for the front end. `aud` mismatches, expiry and missing scopes therefore surface locally instead of in production.
 
-## 前端
+Your own configuration and secrets go in `backend/.dev.vars`, one `KEY=VALUE` per line; `ptx dev` only rewrites the `PT_`-prefixed keys it manages and leaves your lines untouched. That file and `web/.ptx-dev-key.json` are gitignored — never commit them. Full rules, including how values are injected and why a restart is needed: [`AGENTS.md`](./AGENTS.md#本地配置backenddevvars).
 
-`web/` 里的内容与 v2 完全一致（三条硬约定、四处 UI 接线都没变），只是从
-项目根移到了 `web/` 子目录。
+## Front end
 
-应用由平台以微前端（跨源 iframe）加载，平台注入 `window.PtApp`：
+The platform injects `window.PtApp`; read it through `web/src/pt-app.ts`:
 
 ```ts
-import { getPtApp } from './pt-app';
-
 const app = getPtApp();
-app?.context;              // { appId, sid, locale, theme, initialPath }
-app?.ui.toast('已保存');
-await app?.ui.confirm({ message: '确定吗？' });
+app?.context;                 // { appId, sid, locale, theme, initialPath }
+app?.ui.toast('Saved');
 app?.nav.syncRoute('detail');
-```
 
-取站点数据（平台中介执行，profile 锁死在服务端）：
-
-```ts
 const res = await app?.data.query({
     queryType: 'funnel_insight',
     params: { timeRange: { key: 'lastDays', days: 7 },
@@ -134,44 +102,14 @@ const res = await app?.data.query({
 });
 ```
 
-18 个 queryType 的完整参数说明见 `node_modules/@ptengine/app-sdk/data-query.llms.txt`。
-单次最多 5000 行；`describe()` 可在运行时发现平台放开的场景。
+Build the UI with `@ptengine/design-components` — not antd, MUI or hand-rolled controls — so the app looks like the rest of Ptengine. Routing must be hash-based. Both rules, and the four wiring points that make the component library render correctly, are in [`AGENTS.md`](./AGENTS.md).
 
-## 调自己的后端
-
-**不要手写 `fetch('/api/...')`**，用 `web/src/api.ts` 的 `api()`：
+## Backend
 
 ```ts
-import { api } from './api';
-
-const data = await api('GET /orders', { query: { days: '7' } });
-//    ^? OrdersResponse —— 类型来自 shared/api.ts
-```
-
-它兜住了：取令牌、到期前自动续期、401 自动重试一次、解开错误信封。
-
-前后端**同源**（线上都在 `<appId>.app.ptengine.ai`，本地由 vite proxy 代过去），
-所以没有 baseURL、没有 CORS、没有第三方 cookie 的事。
-
-### 加一个新接口
-
-1. `shared/api.ts` 的 `ApiRoutes` 里加一项
-2. `backend/src/index.ts` 的 `routes` 里加 handler —— **不加 tsc 就报错**
-3. 前端 `api('METHOD /path', ...)`
-
-## 后端
-
-```ts
-// backend/src/index.ts
-import { createApp } from './runtime';
-import type { ApiRoutes } from '../../shared/api';
-
 export default createApp<ApiRoutes>({
     routes: {
         'GET /orders': async (ctx) => {
-            const cached = await ctx.kv.get('orders', 'json');
-            if (cached) return cached;
-
             const res = await ctx.fetch('https://api.shopify.com/...', {
                 headers: { 'X-Shopify-Access-Token': ctx.secrets.SHOPIFY_TOKEN }
             });
@@ -182,119 +120,9 @@ export default createApp<ApiRoutes>({
 });
 ```
 
-`createApp` 兜掉的事（让正确的事成为默认）：
+`createApp` verifies every token, pins `aud` to your app, 404s undeclared routes, wraps errors so stacks never leak, and exposes a `/api/__health` probe the platform uses to auto-roll-back a bad release. Call it from the front end with `api('GET /orders', { query: { days: '7' } })` from `web/src/api.ts` — typed from `shared/api.ts`, with token refresh and 401 retry already handled.
 
-| 它做的 | 为什么不交给你做 |
-|---|---|
-| 验签令牌（JWKS + kid 缓存 + 时钟偏移） | 忘记验签 = 后端完全裸奔，而且**本地测不出来** |
-| 校验 `aud === app:<appId>` | 漏了就能被别的应用的令牌调用 |
-| `ctx.auth` 一定是已验证身份 | 类型上就没有"未验证"这个状态可用 |
-| 未声明的路由一律 404 | 避免意外暴露 |
-| 统一错误信封，不透传栈 | 栈里常有内部路径与 SQL |
-| 内建 `/api/__health` | 平台发布后用它探针，失败自动回滚 |
-
-`ctx` 上能用的东西见 [`AGENTS.md`](./AGENTS.md#后端能用的东西ctx)。
-
-### 资源由平台注入
-
-`backend/wrangler.jsonc` **只服务本地开发**。线上有什么由 `manifest.json` 决定：
-
-```json
-"backend": {
-    "resources": { "database": true, "kv": true, "files": false },
-    "secrets": [{ "name": "SHOPIFY_TOKEN", "label": "Shopify Token", "required": true }],
-    "vars": [{ "name": "API_BASE", "required": false, "default": "https://api.shopify.com" }],
-    "egress": ["api.shopify.com"]
-}
-```
-
-- **`resources`** —— 平台代你创建 D1 / KV / R2 并挂上绑定，你不需要 Cloudflare 账号
-- **`secrets`** —— 只声明**名字**，值由你在应用管理页填。包里永远没有密钥
-- **`vars`** —— 非敏感配置项，同样只声明名字（可给 `default`），值在应用管理页填。
-  与 `secrets` **共用同一个环境变量命名空间**：同名会被判为冲突。名字要匹配
-  `^[A-Z][A-Z0-9_]*$`，不能用 `PT_` 前缀，也不能占用 worker 内建 binding 名
-  （`DB` / `KV` / `FILES` / `PT_GATEWAY` …）—— 占了会在发布期生成两个同名 binding，
-  把资源**遮掉**（`ctx.db` 突然变成一个字符串）。两者各最多 64 条
-- **`egress`** —— 出站域名白名单。**缺省或空数组 = 完全禁止出站**，**最多 32 条**
-
-> **校验规则从哪来。** `scripts/rules.json` 是 Ptengine 契约包的**生成快照**（名字正则、
-> `appId` 规则、各项上限、出站禁域表、合法 scope），由维护者跑
-> `PT_CONTRACT_DIR=../custom-app-platform/packages/contract npm run sync-rules` 更新，**不要手改**。
-> 好处是本地 `npm run doctor` 的判定与平台上传校验逐字一致。
-> 注意出站禁域表比早期版本更严：现在还包含 `ptmind.net` 与 `0.0.0.0`。
-
-### 密钥 vs 配置
-
-`backend.secrets` 与 `backend.vars` 声明方式几乎一样、在 worker 里也都从
-`env` / `ctx` 上读，但它们是**两种东西**，选错了会踩坑：
-
-|  | `secrets`（密钥） | `vars`（配置项） |
-|---|---|---|
-| 值存在哪 | Cloudflare **Secrets Store** | 平台数据库 |
-| 填完能读回吗 | **不能**，管理页只显示"已设置" | 能，管理页能看到当前值 |
-| 改完何时生效 | **立即**（下一个请求就是新值） | **要重新发布**才生效 |
-| 适合放什么 | token、私钥、数据库口令 | 接口地址、开关、超时时间、ID |
-
-第三行是最容易踩的一条：配置项在**发布时**被当作 `plain_text` 值**拷进 worker**，
-所以它在管理页改完之后，线上跑的还是发布那一刻的值 —— 必须重新发布一版。
-密钥不是拷贝，是运行时从 Secrets Store 取，所以改了立即生效。
-
-推论：**别把要热改的东西放 `vars`**（比如一个想随时关掉的功能开关，走
-`vars` 得重新发一版）；也**别把密钥放 `vars`** —— `vars` 的值能被读回，
-而且会明文出现在 worker 配置里。
-
-`vars` 可以带 `default`，此时它是可选的（用户不填就用默认值）：
-
-```json
-"vars": [{ "name": "API_BASE", "required": false, "default": "https://api.example.com", "label": "第三方接口地址" }]
-```
-
-### 后端没有的能力
-
-`Durable Objects`、`connect()`、`caches.default`、`request.cf`、
-**Cron Triggers**、Queues、Workflows —— 详见 [`AGENTS.md`](./AGENTS.md) 的
-「后端**没有**的能力」。其中 Cron 特别值得注意：Workers for Platforms 的
-user worker 不支持它，`triggers.crons` 会被**静默丢弃**（无报错、定时永不触发）。
-定时能力要等平台侧调度器。
-
-## 轻应用（只要前端）
-
-不少应用根本不需要后端 —— 数据从 `PtApp.data.query()` 取，交互用 `PtApp.ui`。
-这种情况**删两个东西就行，其余命令照常**：
-
-```bash
-rm -rf backend/
-```
-
-然后改 `manifest.json`：删掉整个 `backend` 段，`schemaVersion` 改回 `1`。
-
-```jsonc
-{
-    "id": "my-app",
-    "schemaVersion": 1,        // 2 是"带后端"的 schema，纯前端回 1 可兼容更老的平台版本
-    "version": "1.0.0",
-    "entry": "index.html",
-    // ... 其余不变，不要有 "backend": { ... }
-}
-```
-
-**不需要改 `tsconfig.json`、`package.json` 或任何 `scripts/` 下的文件。**
-`npm run dev` / `doctor` / `build` / `package` / `deploy` 全部照常跑，会自动切成纯前端模式：
-
-| 命令 | 有后端 | 轻应用 |
-|---|---|---|
-| `npm run dev` | vite + `wrangler dev` + 本地签发真 token，`/api` 代理到 8787 | **只起 vite**；不生成密钥、不配 `/api` 代理，横幅会写「纯前端模式」 |
-| `npm run build` | `tsc -b`（web + backend + shared）+ vite build + wrangler bundle | `tsc -b web`（web + shared）+ vite build |
-| `npm run package` | zip 里含 `_backend/` | zip 只有前端产物 |
-
-判定源**只有 `manifest.json`**（有没有 `backend` 段），`backend/` 目录在不在只用来对账：
-
-- manifest 有 `backend` 段、目录却不在 → 直接报错（不然你只会看到一句
-  `ENOENT backend/wrangler.jsonc`，指不到真正原因）；
-- manifest 没有 `backend` 段、目录还在 → 警告并按纯前端继续。这通常是改了一半：
-  代码还在，但上传后所有 `/api` 请求都会 404。
-
-反过来，给轻应用加回后端：恢复 `backend/` 目录，并把 `backend` 段与 `schemaVersion: 2` 写回 manifest。
+Databases, KV, R2, secrets and outbound access are **declared in `manifest.json` and provisioned by the platform** — you never need a Cloudflare account, and `backend/wrangler.jsonc` serves local development only. What `ctx` offers, which Workers features are *not* available (Durable Objects, cron triggers, queues, …), and how secrets differ from vars: [`AGENTS.md`](./AGENTS.md#后端能用的东西ctx).
 
 ## manifest.json
 
@@ -303,32 +131,17 @@ rm -rf backend/
     "schemaVersion": 2,
     "version": "1.0.0",
     "entry": "index.html",
-    "display_name": { "zh-CN": "我的应用", "en-US": "My App" },
     "icon": "assets/icon.svg",
     "scopes": ["analytics:read", "ui:notify"],
     "backend": { "entry": "_backend/worker.js", "routes": ["/api/*"], "...": "..." }
 }
 ```
 
-- **`schemaVersion` 有 `backend` 段就必须是 `2`**。写成 1 会让平台**静默忽略**后端，
-  跑出一个"前端正常、所有 API 404"的应用 —— `npm run package` 会拦下这种情况
-- `version` 每次上传新版本**必须递增**
-- `id` 是**可选的**（平台创建应用时也会分配）。但写了就会被按创建口径校验：
-  匹配 `^[a-z0-9][a-z0-9-]{0,49}$`（**最长 50 字符**）、不能是保留字
-  （`www` / `api` / `admin` / `app` / `console` / `ptengine` …），也不能用
-  `pt-` 前缀（那是平台自己的官方应用命名空间）。完整名单见 `scripts/rules.json`
-- `scopes` 合法值只有四个：`analytics:read`、`profile:read`、`user:read`、`ui:notify`
-- `icon` 指向包内相对路径，文件必须真实存在（放 `web/public/assets/`）
-- `display_name` 只在你点「从应用包填入名称与图标」时被取用；平台显示的名字
-  是你在工作区里给这个应用起的那个
-- 各项声明有上限：`backend.vars` / `backend.secrets` 各 64 条、
-  **`backend.egress` 32 条**（超了上传被拒，报 `BACKEND_EGRESS_TOO_MANY`）。
-  上限与出站禁域表一样来自 `scripts/rules.json`，`npm run doctor` 会先拦下来
+`version` must increase on every upload, `schemaVersion` must be `2` whenever a `backend` section is present, and `scopes` accepts only `analytics:read`, `profile:read`, `user:read` and `ui:notify`. Every field, its limits and the validation rules — mirrored byte-for-byte from the platform into `scripts/rules.json` — are documented in [`AGENTS.md`](./AGENTS.md#manifestjson-字段), and `npm run doctor` checks them before you upload.
 
-## 自动化部署
+## Deploy from CI
 
 ```yaml
-# .github/workflows/deploy.yml —— 打个 tag，线上就更新了
 on:
   push:
     tags: ['v*']
@@ -336,102 +149,32 @@ jobs:
   deploy:
     steps:
       - run: npm ci
-      - run: npx ptx build
-      - run: npx ptx package
+      - run: npx ptx doctor
+      - run: npx ptx build && npx ptx package
       - run: npx ptx deploy --publish
         env:
           PTENGINE_TOKEN: ${{ secrets.PTENGINE_TOKEN }}
           PTENGINE_APP_ID: ${{ vars.PTENGINE_APP_ID }}
 ```
 
-平台收到包后自动做：校验 → 前端进 R2 → 建资源 → 跑迁移 → 组装密钥绑定 →
-推后端 → 原子切版本指针 → **健康探针（失败自动回滚）**。
-所以 `--publish` 返回成功就意味着线上真的在跑。
+A ready-made workflow ships in [`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml). Generate `PTENGINE_TOKEN` on the **Custom App management** page — per-app, revocable, shown once. Never commit it; `ptx doctor` scans tracked files for leaked tokens. On publish the platform validates the package, uploads the front end, provisions resources, runs migrations, deploys the worker, flips the version pointer atomically and health-probes the result — rolling back automatically if the probe fails.
 
-先看看会做什么而不真发请求：`npx ptx deploy --dry-run`。
+## Versions & upgrading
 
-要看实时进度（而不是等 20–40 秒一次性返回），加 `--stream`：
+The scaffold carries its own semantic version, tagged and released in this repo, separate from the `@ptengine/*` package versions — see the [compatibility matrix](./CHANGELOG.md#兼容矩阵) in the [CHANGELOG](./CHANGELOG.md). Three `version` fields coexist in a project: the git tag belongs to **the scaffold**, while `manifest.json` and `package.json` versions belong to **your app**. `manifest.schemaVersion` is the *platform contract* version, not yours.
 
-```bash
-npx ptx deploy --publish --stream
-```
+Projects already under development usually should **not** upgrade the scaffold — it is a starting point, not a runtime dependency. Follow up only on a **major** release (the CHANGELOG carries migration steps) or to pick up a capability you want.
 
-> `PTENGINE_TOKEN` 在 Ptengine X →「自定义应用管理」→ 部署令牌 生成，
-> 按应用授权、可随时撤销；令牌只显示一次，请立刻存进 CI 的 secrets。
-> 不要用账号级令牌 —— CI 里任何一个恶意依赖都能读到它。
->
-> **令牌绝不能进仓**——写死在代码、`.env` 提交、CI 配置文件明文都算。
-> `npx ptx doctor` 会扫已入库的文件，发现令牌明文会直接报 bad。
+## FAQ
 
-## ptx 命令
+**Blank page after upload?** Almost always `base` in `web/vite.config.ts` changed to an absolute path. `npm run doctor` says so directly.
 
-| 命令 | 作用 |
-|---|---|
-| `ptx dev` | 前端 + 后端 + 本地令牌签发 |
-| `ptx build` | 类型检查 + 构建前端 + 打包后端（wrangler bundle） |
-| `ptx package` | 组装 zip + 结构自检 |
-| `ptx deploy` | 上传（`--publish` 立即发布，`--dry-run` 只看不发） |
-| `ptx doctor` | 体检（`--deps` 额外查依赖漂移） |
+**Components render with no styling?** One of the four wiring points is missing — see [`AGENTS.md`](./AGENTS.md), or just run `npm run doctor`.
 
-## 版本与升级
+**`window.PtApp` is undefined?** It is only injected when the platform loads your app. Locally, use `npm run dev`.
 
-脚手架自身走独立的语义化版本（git tag + Releases），与 `@ptengine/*` 包的版本号
-是两条线；配套关系见 [CHANGELOG 的兼容矩阵](./CHANGELOG.md#兼容矩阵)。
+**Every local `/api/*` call returns 401?** You started `vite` directly instead of `npm run dev`; the `/__ptx/token` endpoint needs the key pair `ptx dev` generates.
 
-注意区分三个 `version`：
+**Backend throws `RESOURCE_NOT_DECLARED` / `SECRET_NOT_DECLARED` / `VAR_NOT_DECLARED`?** That name is not declared in `manifest.json` — or, locally, not in `backend/.dev.vars`. `npm run doctor` tells you which one.
 
-| 位置 | 属于谁 | 谁维护 |
-|---|---|---|
-| git tag / Release | **脚手架** | Ptengine |
-| `manifest.json` 的 `version` | **你的应用**（每次上传必须递增） | 你 |
-| `package.json` 的 `version` | **你的应用**（npm 惯例，平台不读） | 你 |
-
-`manifest.schemaVersion` 是**平台契约版本**，不是你的版本号。
-
-`ctx.vars` 需要 `@ptengine/app-backend` ≥ `0.2.0`：`0.x` 的 caret 不跨 minor，
-所以 `package.json` 里必须写 `^0.2.0`（写 `^0.1.0` 装到的运行时没有 `ctx.vars`）；
-改完区间要重跑一次 `npm install` 刷 `package-lock.json`。
-
-**已经在开发中的项目要不要升级脚手架？** 通常不需要 —— 脚手架是一次性起点，
-不是运行时依赖。只在两种情况下需要跟进：CHANGELOG 里出现 **major**
-（说明平台约定有破坏性变更，照该版本的「升级指引」改），或者想要新版本引入的能力
-（比如 v2 → v3 的后端）。
-
-## 常见问题
-
-**上传后左侧导航没出现应用？** 三个条件都要满足：这一版**已发布**、应用在
-「探索应用」页里是**已固定**状态、以及你对它有访问权。都对了还没有就刷新页面。
-
-**点进去白屏？** 打开控制台看有没有资源 404 —— 多半是 `web/vite.config.ts` 的
-`base` 被改成了绝对路径。跑 `npm run doctor` 会直接告诉你。
-
-**组件渲染出来没有样式？** 见 AGENTS.md 的「四处接线」，或直接跑 `npm run doctor`。
-
-**页面正常、一打开弹窗就没样式？** `pt-ui` 挂在 `#root` 上了。Radix 浮层 portal 到
-`document.body`，必须挂在 `<html>`。
-
-**`window.PtApp` 是 undefined？** 只有经平台加载时才注入。本地请用 `npm run dev`。
-
-**本地调 `/api/*` 一律 401？** 大概率是没用 `npm run dev` 启动（直接跑了 `vite`）——
-`/__ptx/token` 端点需要 `ptx dev` 生成的密钥。它会返回 `PTX_DEV_KEY_MISSING` 说明这件事。
-
-**上线后调 `/api/*` 报"当前平台/SDK 还不支持 PtApp.auth"？** 平台侧 App Runtime
-尚未接入，或 `@ptengine/app-sdk` 还是 ^1.2.0（需等待 2.0.0 发布后升级，见 CHANGELOG 3.1.0 阻塞项）。
-
-**后端报 `RESOURCE_NOT_DECLARED`？** `manifest.json` 的 `backend.resources` 里
-没把对应资源设为 `true`；本地还需要 `backend/wrangler.jsonc` 里有对应 binding。
-
-**后端报 `SECRET_NOT_DECLARED`？** 密钥名没写进 `manifest.backend.secrets`，
-或本地没写进 `backend/.dev.vars`。
-
-**后端报 `VAR_NOT_DECLARED`？** 同一件事的配置项版本，按顺序查三处：
-
-1. 名字写进 `manifest.json` 的 `backend.vars` 了吗（**声明才会注入**）
-2. 线上：应用管理页的「**配置**」页签填了值吗（没 `default` 的必填项不填就没有值）；
-   刚改完值的话，注意**配置要重新发布才生效**（见「密钥 vs 配置」）
-3. 本地：`backend/.dev.vars` 里有这一行吗
-
-`npm run doctor` 会把 1 和 3 对一遍，直接告诉你缺哪个名字。
-
-**换成 Vue / Svelte 可以吗？** 前端可以，关键约定与框架无关（相对 `base`、
-根级 `manifest.json`、`entry` 一致）。后端固定是 Cloudflare Worker。
+More, including publishing and configuration pitfalls: [`docs/troubleshooting.md`](./docs/troubleshooting.md).

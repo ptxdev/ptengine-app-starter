@@ -3,7 +3,7 @@
 给 AI 编码助手的项目说明（Cursor / Claude Code / Copilot / Codex / Gemini 等通用；
 `CLAUDE.md` 只是指向本文件的指针，**内容只维护这一份**）。
 
-本项目是 **Ptengine X 自定义应用**（Custom App），有前端也有后端：
+本项目是 **Ptengine 自定义应用**（Custom App），有前端也有后端：
 
 - **前端** `web/` —— 纯静态产物，由平台以真跨源 `<iframe>` 加载，经 `window.PtApp` 桥拿宿主能力。
 - **后端** `backend/` —— 一个 Cloudflare Worker，由平台部署，只服务 `/api/*`。
@@ -11,11 +11,7 @@
 
 前后端**打在同一个 zip 里、同一个版本号、一起发布一起回滚**。
 
-**也可以没有后端**（「轻应用」）：删掉 `backend/` 目录、去掉 `manifest.json` 的 `backend` 段、
-`schemaVersion` 改回 `1` —— 就这两步，`tsconfig.json` 与 `scripts/` 都不用动，
-`dev` / `doctor` / `build` / `package` / `deploy` 全部照常，会自动切成纯前端模式
-（`dev` 只起 vite、没有 `/api`；`build` 只跑 `tsc -b web`）。判定源只有 `manifest.json`，
-`backend/` 目录在不在只用来对账（少了报错、多了警告）。详见 README 的「轻应用（只要前端）」。
+**也可以没有后端**（「轻应用」）：见下面的[轻应用（只有前端）](#轻应用只有前端)。
 
 在这里写代码前，先把下面「硬边界」看完 —— 违反它们的失败现象大多**不报错**
 （白屏、没样式、上传被拒、线上 401），靠试很难收敛。
@@ -90,6 +86,38 @@
 
 所以：加字段可以；**删字段、改字段语义、改路由名，都要分两次发布** ——
 先加新的、发布、前端切过去、再发布删旧的。
+
+---
+
+## 轻应用（只有前端）
+
+不少应用根本不需要后端 —— 数据从 `PtApp.data.query()` 取，交互用 `PtApp.ui`。
+这种情况**删两个东西就行，其余命令照常**：
+
+```bash
+rm -rf backend/
+```
+
+然后改 `manifest.json`：删掉整个 `backend` 段，`schemaVersion` 改回 `1`
+（`2` 是「带后端」的 schema，纯前端回 `1` 可兼容更老的平台版本）。
+
+**不需要改 `tsconfig.json`、`package.json` 或任何 `scripts/` 下的文件。**
+`dev` / `doctor` / `build` / `package` / `deploy` 全部照常跑，会自动切成纯前端模式：
+
+| 命令 | 有后端 | 轻应用 |
+|---|---|---|
+| `npm run dev` | vite + `wrangler dev` + 本地签发真 token，`/api` 代理到 8787 | **只起 vite**；不生成密钥、不配 `/api` 代理，横幅会写「纯前端模式」 |
+| `npm run build` | `tsc -b`（web + backend + shared）+ vite build + wrangler bundle | `tsc -b web`（web + shared）+ vite build |
+| `npm run package` | zip 里含 `_backend/` | zip 只有前端产物 |
+
+判定源**只有 `manifest.json`**（有没有 `backend` 段），`backend/` 目录在不在只用来对账：
+
+- manifest 有 `backend` 段、目录却不在 → 直接报错（不然只会看到一句
+  `ENOENT backend/wrangler.jsonc`，指不到真正原因）；
+- manifest 没有 `backend` 段、目录还在 → 警告并按纯前端继续。这通常是改了一半：
+  代码还在，但上传后所有 `/api` 请求都会 404。
+
+反过来，给轻应用加回后端：恢复 `backend/` 目录，并把 `backend` 段与 `schemaVersion: 2` 写回 manifest。
 
 ---
 
@@ -172,6 +200,53 @@ ctx.waitUntil(promise)               // 后台任务（如写缓存，不阻塞�
 
 没在 manifest 里声明就访问 `ctx.db` / `ctx.kv` / `ctx.secrets.X`，会抛**说得清原因的错误**
 （`RESOURCE_NOT_DECLARED` / `SECRET_NOT_DECLARED`），不是 `undefined is not a function`。
+
+### 资源由平台注入
+
+`backend/wrangler.jsonc` **只服务本地开发**。线上有什么由 `manifest.json` 决定：
+
+```json
+"backend": {
+    "resources": { "database": true, "kv": true, "files": false },
+    "secrets": [{ "name": "SHOPIFY_TOKEN", "label": "Shopify Token", "required": true }],
+    "vars": [{ "name": "API_BASE", "required": false, "default": "https://api.shopify.com" }],
+    "egress": ["api.shopify.com"]
+}
+```
+
+- **`resources`** —— 平台代你创建 D1 / KV / R2 并挂上绑定，你不需要 Cloudflare 账号
+- **`secrets`** —— 只声明**名字**，值由用户在应用管理页填。包里永远没有密钥
+- **`vars`** —— 非敏感配置项，同样只声明名字（可给 `default`），值在应用管理页填。
+  与 `secrets` **共用同一个环境变量命名空间**：同名会被判为冲突。名字要匹配
+  `^[A-Z][A-Z0-9_]*$`，不能用 `PT_` 前缀，也不能占用 worker 内建 binding 名
+  （`DB` / `KV` / `FILES` / `PT_GATEWAY` …）—— 占了会在发布期生成两个同名 binding，
+  把资源**遮掉**（`ctx.db` 突然变成一个字符串）。两者各最多 64 条
+- **`egress`** —— 出站域名白名单，规则见上面的[硬边界 4](#4-出站请求受白名单管默认全禁)
+
+### 密钥 vs 配置
+
+`backend.secrets` 与 `backend.vars` 声明方式几乎一样、在 worker 里也都从 `ctx` 上读，
+但它们是**两种东西**，选错了会踩坑：
+
+|  | `secrets`（密钥） | `vars`（配置项） |
+|---|---|---|
+| 值存在哪 | Cloudflare **Secrets Store** | 平台数据库 |
+| 填完能读回吗 | **不能**，管理页只显示「已设置」 | 能，管理页能看到当前值 |
+| 改完何时生效 | **立即**（下一个请求就是新值） | **要重新发布**才生效 |
+| 适合放什么 | token、私钥、数据库口令 | 接口地址、开关、超时时间、ID |
+
+第三行是最容易踩的一条：配置项在**发布时**被当作 `plain_text` 值**拷进 worker**，
+所以它在管理页改完之后，线上跑的还是发布那一刻的值 —— 必须重新发布一版。
+密钥不是拷贝，是运行时从 Secrets Store 取，所以改了立即生效。
+
+推论：**别把要热改的东西放 `vars`**（比如一个想随时关掉的功能开关，走 `vars` 得重新发一版）；
+也**别把密钥放 `vars`** —— `vars` 的值能被读回，而且会明文出现在 worker 配置里。
+
+`vars` 可以带 `default`，此时它是可选的（用户不填就用默认值）：
+
+```json
+"vars": [{ "name": "API_BASE", "required": false, "default": "https://api.example.com", "label": "第三方接口地址" }]
+```
 
 ---
 
@@ -281,6 +356,42 @@ npm run dev        # 同时起 vite（前端）与 wrangler dev（后端），�
 里 `server.cors: true` 就是为它准备的（平台 app 的 origin 会跨源 fetch 你的 dev server，
 Vite 6+ 默认会挡掉）。
 
+### 本地配置：backend/.dev.vars
+
+一个文件、一行一个 `KEY=VALUE`，**密钥和普通配置放在一起**（它们最终都是 worker `env`
+上的键，本来就是同一个命名空间）：
+
+```
+# 你自己的（对应 manifest 的 backend.secrets / backend.vars）
+SHOPIFY_TOKEN=shpat_xxx
+API_BASE=https://api.example.com
+
+# --- 以下由 ptx dev 自动生成，请勿手改 ---
+PT_JWKS_JSON={"keys":[...]}
+```
+
+- 这个文件**不需要你创建**：第一次 `npm run dev` 会生成它（里面先只有 `PT_JWKS_JSON`）。
+  你自己加的行会被原样保留，`ptx dev` 只重写 `PT_` 开头的受管键
+- 值一般不用加引号（`API_BASE=https://a.test` 即可）。wrangler 用 dotenv 规则解析：引号会被剥掉，
+  所以 `API_BASE="https://a.test"` 读到同一个值；只有值里含空格或 `#`（未加引号时 `#` 之后会被当注释截掉）
+  才需要用引号包住
+- 改完要**重启 `npm run dev`** 才生效
+- `npm run doctor` 会把这个文件和 `manifest.json` 的声明对一遍：漏填必填项、
+  或填了没声明的名字，都会给一条提醒
+
+> **本地是怎么注入的（已实测，不要再重跑一遍）。** `ptx dev` **自己不做任何注入**：
+> 它把 `wrangler dev` 的 cwd 设在 `backend/`，既不传 `--var` 也不传 `--config`，
+> 于是 wrangler 原生读同目录的 `.dev.vars`，逐行绑成 env 变量 —— 启动日志里那句
+> `Using secrets defined in .dev.vars` 就是它。想自己确认：
+> `printf 'PTX_SMOKE=hello\n' >> backend/.dev.vars`，加一个读 `env.PTX_SMOKE` 的
+> 路由，`npm run dev` 后请求它，拿到 `hello`。（wrangler 4.128.0 实测通过。）
+
+本地跑数据库迁移（在 `backend/` 下）：
+
+```bash
+npx wrangler d1 migrations apply ptapp-local --local
+```
+
 ---
 
 ## 改完必须验证
@@ -297,13 +408,72 @@ npm run package    # 组装 zip + 结构自检
 
 ---
 
-## 权限声明（manifest.scopes）
+## manifest.json 字段
+
+```json
+{
+    "schemaVersion": 2,
+    "version": "1.0.0",
+    "entry": "index.html",
+    "display_name": { "zh-CN": "我的应用", "en-US": "My App" },
+    "icon": "assets/icon.svg",
+    "scopes": ["analytics:read", "ui:notify"],
+    "backend": { "entry": "_backend/worker.js", "routes": ["/api/*"], "...": "..." }
+}
+```
+
+- **`schemaVersion` 有 `backend` 段就必须是 `2`**。写成 1 会让平台**静默忽略**后端，
+  跑出一个「前端正常、所有 API 404」的应用 —— `npm run package` 会拦下这种情况
+- `version` 每次上传新版本**必须递增**
+- `id` 是**可选的**（平台创建应用时也会分配）。但写了就会被按创建口径校验：
+  匹配 `^[a-z0-9][a-z0-9-]{0,49}$`（**最长 50 字符**）、不能是保留字
+  （`www` / `api` / `admin` / `app` / `console` / `ptengine` …），也不能用
+  `pt-` 前缀（那是平台自己的官方应用命名空间）。完整名单见 `scripts/rules.json`
+- `icon` 指向包内相对路径，文件必须真实存在（放 `web/public/assets/`）
+- `display_name` 只在点「从应用包填入名称与图标」时被取用；平台显示的名字
+  是用户在工作区里给这个应用起的那个
+- 各项声明有上限：`backend.vars` / `backend.secrets` 各 64 条、
+  **`backend.egress` 32 条**（超了上传被拒，报 `BACKEND_EGRESS_TOO_MANY`）
+- `backend` 段里各字段的含义见[资源由平台注入](#资源由平台注入)
+
+### 权限声明（manifest.scopes）
 
 合法值只有四个：`analytics:read`、`profile:read`、`user:read`、`ui:notify`。
 写未定义或拼错的值会导致**上传校验失败**。遵循最小权限原则。
 
 平台当前只校验取值合法性，尚未据此放行/拦截；但 `ctx.requireScope()` 已经会按
 token 里的 scopes 强制校验，所以后端可以现在就写。
+
+### 校验规则从哪来
+
+`scripts/rules.json` 是 Ptengine 契约包的**生成快照**（名字正则、`appId` 规则、各项上限、
+出站禁域表、合法 scope），由维护者用 `npm run sync-rules` 更新，**不要手改**。
+好处是本地 `npm run doctor` 的判定与平台上传校验逐字一致。
+注意出站禁域表比早期版本更严：平台自身域名与本机/保留地址都在里面，以 `rules.json` 为准。
+
+---
+
+## 发布与 CI
+
+```bash
+npx ptx deploy --dry-run           # 只打印将要做什么，不发请求
+npx ptx deploy --publish           # 上传并立即发布
+npx ptx deploy --publish --stream  # 同上，流式打印九步进度（否则要等 20–40 秒）
+```
+
+需要环境变量 `PTENGINE_TOKEN` 与 `PTENGINE_APP_ID`，可选 `PTENGINE_API_BASE`（默认线上）。
+仓库里带了一份可用的 GitHub Actions 工作流：`.github/workflows/deploy.yml`（打 `v*` tag 即发布）。
+
+平台收到包后自动做：校验 → 前端进对象存储 → 建资源 → 跑迁移 → 组装密钥绑定 →
+推后端 → 原子切版本指针 → **健康探针（失败自动回滚）**。
+所以 `--publish` 返回成功就意味着线上真的在跑。
+
+> `PTENGINE_TOKEN` 在「自定义应用管理」→ 部署令牌 生成，按应用授权、可随时撤销；
+> 令牌只显示一次，请立刻存进 CI 的 secrets。不要用账号级令牌 ——
+> CI 里任何一个恶意依赖都能读到它。
+>
+> **令牌绝不能进仓** —— 写死在代码、`.env` 提交、CI 配置文件明文都算。
+> `npx ptx doctor` 会扫已入库的文件，发现令牌明文会直接报 bad。
 
 ---
 
@@ -316,4 +486,19 @@ token 里的 scopes 强制校验，所以后端可以现在就写。
 | `package.json` 的 `version` | 这个应用（npm 惯例，平台不读） |
 
 `manifest.schemaVersion` 是**平台契约版本**，不是你的版本号 —— 有 `backend` 段就必须是 `2`。
-写成 1 会让平台**静默忽略**后端，跑出一个"前端正常、所有 API 404"的应用。
+写成 1 会让平台**静默忽略**后端，跑出一个「前端正常、所有 API 404」的应用。
+
+脚手架与 `@ptengine/*` 包的配套关系见 [CHANGELOG 的兼容矩阵](./CHANGELOG.md#兼容矩阵)。
+`ctx.vars` 需要 `@ptengine/app-backend` ≥ `0.2.0`：`0.x` 的 caret 不跨 minor，
+所以 `package.json` 里必须写 `^0.2.0`（写 `^0.1.0` 装到的运行时没有 `ctx.vars`）；
+改完区间要重跑一次 `npm install` 刷 `package-lock.json`。
+
+**已经在开发中的项目通常不需要升级脚手架** —— 它是一次性起点，不是运行时依赖。
+只在两种情况下需要跟进：CHANGELOG 里出现 **major**（平台约定有破坏性变更，照该版本的
+「升级指引」改），或者想要新版本引入的能力。
+
+---
+
+## 出问题了
+
+先跑 `npm run doctor`。它没点名的情况见 [`docs/troubleshooting.md`](./docs/troubleshooting.md)。

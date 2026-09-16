@@ -1,5 +1,5 @@
 /**
- * ptx package —— 组装可直接上传到 Ptengine X 的 zip，并做结构自检。
+ * ptx package —— 组装可直接上传到 Ptengine 的 zip，并做结构自检。
  *
  * 平台对包结构的要求很严：`manifest.json` 与入口 HTML 必须在 **zip 根级**。
  * 在 Finder / 资源管理器里右键压缩 dist 会多一层 `dist/`，平台找不到根级
@@ -246,7 +246,7 @@ function assertFresh(root, outFile, srcDirs, label) {
                 ? files.filter(f => f.rel.startsWith(`${manifest.backend.migrations}/`)).length + ' 个'
                 : '（无）'}
 
-     上传：到 Ptengine X -> 「自定义应用管理」选这个 zip，
+     上传：到 Ptengine -> 「自定义应用管理」选这个 zip，
            或在 CI 里跑 \`npx ptx deploy --publish\`。
 `);
     } finally {

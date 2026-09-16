@@ -54,7 +54,7 @@ async function mint(): Promise<string> {
     const app = getPtApp();
     if (!app) {
         throw new Error(
-            '未检测到 window.PtApp —— 只有经 Ptengine X 平台加载时才会注入。' +
+            '未检测到 window.PtApp —— 只有经 Ptengine 平台加载时才会注入。' +
             '本地开发请用 `npm run dev`。'
         );
     }

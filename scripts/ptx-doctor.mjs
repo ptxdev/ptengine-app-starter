@@ -438,7 +438,7 @@ function checkTokenLeak(root) {
     if (hits.length === 0) return ok('没有在受版本控制的文件里发现部署令牌明文');
     for (const rel of hits) {
         bad(`文件 ${rel} 里出现了部署令牌明文，立即撤销并从历史里清掉`,
-            '到 Ptengine X →「自定义应用管理」→ 部署令牌 撤销旧令牌、生成新的，' +
+            '到 Ptengine →「自定义应用管理」→ 部署令牌 撤销旧令牌、生成新的，' +
             '并把这个文件从 git 历史里清掉（不能只删掉这次改动，历史里还留着）');
     }
 }
