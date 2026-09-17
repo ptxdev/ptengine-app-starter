@@ -96,6 +96,13 @@ test('相对 glob + 依赖就在 web/ 下（老的纯前端布局）→ ok，不
     assert.equal(res.level, 'ok');
 });
 
+test("已生成应用的最小修法 '../node_modules/…' 也判通过（docs/troubleshooting.md 里写的那条）", () => {
+    const config = RELATIVE_CONFIG.replace('./node_modules/', '../node_modules/');
+    assert.equal(checkTailwindContent(project({ config, depsAt: 'root' })).level, 'ok');
+    // 依赖真在 web/ 下时，'../' 就退过头了 —— 仍应被判出来
+    assert.equal(checkTailwindContent(project({ config, depsAt: 'web' })).level, 'bad');
+});
+
 test('按包名解析 → ok，无论依赖装在哪一层', () => {
     assert.equal(checkTailwindContent(project({ config: RESOLVED_CONFIG, depsAt: 'root' })).level, 'ok');
     assert.equal(checkTailwindContent(project({ config: RESOLVED_CONFIG, depsAt: 'web' })).level, 'ok');

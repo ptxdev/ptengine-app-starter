@@ -52,6 +52,11 @@ Tailwind 把相对 glob 按**配置文件所在目录**（也就是 `web/`）解
 修法：按**包名**解析成绝对路径，装在哪一层都能找到 —— 见 `web/tailwind.config.js` 里
 `resolveDesignComponentsDist()` 的写法，不要改回相对路径。
 
+**已经生成出来的应用怎么救**：不必重新生成。要么把 `web/tailwind.config.js` 整个换成脚手架的新版本
+（推荐，装在哪一层都不用管），要么最小改动 —— 把那条 glob 的 `./node_modules/…` 改成
+`'../node_modules/@ptengine/design-components/dist/**/*.{js,cjs}'`（多一个 `../`，从 `web/` 退到项目根）。
+改完重新构建，`wc -c web/dist/assets/*.css` 应该从十几 KB 跳到近百 KB。
+
 自查：`npm run doctor` 会**真的去跑这条 glob**，匹配不到文件就报
 「tailwind content 里组件库 dist 的 glob 一个文件都匹配不到」。
 也可以直接量一下产物：`wc -c web/dist/assets/*.css`，再 `grep -c 'bg-primary' web/dist/assets/*.css`。
