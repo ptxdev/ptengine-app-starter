@@ -12,7 +12,8 @@
  *   npx ptx doctor --deps     额外检查 @ptengine/* 依赖是否落后于 npm 最新版（需要网络）
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { readManifest, resolveBackend, validateManifest } from './manifest.mjs';
 import { parseJsonc } from './jsonc.mjs';
@@ -56,6 +57,150 @@ function checkManifestEntry(root, manifest) {
 
 // ─── 四处 UI 接线（错了都不报错，只是样式不对）───────────────────────────
 
+/**
+ * 把一个 glob 变成正则。只支持 Tailwind content 里实际会出现的几种写法：
+ * `**`（跨目录）、`*`（单层）、`?`、以及 `{js,cjs}` 这样的花括号枚举。
+ */
+function globToRegExp(pattern) {
+    const p = pattern.split(sep).join('/');
+    let out = '';
+    for (let i = 0; i < p.length; i++) {
+        const c = p[i];
+        if (c === '*') {
+            if (p[i + 1] === '*') {
+                // `**/` 允许匹配零层目录，所以整段（含斜杠）都是可选的。
+                if (p[i + 2] === '/') { out += '(?:.*/)?'; i += 2; } else { out += '.*'; i += 1; }
+            } else out += '[^/]*';
+        } else if (c === '?') out += '[^/]';
+        else if (c === '{') {
+            const end = p.indexOf('}', i);
+            if (end === -1) out += '\\{';
+            else {
+                out += `(?:${p.slice(i + 1, end).split(',').map(x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`;
+                i = end;
+            }
+        } else out += c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+    return new RegExp(`^${out}$`);
+}
+
+/**
+ * glob 至少匹配到一个真实存在的文件？
+ *
+ * 从 glob 里第一个通配符之前的那段字面量目录开始递归走，避免把整个磁盘翻一遍。
+ */
+function globMatchesAnyFile(pattern) {
+    const p = pattern.split(sep).join('/');
+    const star = p.search(/[*?{]/);
+    const base = star === -1 ? dirname(p) : p.slice(0, p.lastIndexOf('/', star) + 1) || '/';
+    if (!existsSync(base)) return false;
+    const re = globToRegExp(p);
+    const stack = [base.replace(/\/$/, '') || '/'];
+    let seen = 0;
+    while (stack.length) {
+        const dir = stack.pop();
+        let entries;
+        try { entries = readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+        for (const e of entries) {
+            const full = `${dir}/${e.name}`;
+            if (e.isDirectory()) stack.push(full);
+            else if (re.test(full)) return true;
+            if (++seen > 50000) return false;   // 兜底，别在畸形 glob 上转太久
+        }
+    }
+    return false;
+}
+
+/**
+ * tailwind content 里覆盖组件库 dist 的那条 glob，**真的能匹配到文件吗**。
+ *
+ * 为什么不只做字符串匹配（这条规则原来就是字符串匹配，漏掉了真正的坑）：
+ * Tailwind 把相对 glob 按**配置文件所在目录**（web/）解析，而带后端的布局里
+ * node_modules/ 装在**项目根**、没有 web/node_modules/ ——
+ * `./node_modules/@ptengine/design-components/dist/**` 于是一个文件都匹配不到，
+ * 不报错、不告警，只是组件的 class 全都不生成，页面"结构对、没样式"。
+ *
+ * 这里不 import 配置本身：组件库的 tailwind.preset.js 在裸 Node ESM 下解析不了
+ * （它 import 'tailwindcss/plugin'，靠打包器的 CJS 解析才能跑）。所以改成按
+ * 配置里实际用的两种写法各自求值：字面量相对 glob 按 web/ 解析，按包名解析的
+ * 写法就用 createRequire 从配置文件出发重做一遍 —— 与配置同一条路径。
+ *
+ * 返回 { level, msg, why } 以便单测。
+ */
+export function checkTailwindContent(root) {
+    const configPath = join(root, 'web', 'tailwind.config.js');
+    if (!existsSync(configPath)) {
+        return { level: 'bad', msg: 'web/tailwind.config.js 不存在', msgKey: 'missing', why: '组件库的设计 token 接不进来' };
+    }
+    const src = readFileSync(configPath, 'utf8');
+    const webDir = join(root, 'web');
+
+    /** 候选 glob：[人类可读的来源, 绝对 glob]。 */
+    const candidates = [];
+
+    // 写法 A：字面量里直接写了包名（老写法，多半是相对路径）。
+    for (const m of src.matchAll(/['"`]([^'"`\n]*@ptengine\/design-components[^'"`\n]*)['"`]/g)) {
+        const g = m[1];
+        if (!g.includes('dist')) continue;           // tailwind-preset / tokens.css 的 import 不算
+        candidates.push([g, isAbsolute(g) ? g : resolve(webDir, g)]);
+    }
+
+    // 写法 B：按包名解析（推荐写法）。用与配置同一条解析路径重做一遍。
+    if (/require\.resolve\(\s*['"]@ptengine\/design-components/.test(src)) {
+        const req = createRequire(configPath);
+        let dist = null;
+        try {
+            dist = join(dirname(req.resolve('@ptengine/design-components/package.json')), 'dist');
+        } catch {
+            try {
+                let dir = dirname(req.resolve('@ptengine/design-components'));
+                for (let i = 0; i < 5 && dir; i++) {
+                    try {
+                        if (JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).name === '@ptengine/design-components') { dist = join(dir, 'dist'); break; }
+                    } catch { /* 这一层没有 package.json */ }
+                    const up = dirname(dir);
+                    if (up === dir) break;
+                    dir = up;
+                }
+            } catch { /* 包根本没装 */ }
+        }
+        if (!dist) {
+            return {
+                level: 'bad',
+                msg: '解析不到 @ptengine/design-components 的安装位置',
+                msgKey: 'unresolved',
+                why: '配置按包名解析 dist 目录，但这个包没装上。先 npm install。'
+            };
+        }
+        candidates.push(['按包名解析', join(dist, '**', '*.{js,cjs}')]);
+    }
+
+    if (candidates.length === 0) {
+        return {
+            level: 'bad',
+            msg: 'tailwind content 里没有覆盖 @ptengine/design-components 的 dist',
+            msgKey: 'absent',
+            why: '组件的 class 字符串在**已编译的库产物里**。漏了这条，Tailwind 扫不到、' +
+                 '不生成对应 CSS，页面渲染出"结构对但完全没有样式"的组件。'
+        };
+    }
+
+    const hit = candidates.find(([, g]) => globMatchesAnyFile(g));
+    if (hit) {
+        return { level: 'ok', msg: `tailwind content 覆盖了组件库 dist，且 glob 能匹配到文件（${hit[0]}）`, msgKey: 'ok' };
+    }
+    return {
+        level: 'bad',
+        msg: `tailwind content 里组件库 dist 的 glob 一个文件都匹配不到：${candidates.map(([g]) => g).join('、')}`,
+        msgKey: 'nomatch',
+        why: 'Tailwind 把相对 glob 按**配置文件所在目录**（web/）解析，而依赖装在**项目根**的 ' +
+             'node_modules/ —— 带后端的布局下没有 web/node_modules/，这条 glob 于是静默地扫不到任何文件：' +
+             '不报错、不告警，只是组件的 class 全都不生成，页面"结构对、没样式"（CSS 产物会小一个量级）。' +
+             "改成按包名解析绝对路径：createRequire(import.meta.url) 拿到 @ptengine/design-components 的安装位置，" +
+             '再拼 dist/**/*.{js,cjs}。见 web/tailwind.config.js 的注释。'
+    };
+}
+
 function checkTailwind(root) {
     const src = read(root, 'web/tailwind.config.js');
     if (!src) return bad('web/tailwind.config.js 不存在', '组件库的设计 token 接不进来');
@@ -70,15 +215,8 @@ function checkTailwind(root) {
         );
     }
 
-    if (/@ptengine\/design-components\/dist/.test(src)) {
-        ok('tailwind content 覆盖了组件库 dist');
-    } else {
-        bad(
-            'tailwind content 里没有 @ptengine/design-components/dist/**',
-            '组件的 class 字符串在**已编译的库产物里**。漏了这条，Tailwind 扫不到、' +
-            '不生成对应 CSS，页面渲染出"结构对但完全没有样式"的组件。'
-        );
-    }
+    const { level, msg, why } = checkTailwindContent(root);
+    results.push(why ? { level, msg, why } : { level, msg });
 }
 
 function checkTokensCss(root) {

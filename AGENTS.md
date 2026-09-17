@@ -327,7 +327,7 @@ const res = await window.PtApp.data.query({
 | 位置 | 作用 | 错了会怎样 |
 |---|---|---|
 | `web/tailwind.config.js` 的 `presets: [designPreset]` | token（颜色/字阶/圆角）+ `state-layer` 插件 | 组件掉成 Tailwind 默认观感 |
-| `web/tailwind.config.js` content 里 `node_modules/@ptengine/design-components/dist/**` | 组件 class 在**编译后的库产物**里 | 组件「有结构、没样式」 |
+| `web/tailwind.config.js` content 里指向组件库 `dist/**` 的那条 glob（**按包名解析成绝对路径**，见文件里的 `resolveDesignComponentsDist()`）| 组件 class 在**编译后的库产物**里 | 组件「有结构、没样式」。别改回相对路径 `'./node_modules/...'`：相对 glob 按 `web/` 解析，而依赖装在项目根，改回去会静默地一个文件都扫不到 |
 | `web/src/main.tsx` 的 `import '@ptengine/design-components/styles/tokens.css'` | 提供 `--pt-*` 变量 | 所有颜色失效 |
 | `web/src/theme.ts` 的 `applyPtTheme()` 在 **`<html>`** 上挂 `pt-ui` | 库不写任何 `:root` 级样式 | 同上；挂到 `#root` 则「页面正常、一开弹窗就没样式」（Radix 浮层 portal 到 `body`） |
 
