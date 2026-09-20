@@ -10,7 +10,7 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/app-backend` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|---|
-| 未发布 | `^2.4.0` | `^0.4.0` | `^0.5.0` | **2**（轻应用 1）| `@ptengine/app-sdk` 2.4：`context.user { id, email, name }`；取数契约 `requiredScope` 自 2.2.2 起与 manifest 四个 scope 同口径（≤2.2.1 的 `query:read` 已废）。`@ptengine/app-backend` 0.4：`ctx.auth.email / name`；0.3 起 `ctx.files` 前缀带工作区（客户应用不可用，不受影响）。**`0.x` 的 caret 不跨 minor，旧项目要手改区间再 `npm install`** |
+| v3.3.0 | `^2.4.0` | `^0.4.0` | `^0.5.0` | **2**（轻应用 1）| `@ptengine/app-sdk` 2.4：`context.user { id, email, name }`；取数契约 `requiredScope` 自 2.2.2 起与 manifest 四个 scope 同口径（≤2.2.1 的 `query:read` 已废）。`@ptengine/app-backend` 0.4：`ctx.auth.email / name`；0.3 起 `ctx.files` 前缀带工作区（客户应用不可用，不受影响）。**`0.x` 的 caret 不跨 minor，旧项目要手改区间再 `npm install`** |
 | v3.2.1 | `^2.2.0` | `^0.2.0` | `^0.5.0` | **2**（轻应用 1）| 修复带后端布局下组件样式全丢（Tailwind `content` 改为按包解析绝对路径）|
 | v3.2.0 | `^2.2.0` | `^0.2.0` | `^0.5.0` | **2**（轻应用 1）| `@ptengine/app-sdk` 升到 2.x（`PtApp.auth.getAppToken()` 可用）；`@ptengine/app-backend` 升到 0.2.x（`ctx.vars`）；轻应用（无后端）零改动可用 |
 | v3.1.0 | `^1.2.0`（待 `2.0.0`） | `^0.1.0` | `^0.5.0` | **2** | `ptx deploy --stream`；`ptx doctor` 令牌泄漏检查；默认 API 域名改线上正式环境 |
@@ -25,7 +25,7 @@
 | v1.0.1 | `^0.3.0` | — | — | 1 | 支持在平台内加载本地 dev server 联调 |
 | v1.0.0 | `^0.2.0` | — | — | 1 | 首个版本 |
 
-## [未发布]
+## [3.3.0] - 2026-09-20
 
 ### 变更
 
