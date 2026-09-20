@@ -14,8 +14,8 @@
         "ptx": "node scripts/ptx.mjs"
     },
     "dependencies": {
-        "@ptengine/app-backend": "^0.4.0",
-        "@ptengine/app-sdk": "^2.4.0",
+        "@ptengine/app-backend": "^0.5.0",
+        "@ptengine/app-sdk": "^2.5.0",
         "@ptengine/design-components": "^0.5.0",
         "react": "^19.1.1",
         "react-dom": "^19.1.1"
