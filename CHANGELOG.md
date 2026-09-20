@@ -30,7 +30,7 @@
 
 ### 变更
 
-- **`ptx doctor` 新增 `@ptengine/*` 版本下限检查**：`package.json` 区间下界与 `node_modules` 实际安装版本都必须 ≥ 脚手架要求（app-sdk ≥ 2.4.0、app-backend ≥ 0.4.0，表在 `scripts/ptx-doctor.mjs` 的 `PACKAGE_FLOORS`，与本文件兼容矩阵同一次改）；低于则 bad 并给出 `npm i` 修法。skill 只写下限、让 AI 开工先核对，避免再出现「文档是新口径、项目装的是老包」。
+- **`ptx doctor` 新增 `@ptengine/*` 版本下限检查**：`package.json` 区间下界与 `node_modules` 实际安装版本都必须 ≥ 脚手架要求（app-sdk ≥ 2.5.0、app-backend ≥ 0.5.0，表在 `scripts/ptx-doctor.mjs` 的 `PACKAGE_FLOORS`，与本文件兼容矩阵同一次改）；低于则 bad 并给出 `npm i` 修法。skill 只写下限、让 AI 开工先核对，避免再出现「文档是新口径、项目装的是老包」。
 - 补回 `.github/workflows/release.yml`：推 `v*` tag 时从本文件抽出对应版本段落建 GitHub Release（只在脚手架仓生效，客户仓不触发）。迁到 GitLab 时它被落下了，`v3.0.0` 起的 tag 都没有 Release 页面。
 
 ## [3.4.0] - 2026-09-20
