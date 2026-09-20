@@ -1,0 +1,47 @@
+name: Release
+
+# 脚手架自身的 GitHub Release：推 v* tag 时，从 CHANGELOG.md 抽出对应版本那一段作为说明。
+#
+# 只在脚手架仓（ptxdev/ptengine-app-starter，GitLab 的 push mirror）上跑：
+# 客户 clone 出去的应用仓也会带着这个文件，但那里的 v* tag 是应用自己的发布（见 deploy.yml），
+# 不该在客户仓里建 Release，所以用 github.repository 守住。
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.repository == 'ptxdev/ptengine-app-starter'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # CHANGELOG 的版本标题形如 `## [3.3.0] - 2026-09-20`；tag 是 `v3.3.0`。
+      # 抽出该标题到下一个 `## [` 之间的内容；抽不到就用一句兜底，不让发布失败。
+      - name: 从 CHANGELOG 抽取本版说明
+        id: notes
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" { on=1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > /tmp/notes.md
+          if [ ! -s /tmp/notes.md ]; then
+            echo "CHANGELOG.md 里没有 ## [$VERSION] 段落，见文件内兼容矩阵。" > /tmp/notes.md
+          fi
+          echo "bytes=$(wc -c < /tmp/notes.md)" >> "$GITHUB_OUTPUT"
+
+      - name: 建 Release（已存在则更新说明）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --notes-file /tmp/notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --title "$GITHUB_REF_NAME" --notes-file /tmp/notes.md --verify-tag
+          fi
