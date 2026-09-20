@@ -32,7 +32,8 @@ verify:
     - npm run build
     - npm run package
     # 打出来的包里不得有本地密钥文件 / 源码目录
-    - ZIP=$(ls *.zip | head -1); echo "package: $ZIP"; unzip -l "$ZIP"
+    # 整行加引号：`echo "package: $ZIP"` 里的「冒号+空格」会被 YAML 当成映射，job 就成了 yaml invalid
+    - 'ZIP=$(ls *.zip | head -1); echo "package: $ZIP"; unzip -l "$ZIP"'
     - '! unzip -l "$ZIP" | grep -E "\.dev\.vars|node_modules/|backend/src/"'
   artifacts:
     paths: ['*.zip']
