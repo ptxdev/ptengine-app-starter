@@ -489,8 +489,8 @@ npx ptx deploy --publish --stream  # 同上，流式打印九步进度（否则�
 写成 1 会让平台**静默忽略**后端，跑出一个「前端正常、所有 API 404」的应用。
 
 脚手架与 `@ptengine/*` 包的配套关系见 [CHANGELOG 的兼容矩阵](./CHANGELOG.md#兼容矩阵)。
-`ctx.vars` 需要 `@ptengine/app-backend` ≥ `0.2.0`：`0.x` 的 caret 不跨 minor，
-所以 `package.json` 里必须写 `^0.2.0`（写 `^0.1.0` 装到的运行时没有 `ctx.vars`）；
+`ctx.vars` 需要 `@ptengine/app-backend` ≥ `0.2.0`，`ctx.auth.email / name` 需要 ≥ `0.4.0`：`0.x` 的 caret 不跨 minor，
+所以 `package.json` 里必须写 `^0.4.0`（写 `^0.1.0` / `^0.2.0` 装到的运行时没有这些字段）；
 改完区间要重跑一次 `npm install` 刷 `package-lock.json`。
 
 **已经在开发中的项目通常不需要升级脚手架** —— 它是一次性起点，不是运行时依赖。

@@ -10,6 +10,7 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/app-backend` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|---|
+| 未发布 | `^2.4.0` | `^0.4.0` | `^0.5.0` | **2**（轻应用 1）| `@ptengine/app-sdk` 2.4：`context.user { id, email, name }`；取数契约 `requiredScope` 自 2.2.2 起与 manifest 四个 scope 同口径（≤2.2.1 的 `query:read` 已废）。`@ptengine/app-backend` 0.4：`ctx.auth.email / name`；0.3 起 `ctx.files` 前缀带工作区（客户应用不可用，不受影响）。**`0.x` 的 caret 不跨 minor，旧项目要手改区间再 `npm install`** |
 | v3.2.1 | `^2.2.0` | `^0.2.0` | `^0.5.0` | **2**（轻应用 1）| 修复带后端布局下组件样式全丢（Tailwind `content` 改为按包解析绝对路径）|
 | v3.2.0 | `^2.2.0` | `^0.2.0` | `^0.5.0` | **2**（轻应用 1）| `@ptengine/app-sdk` 升到 2.x（`PtApp.auth.getAppToken()` 可用）；`@ptengine/app-backend` 升到 0.2.x（`ctx.vars`）；轻应用（无后端）零改动可用 |
 | v3.1.0 | `^1.2.0`（待 `2.0.0`） | `^0.1.0` | `^0.5.0` | **2** | `ptx deploy --stream`；`ptx doctor` 令牌泄漏检查；默认 API 域名改线上正式环境 |
@@ -23,6 +24,15 @@
 | v1.1.0 | `^0.3.0` | — | `^0.3.0` | 1 | 预装 UI 组件库 + Tailwind，暗色跟随平台主题 |
 | v1.0.1 | `^0.3.0` | — | — | 1 | 支持在平台内加载本地 dev server 联调 |
 | v1.0.0 | `^0.2.0` | — | — | 1 | 首个版本 |
+
+## [未发布]
+
+### 变更
+
+- **依赖区间**：`@ptengine/app-sdk` `^2.2.0` → `^2.4.0`，`@ptengine/app-backend` `^0.2.0` → `^0.4.0`；`package-lock.json` 锁到 2.4.0 / 0.4.0。
+  - app-sdk 2.4：`PtApp.context.user { id, email, name }`（老宿主没有，判空）；2.2.2 起 `data-query.schema.json` 的 `requiredScope` 与 manifest 的 `analytics:read / profile:read / user:read` 同口径，≤2.2.1 里的 `query:read` 不要写进 manifest。
+  - app-backend 0.4：`ctx.auth.email / ctx.auth.name`（可选，来自已签名令牌）。0.3 的 `ctx.files` 前缀变更只影响官方应用。
+  - 已在开发中的项目：`0.x` 的 caret 拿不到新 minor，请手改 `package.json` 区间后重跑 `npm install`。
 
 ## [3.2.1] - 2026-09-17
 
