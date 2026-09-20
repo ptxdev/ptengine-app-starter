@@ -11,7 +11,8 @@
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/app-backend` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|---|
 | 未发布 | `^2.4.0` | `^0.4.0` | `^0.5.0` | **2**（轻应用 1）| `@ptengine/app-sdk` 2.4：`context.user { id, email, name }`；取数契约 `requiredScope` 自 2.2.2 起与 manifest 四个 scope 同口径（≤2.2.1 的 `query:read` 已废）。`@ptengine/app-backend` 0.4：`ctx.auth.email / name`；0.3 起 `ctx.files` 前缀带工作区（客户应用不可用，不受影响）。**`0.x` 的 caret 不跨 minor，旧项目要手改区间再 `npm install`** |
-| v3.2.1 | `^2.2.0` | `^0.2.0` | `^0.5.0` | **2**（轻应用 1）| `@ptengine/app-sdk` 升到 2.x（`PtApp.auth.getAppToken()` 可用）；`@ptengine/app-backend` 升到 0.2.x（`ctx.vars`）；轻应用（无后端）零改动可用 |
+| v3.2.1 | `^2.2.0` | `^0.2.0` | `^0.5.0` | **2**（轻应用 1）| 修复带后端布局下组件样式全丢（Tailwind `content` 改为按包解析绝对路径）|
+| v3.2.0 | `^2.2.0` | `^0.2.0` | `^0.5.0` | **2**（轻应用 1）| `@ptengine/app-sdk` 升到 2.x（`PtApp.auth.getAppToken()` 可用）；`@ptengine/app-backend` 升到 0.2.x（`ctx.vars`）；轻应用（无后端）零改动可用 |
 | v3.1.0 | `^1.2.0`（待 `2.0.0`） | `^0.1.0` | `^0.5.0` | **2** | `ptx deploy --stream`；`ptx doctor` 令牌泄漏检查；默认 API 域名改线上正式环境 |
 | v3.0.1 | `^2.0.0` | `^0.1.0`（npm） | `^0.5.0` | **2** | `@ptengine/app-backend` 首发到公共 npm，脚手架改为依赖它；修示例错误码；manifest 加 `id` |
 | v3.0.0 | `^2.0.0` | `file:../app-backend` | `^0.5.0` | **2** | **新增后端运行时**：每个应用一个 Worker，前后端同包同版本。目录结构变化（前端移到 `web/`）|
@@ -32,6 +33,35 @@
   - app-sdk 2.4：`PtApp.context.user { id, email, name }`（老宿主没有，判空）；2.2.2 起 `data-query.schema.json` 的 `requiredScope` 与 manifest 的 `analytics:read / profile:read / user:read` 同口径，≤2.2.1 里的 `query:read` 不要写进 manifest。
   - app-backend 0.4：`ctx.auth.email / ctx.auth.name`（可选，来自已签名令牌）。0.3 的 `ctx.files` 前缀变更只影响官方应用。
   - 已在开发中的项目：`0.x` 的 caret 拿不到新 minor，请手改 `package.json` 区间后重跑 `npm install`。
+
+## [3.2.1] - 2026-09-17
+
+### 修复
+
+- **带后端的布局下，组件库的样式全都不生成**（`web/tailwind.config.js` 的 `content`）。
+  症状是页面"结构对、完全没样式"：DOM 层级和文案都在，但颜色、圆角、间距、hover 叠加层全没了，
+  按钮看着像一段纯文本。原因是那条覆盖组件库产物的 glob 写成了相对路径
+  `'./node_modules/@ptengine/design-components/dist/**/*.{js,cjs}'` —— Tailwind 把相对 glob 按
+  **配置文件所在目录**（`web/`）解析，而 v3 把依赖装在**项目根**的 `node_modules/`，
+  压根没有 `web/node_modules/`，于是这条 glob 一个文件都匹配不到。
+  它不报错、不告警，构建照样"成功"，只有 CSS 产物小一个量级（实测 16KB，修好后 88KB）。
+  v1/v2 的纯前端应用 `node_modules/` 就在配置旁边，所以同样的写法当时看着是对的 ——
+  正是这一点让它在 v3 里活了下来。
+
+  现在 `content` 里那一条**按包名解析成绝对路径**（`createRequire(import.meta.url)` +
+  `require.resolve`，并对组件库 `exports` 没暴露 `./package.json` 的情况做了包根兜底），
+  依赖装在哪一层都能找到。配置里的「两处不要动」注释同步更新，明确写了不要改回相对路径。
+
+- **`ptx doctor` 现在真的去验证这条 glob**。此前这条规则只是字符串匹配
+  `@ptengine/design-components/dist`，而出问题的配置**恰好能通过字符串匹配** —— 规则在，
+  坑照样踩。现在 doctor 按配置里实际用的写法求值（字面量相对 glob 按 `web/` 解析；
+  按包名解析的写法用 `createRequire` 从配置文件出发重做一遍），然后真的去磁盘上跑这条 glob，
+  匹配不到文件就报错，并把"依赖装在项目根、glob 按 web/ 解析"这个层级原因写进提示里。
+  依赖装在 `web/` 下的老布局仍判为通过，不误报。
+
+### 文档
+
+- `docs/troubleshooting.md` 新增「页面只有结构没有样式 / 按钮变成纯文字」条目。
 
 ## [3.2.0] - 2026-09-16
 

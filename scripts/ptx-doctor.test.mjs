@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkMigrationsAdditive } from './ptx-doctor.mjs';
+import { checkMigrationsAdditive, checkTailwindContent } from './ptx-doctor.mjs';
 
 function fixture(files) {
     const root = mkdtempSync(join(tmpdir(), 'ptx-doctor-'));
@@ -44,4 +44,97 @@ test('没有 backend 段时什么都不做', () => {
     const results = [];
     checkMigrationsAdditive(fixture({}), {}, results);
     assert.equal(results.length, 0);
+});
+
+// ─── tailwind content 的 glob 必须真的能匹配到文件 ───────────────────────
+//
+// 这条规则原来只做字符串匹配，于是漏掉了真正的坑：相对 glob 按**配置文件所在
+// 目录**（web/）解析，而带后端的布局把依赖装在**项目根** —— 没有 web/node_modules/，
+// glob 一个文件都匹配不到，还完全不报错。下面的用例锁的就是这个差别。
+
+/** 造一个假的 @ptengine/design-components 包。exports 里是否暴露 ./package.json 可选。 */
+function fakeDesignComponents(nodeModulesDir, { exposePackageJson } = {}) {
+    const pkgDir = join(nodeModulesDir, '@ptengine', 'design-components');
+    mkdirSync(join(pkgDir, 'dist', 'components'), { recursive: true });
+    writeFileSync(join(pkgDir, 'dist', 'index.cjs'), 'module.exports = {};');
+    writeFileSync(join(pkgDir, 'dist', 'components', 'button.js'), 'export const cls = "bg-primary";');
+    const exports = { '.': { require: './dist/index.cjs', import: './dist/index.cjs' }, './tailwind-preset': './tailwind.preset.js' };
+    if (exposePackageJson) exports['./package.json'] = './package.json';
+    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name: '@ptengine/design-components', version: '0.5.3', main: 'dist/index.cjs', exports }));
+    return pkgDir;
+}
+
+const RELATIVE_CONFIG = `import designPreset from '@ptengine/design-components/tailwind-preset';
+export default { presets: [designPreset], content: ['./index.html', './src/**/*.{ts,tsx}', './node_modules/@ptengine/design-components/dist/**/*.{js,cjs}'] };`;
+
+const RESOLVED_CONFIG = `import path from 'node:path';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const dcDist = path.join(path.dirname(require.resolve('@ptengine/design-components/package.json')), 'dist');
+export default { presets: [designPreset], content: ['./index.html', \`\${dcDist}/**/*.{js,cjs}\`] };`;
+
+/** 造一个项目：web/tailwind.config.js + 可选的两处 node_modules。 */
+function project({ config, depsAt = 'root', exposePackageJson = false } = {}) {
+    const root = mkdtempSync(join(tmpdir(), 'ptx-tw-'));
+    mkdirSync(join(root, 'web'), { recursive: true });
+    if (config !== undefined) writeFileSync(join(root, 'web', 'tailwind.config.js'), config);
+    if (depsAt === 'root') fakeDesignComponents(join(root, 'node_modules'), { exposePackageJson });
+    if (depsAt === 'web') fakeDesignComponents(join(root, 'web', 'node_modules'), { exposePackageJson });
+    return root;
+}
+
+test('相对 glob + 依赖装在项目根（带后端的布局）→ bad：glob 一个文件都匹配不到', () => {
+    const res = checkTailwindContent(project({ config: RELATIVE_CONFIG, depsAt: 'root' }));
+    assert.equal(res.level, 'bad');
+    assert.equal(res.msgKey, 'nomatch');
+    assert.match(res.why, /web\//);          // 指出层级原因
+    assert.match(res.why, /node_modules/);
+});
+
+test('相对 glob + 依赖就在 web/ 下（老的纯前端布局）→ ok，不误报', () => {
+    const res = checkTailwindContent(project({ config: RELATIVE_CONFIG, depsAt: 'web' }));
+    assert.equal(res.level, 'ok');
+});
+
+test("已生成应用的最小修法 '../node_modules/…' 也判通过（docs/troubleshooting.md 里写的那条）", () => {
+    const config = RELATIVE_CONFIG.replace('./node_modules/', '../node_modules/');
+    assert.equal(checkTailwindContent(project({ config, depsAt: 'root' })).level, 'ok');
+    // 依赖真在 web/ 下时，'../' 就退过头了 —— 仍应被判出来
+    assert.equal(checkTailwindContent(project({ config, depsAt: 'web' })).level, 'bad');
+});
+
+test('按包名解析 → ok，无论依赖装在哪一层', () => {
+    assert.equal(checkTailwindContent(project({ config: RESOLVED_CONFIG, depsAt: 'root' })).level, 'ok');
+    assert.equal(checkTailwindContent(project({ config: RESOLVED_CONFIG, depsAt: 'web' })).level, 'ok');
+});
+
+test('组件库的 exports 没暴露 ./package.json 时也要能解析（走包根兜底）', () => {
+    const res = checkTailwindContent(project({ config: RESOLVED_CONFIG, depsAt: 'root', exposePackageJson: false }));
+    assert.equal(res.level, 'ok');
+    // 反面：暴露了也一样能过
+    assert.equal(checkTailwindContent(project({ config: RESOLVED_CONFIG, depsAt: 'root', exposePackageJson: true })).level, 'ok');
+});
+
+test('按包名解析但包根本没装 → bad，提示去 npm install', () => {
+    const res = checkTailwindContent(project({ config: RESOLVED_CONFIG, depsAt: 'none' }));
+    assert.equal(res.level, 'bad');
+    assert.equal(res.msgKey, 'unresolved');
+    assert.match(res.why, /npm install/);
+});
+
+test('content 里压根没有组件库 dist → bad', () => {
+    const res = checkTailwindContent(project({ config: "export default { content: ['./src/**/*.tsx'] };" }));
+    assert.equal(res.level, 'bad');
+    assert.equal(res.msgKey, 'absent');
+});
+
+test('配置文件不存在 → bad', () => {
+    assert.equal(checkTailwindContent(project({})).msgKey, 'missing');
+});
+
+test('只 import tailwind-preset、不算 content 覆盖（字符串匹配的旧坑）', () => {
+    const res = checkTailwindContent(project({
+        config: "import p from '@ptengine/design-components/tailwind-preset';\nexport default { presets: [p], content: ['./src/**/*.tsx'] };"
+    }));
+    assert.equal(res.msgKey, 'absent');
 });

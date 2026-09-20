@@ -37,6 +37,30 @@ README 里列了最常撞上的五条，这里是全集。绝大多数问题 `np
 **组件渲染出来没有样式？**
 见 AGENTS.md 的「四处接线」，或直接跑 `npm run doctor`。
 
+**页面只有结构没有样式 / 按钮变成纯文字？**
+组件的 DOM 层级都对、文案也在，但颜色、圆角、间距、hover 叠加层全没了，按钮看着像一段纯文本 ——
+这是 Tailwind **没扫到组件库的 class**。组件的 class 字符串在**已编译的库产物里**
+（`node_modules/@ptengine/design-components/dist/`），不在你的源码里，必须由
+`web/tailwind.config.js` 的 `content` 显式覆盖到。
+
+最典型的踩法是把那条 glob 写成相对路径 `'./node_modules/@ptengine/design-components/dist/**'`：
+Tailwind 把相对 glob 按**配置文件所在目录**（也就是 `web/`）解析，而依赖装在**项目根**的
+`node_modules/` —— 带后端的布局下根本没有 `web/node_modules/`，这条 glob 于是一个文件都匹配不到。
+它不报错、不告警，构建照样"成功"，只有 CSS 产物小一个量级（十几 KB 而不是近百 KB）。
+（v1/v2 的纯前端应用 `node_modules/` 就在配置旁边，所以同样的写法当时看着没问题。）
+
+修法：按**包名**解析成绝对路径，装在哪一层都能找到 —— 见 `web/tailwind.config.js` 里
+`resolveDesignComponentsDist()` 的写法，不要改回相对路径。
+
+**已经生成出来的应用怎么救**：不必重新生成。要么把 `web/tailwind.config.js` 整个换成脚手架的新版本
+（推荐，装在哪一层都不用管），要么最小改动 —— 把那条 glob 的 `./node_modules/…` 改成
+`'../node_modules/@ptengine/design-components/dist/**/*.{js,cjs}'`（多一个 `../`，从 `web/` 退到项目根）。
+改完重新构建，`wc -c web/dist/assets/*.css` 应该从十几 KB 跳到近百 KB。
+
+自查：`npm run doctor` 会**真的去跑这条 glob**，匹配不到文件就报
+「tailwind content 里组件库 dist 的 glob 一个文件都匹配不到」。
+也可以直接量一下产物：`wc -c web/dist/assets/*.css`，再 `grep -c 'bg-primary' web/dist/assets/*.css`。
+
 **页面正常、一打开弹窗就没样式？**
 `pt-ui` 挂在 `#root` 上了。Radix 浮层 portal 到 `document.body`，必须挂在 `<html>`。
 
