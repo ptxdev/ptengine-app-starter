@@ -491,7 +491,7 @@ npx ptx deploy --publish --stream  # 同上，流式打印九步进度（否则�
 脚手架与 `@ptengine/*` 包的配套关系见 [CHANGELOG 的兼容矩阵](./CHANGELOG.md#兼容矩阵)。
 `ctx.vars` 需要 `@ptengine/app-backend` ≥ `0.2.0`，`ctx.auth.email / name` 需要 ≥ `0.4.0`：`0.x` 的 caret 不跨 minor，
 所以 `package.json` 里必须写 `^0.4.0`（写 `^0.1.0` / `^0.2.0` 装到的运行时没有这些字段）；
-改完区间要重跑一次 `npm install` 刷 `package-lock.json`。
+改完区间要重跑一次 `npm install` 刷 `package-lock.json`。`npm run doctor` 会核对区间与实际安装版本是否达到脚手架要求的下限（`scripts/ptx-doctor.mjs` 的 `PACKAGE_FLOORS`），**开工前先跑一次**。
 
 **已经在开发中的项目通常不需要升级脚手架** —— 它是一次性起点，不是运行时依赖。
 只在两种情况下需要跟进：CHANGELOG 里出现 **major**（平台约定有破坏性变更，照该版本的

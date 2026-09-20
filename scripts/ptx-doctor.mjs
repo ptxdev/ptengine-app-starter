@@ -533,6 +533,83 @@ export function checkVars(root, manifest) {
 
 // ─── 密钥与忽略项 ───────────────────────────────────────────────────────
 
+/**
+ * @ptengine/* 包的最低版本（floor）。**这是脚手架能力表的唯一机器可读副本**：
+ * skill / 文档只写"需要 ≥ 某版本"，真正的拦截在这里。改 floor 的时机只有一种——
+ * 脚手架开始依赖某个新版本才有的能力时（与 CHANGELOG 兼容矩阵同一次改）。
+ *
+ * 检查两层：
+ *   1. package.json 声明的区间下界 ≥ floor（区间写老了，npm install 装到的就是老包；
+ *      0.x 的 caret 不跨 minor，^0.2.0 永远拿不到 0.4）；
+ *   2. node_modules 里实际安装的版本 ≥ floor 且 ≥ 区间下界（lock 落后 / 没跑 npm install）。
+ */
+export const PACKAGE_FLOORS = {
+    '@ptengine/app-sdk': { min: '2.4.0', why: 'context.user；取数契约 requiredScope 与 manifest 四个 scope 同口径（≤2.2.1 还是 query:read）' },
+    '@ptengine/app-backend': { min: '0.4.0', why: 'ctx.auth.email / name；0.2 起 ctx.vars' }
+};
+
+function parseVersion(v) {
+    const m = /^(\d+)\.(\d+)\.(\d+)/.exec(String(v ?? '').trim());
+    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+function cmpVersion(a, b) {
+    for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] - b[i];
+    return 0;
+}
+/** 只认 `^x.y.z` / `~x.y.z` / `x.y.z` / `>=x.y.z` 这几种脚手架会写的形态；别的（workspace:、file:、*）返回 null 不判。 */
+function rangeLowerBound(range) {
+    const m = /^(?:\^|~|>=)?\s*(\d+\.\d+\.\d+)/.exec(String(range ?? '').trim());
+    return m ? parseVersion(m[1]) : null;
+}
+
+/**
+ * 与其它 check 不同，返回结果数组而不直接 push：方便单测在临时目录里跑。
+ * `installedVersion` 可注入，缺省读 node_modules/<pkg>/package.json。
+ */
+export function checkPackageFloors(root, deps = {}) {
+    const out = [];
+    const pkgRaw = read(root, 'package.json');
+    if (!pkgRaw) return out;   // package.json 缺失由 checkBackend 报，这里不重复
+    let pkg;
+    try { pkg = JSON.parse(pkgRaw); } catch { return out; }
+    const declared = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+    const installedVersion = deps.installedVersion ?? (name => {
+        const raw = read(root, join('node_modules', name, 'package.json'));
+        if (!raw) return null;
+        try { return JSON.parse(raw).version ?? null; } catch { return null; }
+    });
+
+    for (const [name, floor] of Object.entries(PACKAGE_FLOORS)) {
+        const range = declared[name];
+        if (range === undefined) continue;   // 轻应用可以没有 app-backend；缺 app-backend 由 checkBackend 报
+        const min = parseVersion(floor.min);
+        const lower = rangeLowerBound(range);
+        const fix = `npm i ${name}@^${floor.min}`;
+        if (lower && cmpVersion(lower, min) < 0) {
+            out.push({ level: 'bad', msg: `${name} 的依赖区间 ${range} 低于脚手架要求的 ≥${floor.min}`,
+                why: `${floor.why}。改 package.json 区间并重跑 npm install：${fix}` });
+            continue;
+        }
+        const inst = installedVersion(name);
+        const instV = parseVersion(inst);
+        if (!instV) {
+            out.push({ level: 'warn', msg: `${name} 没有安装（node_modules 里找不到）`, why: '先 npm install；doctor 只能按 package.json 判，装出来的可能是老包' });
+            continue;
+        }
+        if (cmpVersion(instV, min) < 0) {
+            out.push({ level: 'bad', msg: `${name} 实际安装的是 ${inst}，低于脚手架要求的 ≥${floor.min}`,
+                why: `${floor.why}。lock 落后于 package.json 或没重跑安装：${fix}` });
+            continue;
+        }
+        if (lower && cmpVersion(instV, lower) < 0) {
+            out.push({ level: 'warn', msg: `${name} 实际安装 ${inst} 低于 package.json 声明的 ${range}`, why: 'package-lock 落后，重跑 npm install' });
+            continue;
+        }
+        out.push({ level: 'ok', msg: `${name} ${inst}（要求 ≥${floor.min}）` });
+    }
+    return out;
+}
+
 function checkGitignore(root) {
     const src = read(root, '.gitignore');
     if (!src) return warn('.gitignore 不存在', '本地密钥文件可能被提交');
@@ -647,6 +724,7 @@ export async function run(args, root) {
     checkPtUiScope(root);
     checkRouting(root);
     checkBackend(root, manifest);
+    results.push(...checkPackageFloors(root));
     results.push(checkVars(root, manifest));
     checkScopeConsistency(root, manifest);
     checkMigrationsAdditive(root, manifest, results);

@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkMigrationsAdditive, checkTailwindContent } from './ptx-doctor.mjs';
+import { checkMigrationsAdditive, checkTailwindContent, checkPackageFloors, PACKAGE_FLOORS } from './ptx-doctor.mjs';
 
 function fixture(files) {
     const root = mkdtempSync(join(tmpdir(), 'ptx-doctor-'));
@@ -137,4 +137,47 @@ test('只 import tailwind-preset、不算 content 覆盖（字符串匹配的旧
         config: "import p from '@ptengine/design-components/tailwind-preset';\nexport default { presets: [p], content: ['./src/**/*.tsx'] };"
     }));
     assert.equal(res.msgKey, 'absent');
+});
+
+function floorFixture(deps) {
+    const root = mkdtempSync(join(tmpdir(), 'ptx-floors-'));
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'x', dependencies: deps }));
+    return root;
+}
+const byLevel = rs => rs.map(r => r.level).join(',');
+
+test('包版本 floor：区间与安装都满足 → 两条 ok', () => {
+    const root = floorFixture({ '@ptengine/app-sdk': '^2.4.0', '@ptengine/app-backend': '^0.4.0' });
+    const rs = checkPackageFloors(root, { installedVersion: n => (n.endsWith('app-sdk') ? '2.4.0' : '0.4.1') });
+    assert.equal(byLevel(rs), 'ok,ok');
+});
+
+test('包版本 floor：区间下界低于 floor → bad，并给出 npm i 修法', () => {
+    const root = floorFixture({ '@ptengine/app-sdk': '^2.2.0', '@ptengine/app-backend': '^0.4.0' });
+    const rs = checkPackageFloors(root, { installedVersion: () => '9.9.9' });
+    assert.equal(rs[0].level, 'bad');
+    assert.match(rs[0].msg, /\^2\.2\.0/);
+    assert.match(rs[0].why, /npm i @ptengine\/app-sdk@\^2\.4\.0/);
+    assert.equal(rs[1].level, 'ok');
+});
+
+test('包版本 floor：区间对但 node_modules 里装的是老包 → bad（lock 落后）', () => {
+    const root = floorFixture({ '@ptengine/app-sdk': '^2.4.0' });
+    const rs = checkPackageFloors(root, { installedVersion: () => '2.2.1' });
+    assert.equal(rs.length, 1);
+    assert.equal(rs[0].level, 'bad');
+    assert.match(rs[0].msg, /2\.2\.1/);
+});
+
+test('包版本 floor：没装 → warn；没声明的包跳过（轻应用可以没有 app-backend）', () => {
+    const root = floorFixture({ '@ptengine/app-sdk': '^2.4.0' });
+    const rs = checkPackageFloors(root, { installedVersion: () => null });
+    assert.equal(byLevel(rs), 'warn');
+});
+
+test('包版本 floor：floor 表与 package.json 模板的区间一致（改一处必须改另一处）', () => {
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+    for (const [name, floor] of Object.entries(PACKAGE_FLOORS)) {
+        assert.equal(pkg.dependencies[name], `^${floor.min}`, `${name} 的模板区间应为 ^${floor.min}`);
+    }
 });
