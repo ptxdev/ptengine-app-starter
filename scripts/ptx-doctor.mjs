@@ -544,8 +544,8 @@ export function checkVars(root, manifest) {
  *   2. node_modules 里实际安装的版本 ≥ floor 且 ≥ 区间下界（lock 落后 / 没跑 npm install）。
  */
 export const PACKAGE_FLOORS = {
-    '@ptengine/app-sdk': { min: '2.4.0', why: 'context.user；取数契约 requiredScope 与 manifest 四个 scope 同口径（≤2.2.1 还是 query:read）' },
-    '@ptengine/app-backend': { min: '0.4.0', why: 'ctx.auth.email / name；0.2 起 ctx.vars' }
+    '@ptengine/app-sdk': { min: '2.5.0', why: '新增 openapi:read scope；2.4 起 context.user；取数契约 requiredScope 与 manifest 的 scope 同口径（≤2.2.1 还是 query:read）' },
+    '@ptengine/app-backend': { min: '0.5.0', why: 'ctx.pt.openApiUrl；0.4 起 ctx.auth.email / name；0.2 起 ctx.vars' }
 };
 
 function parseVersion(v) {

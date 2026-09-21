@@ -192,6 +192,7 @@ ctx.files       // R2（需 backend.resources.files: true；前缀已限定）
 ctx.secrets.X   // manifest backend.secrets 里声明过的密钥
 ctx.fetch()     // 出站（受 egress 白名单管，带超时与日志）
 ctx.pt.query()  // Ptengine 取数（Phase 2，尚未开放）
+ctx.pt.openApiUrl  // 当前环境的 Ptengine Open API 根地址（需 manifest scopes 含 openapi:read）
 ctx.requireScope('analytics:read')   // 缺则抛 403
 ctx.error(502, 'CODE')               // 抛它 → 受控响应；抛其它 → 500 且详情只进日志
 ctx.log('msg', { ... })              // 结构化日志
@@ -222,6 +223,33 @@ ctx.waitUntil(promise)               // 后台任务（如写缓存，不阻塞�
   （`DB` / `KV` / `FILES` / `PT_GATEWAY` …）—— 占了会在发布期生成两个同名 binding，
   把资源**遮掉**（`ctx.db` 突然变成一个字符串）。两者各最多 64 条
 - **`egress`** —— 出站域名白名单，规则见上面的[硬边界 4](#4-出站请求受白名单管默认全禁)
+
+### 调 Ptengine 自己的 Open API
+
+后端可以调 Ptengine 的 Open API（站点数据、用户属性等，比前端 `PtApp.data` 的口径宽）：
+
+1. `manifest.json` 里声明 `"scopes": ["openapi:read", ...]` 和 `"backend": { "secrets": ["OPENAPI_KEY"] }`
+   （`PT_` 是保留前缀，密钥**不能**叫 `PT_OPENAPI_KEY`）
+2. 发布后由管理员在同意弹窗里批准 `openapi:read`，并在应用管理页的凭证里填 profile API key
+   （key 从 Experience → Settings → External App Integration → API Keys 创建）
+3. 代码里：
+
+```ts
+const res = await ctx.fetch(`${ctx.pt.openApiUrl}/datacenter/query`, {
+    method: 'POST',
+    headers: { 'x-api-key': ctx.secrets.OPENAPI_KEY, 'content-type': 'application/json' },
+    body: JSON.stringify(payload)
+});
+```
+
+**不要写死后端域名**：`ctx.pt.openApiUrl` 按环境给，出站也只放行该 host 的 `/open-api/v1/` 前缀。
+没声明 scope 就读 `ctx.pt.openApiUrl` 会抛 501 `PT_OPENAPI_NOT_DECLARED`，调用被拦是 403 `EGRESS_PLATFORM_BLOCKED`。
+
+**边界**：key 是**按应用**存的，所以这条路子只适合单工作区使用的应用（自建 / 单客户）。
+应用市场里被多个工作区安装的同一个应用，会拿发布者的 key 读发布者的数据 —— 不要这么做。
+
+本地联调把 key 写进 `backend/.dev.vars`（见 [本地配置](#本地配置backenddevvars)），
+`backend/wrangler.jsonc` 的 `PT_OPENAPI_URL` 已经默认指向 prod Open API。
 
 ### 密钥 vs 配置
 
@@ -370,6 +398,7 @@ API_BASE=https://api.example.com
 PT_JWKS_JSON={"keys":[...]}
 ```
 
+- 同目录下有一份 `backend/.dev.vars.example`（这份**是入库的**），列了常见的键，比如 Open API 的 `OPENAPI_KEY=`；照着补到自己的 `.dev.vars` 里即可
 - 这个文件**不需要你创建**：第一次 `npm run dev` 会生成它（里面先只有 `PT_JWKS_JSON`）。
   你自己加的行会被原样保留，`ptx dev` 只重写 `PT_` 开头的受管键
 - 值一般不用加引号（`API_BASE=https://a.test` 即可）。wrangler 用 dotenv 规则解析：引号会被剥掉，

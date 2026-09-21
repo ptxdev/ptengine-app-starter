@@ -10,6 +10,7 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/app-backend` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|---|
+| v3.4.0 | `^2.5.0` | `^0.5.0` | `^0.5.0` | **2**（轻应用 1）| 新增 `openapi:read` scope：后端可用 `ctx.pt.openApiUrl` + 自带的 profile API key 调 Ptengine Open API。`@ptengine/app-sdk` 2.5：manifest 的第五个 scope；`@ptengine/app-backend` 0.5：`ctx.pt.openApiUrl`（未声明 scope 时读它抛 501 `PT_OPENAPI_NOT_DECLARED`）。**`0.x` 的 caret 不跨 minor，旧项目要手改区间再 `npm install`** |
 | v3.3.0 | `^2.4.0` | `^0.4.0` | `^0.5.0` | **2**（轻应用 1）| `@ptengine/app-sdk` 2.4：`context.user { id, email, name }`；取数契约 `requiredScope` 自 2.2.2 起与 manifest 四个 scope 同口径（≤2.2.1 的 `query:read` 已废）。`@ptengine/app-backend` 0.4：`ctx.auth.email / name`；0.3 起 `ctx.files` 前缀带工作区（客户应用不可用，不受影响）。**`0.x` 的 caret 不跨 minor，旧项目要手改区间再 `npm install`** |
 | v3.2.1 | `^2.2.0` | `^0.2.0` | `^0.5.0` | **2**（轻应用 1）| 修复带后端布局下组件样式全丢（Tailwind `content` 改为按包解析绝对路径）|
 | v3.2.0 | `^2.2.0` | `^0.2.0` | `^0.5.0` | **2**（轻应用 1）| `@ptengine/app-sdk` 升到 2.x（`PtApp.auth.getAppToken()` 可用）；`@ptengine/app-backend` 升到 0.2.x（`ctx.vars`）；轻应用（无后端）零改动可用 |
@@ -29,8 +30,23 @@
 
 ### 变更
 
-- **`ptx doctor` 新增 `@ptengine/*` 版本下限检查**：`package.json` 区间下界与 `node_modules` 实际安装版本都必须 ≥ 脚手架要求（app-sdk ≥ 2.4.0、app-backend ≥ 0.4.0，表在 `scripts/ptx-doctor.mjs` 的 `PACKAGE_FLOORS`，与本文件兼容矩阵同一次改）；低于则 bad 并给出 `npm i` 修法。skill 只写下限、让 AI 开工先核对，避免再出现「文档是新口径、项目装的是老包」。
+- **`ptx doctor` 新增 `@ptengine/*` 版本下限检查**：`package.json` 区间下界与 `node_modules` 实际安装版本都必须 ≥ 脚手架要求（app-sdk ≥ 2.5.0、app-backend ≥ 0.5.0，表在 `scripts/ptx-doctor.mjs` 的 `PACKAGE_FLOORS`，与本文件兼容矩阵同一次改）；低于则 bad 并给出 `npm i` 修法。skill 只写下限、让 AI 开工先核对，避免再出现「文档是新口径、项目装的是老包」。
 - 补回 `.github/workflows/release.yml`：推 `v*` tag 时从本文件抽出对应版本段落建 GitHub Release（只在脚手架仓生效，客户仓不触发）。迁到 GitLab 时它被落下了，`v3.0.0` 起的 tag 都没有 Release 页面。
+
+## [3.4.0] - 2026-09-21
+
+### 变更
+
+- **依赖区间**：`@ptengine/app-sdk` `^2.4.0` → `^2.5.0`，`@ptengine/app-backend` `^0.4.0` → `^0.5.0`；`ptx doctor` 的 `PACKAGE_FLOORS` 同步抬到 2.5.0 / 0.5.0。
+  - app-sdk 2.5：manifest 的 `scopes` 增加第五个合法值 `openapi:read`。
+  - app-backend 0.5：`ctx.pt.openApiUrl` —— 当前环境的 Open API 根地址（`https://<env-backend>/open-api/v1`）。
+    没在 manifest 里声明 `openapi:read` 就读它会抛 501 `PT_OPENAPI_NOT_DECLARED`；出站也只放行该 host 的 `/open-api/v1/` 前缀。
+- **后端调 Ptengine Open API 的脚手架默认值**：`backend/wrangler.jsonc` 的本地 `vars` 增加 `PT_OPENAPI_URL`（本地直连 prod Open API），
+  新增 `backend/.dev.vars.example` 示范 `OPENAPI_KEY=`（profile API key，由 Owner / Admin 在 Experience → Settings → External App Integration → API Keys 创建）。
+  代码里一律读 `ctx.pt.openApiUrl`，不要写死后端域名。
+- **边界**：key 是**按应用**存的，所以这条路子只适合单工作区使用的应用（自建 / 单客户）；
+  应用市场里被多个工作区安装的应用不要这么用。
+- 已在开发中的项目：`0.x` 的 caret 拿不到新 minor，请手改 `package.json` 区间后重跑 `npm install`。
 
 ## [3.3.0] - 2026-09-20
 
