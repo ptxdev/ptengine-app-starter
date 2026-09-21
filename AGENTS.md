@@ -228,7 +228,7 @@ ctx.waitUntil(promise)               // 后台任务（如写缓存，不阻塞�
 
 后端可以调 Ptengine 的 Open API（站点数据、用户属性等，比前端 `PtApp.data` 的口径宽）：
 
-1. `manifest.json` 里声明 `"scopes": ["openapi:read", ...]` 和 `"backend": { "secrets": ["OPENAPI_KEY"] }`
+1. `manifest.json` 里声明 `"scopes": ["openapi:read", ...]` 和 `"backend": { "secrets": ["PTENGINE_OPENAPI_KEY"] }`
    （`PT_` 是保留前缀，密钥**不能**叫 `PT_OPENAPI_KEY`）
 2. 发布后由管理员在同意弹窗里批准 `openapi:read`，并在应用管理页的凭证里填 profile API key
    （key 从 Experience → Settings → External App Integration → API Keys 创建）
@@ -237,7 +237,7 @@ ctx.waitUntil(promise)               // 后台任务（如写缓存，不阻塞�
 ```ts
 const res = await ctx.fetch(`${ctx.pt.openApiUrl}/datacenter/query`, {
     method: 'POST',
-    headers: { 'x-api-key': ctx.secrets.OPENAPI_KEY, 'content-type': 'application/json' },
+    headers: { 'x-api-key': ctx.secrets.PTENGINE_OPENAPI_KEY, 'content-type': 'application/json' },
     body: JSON.stringify(payload)
 });
 ```
@@ -398,7 +398,7 @@ API_BASE=https://api.example.com
 PT_JWKS_JSON={"keys":[...]}
 ```
 
-- 同目录下有一份 `backend/.dev.vars.example`（这份**是入库的**），列了常见的键，比如 Open API 的 `OPENAPI_KEY=`；照着补到自己的 `.dev.vars` 里即可
+- 同目录下有一份 `backend/.dev.vars.example`（这份**是入库的**），列了常见的键，比如 Open API 的 `PTENGINE_OPENAPI_KEY=`；照着补到自己的 `.dev.vars` 里即可
 - 这个文件**不需要你创建**：第一次 `npm run dev` 会生成它（里面先只有 `PT_JWKS_JSON`）。
   你自己加的行会被原样保留，`ptx dev` 只重写 `PT_` 开头的受管键
 - 值一般不用加引号（`API_BASE=https://a.test` 即可）。wrangler 用 dotenv 规则解析：引号会被剥掉，

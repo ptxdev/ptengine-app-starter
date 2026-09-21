@@ -1,10 +1,10 @@
 # backend/.dev.vars 的示例。复制成 .dev.vars 后填上自己的值（.dev.vars 在 .gitignore 里，绝不要提交）。
 # PT_ 开头的键由 `ptx dev` 自动生成并重写，这里不用写。
 
-# Ptengine Open API 的 profile API key（对应 manifest 的 backend.secrets: ["OPENAPI_KEY"]）。
+# Ptengine Open API 的 profile API key（对应 manifest 的 backend.secrets: ["PTENGINE_OPENAPI_KEY"]）。
 # 来源：Ptengine 控制台 Experience → Settings → External App Integration → API Keys，
 # 由该工作区的 Owner / Admin 创建；线上由管理员在应用管理页的「凭证」里填，本地填这里。
-OPENAPI_KEY=
+PTENGINE_OPENAPI_KEY=
 
 # 你自己的其它密钥 / 配置项（对应 manifest 的 backend.secrets / backend.vars）
 # SHOPIFY_TOKEN=
