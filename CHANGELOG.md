@@ -42,7 +42,7 @@
   - app-backend 0.5：`ctx.pt.openApiUrl` —— 当前环境的 Open API 根地址（`https://<env-backend>/open-api/v1`）。
     没在 manifest 里声明 `openapi:read` 就读它会抛 501 `PT_OPENAPI_NOT_DECLARED`；出站也只放行该 host 的 `/open-api/v1/` 前缀。
 - **后端调 Ptengine Open API 的脚手架默认值**：`backend/wrangler.jsonc` 的本地 `vars` 增加 `PT_OPENAPI_URL`（本地直连 prod Open API），
-  新增 `backend/.dev.vars.example` 示范 `OPENAPI_KEY=`（profile API key，由 Owner / Admin 在 Experience → Settings → External App Integration → API Keys 创建）。
+  新增 `backend/.dev.vars.example` 示范 `PTENGINE_OPENAPI_KEY=`（profile API key，由 Owner / Admin 在 Experience → Settings → External App Integration → API Keys 创建）。
   代码里一律读 `ctx.pt.openApiUrl`，不要写死后端域名。
 - **边界**：key 是**按应用**存的，所以这条路子只适合单工作区使用的应用（自建 / 单客户）；
   应用市场里被多个工作区安装的应用不要这么用。

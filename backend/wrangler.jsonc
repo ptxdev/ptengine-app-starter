@@ -39,7 +39,7 @@
         "PT_TOKEN_AUD": "app:local-dev",
         "PT_TOKEN_ISS": "https://auth.ptengine.ai",
 
-        // 本地直连 prod Open API，用你自己的 key（profile API key 写在 backend/.dev.vars 的 OPENAPI_KEY）。
+        // 本地直连 prod Open API，用你自己的 key（profile API key 写在 backend/.dev.vars 的 PTENGINE_OPENAPI_KEY）。
         // 线上这个值由平台按环境注入，代码里一律读 ctx.pt.openApiUrl，不要写死域名。
         "PT_OPENAPI_URL": "https://xbackend.ptengine.com/open-api/v1"
     }
