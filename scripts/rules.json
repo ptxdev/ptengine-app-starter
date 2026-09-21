@@ -31,7 +31,8 @@
             "PT_JWKS_URL",
             "PT_TOKEN_ISS",
             "PT_TOKEN_AUD",
-            "PT_GATEWAY"
+            "PT_GATEWAY",
+            "PT_OPENAPI_URL"
         ]
     },
     "limits": {
@@ -55,6 +56,7 @@
         "analytics:read",
         "profile:read",
         "user:read",
-        "ui:notify"
+        "ui:notify",
+        "openapi:read"
     ]
 }
