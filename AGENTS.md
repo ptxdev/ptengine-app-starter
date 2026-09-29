@@ -467,7 +467,7 @@ npm run package    # 组装 zip + 结构自检
 
 ### 权限声明（manifest.scopes）
 
-合法值只有四个：`analytics:read`、`profile:read`、`user:read`、`ui:notify`。
+合法值以 `scripts/rules.json` 的 `validScopes` 为准（那份从平台生成，`npm run sync-rules` 同步）：`analytics:read`、`profile:read`、`user:read`、`ui:notify`、`openapi:read`、`asset:write`。**这里不要再写死一个数字**——「只有四个」这句在 `openapi:read` 加进来时就已经错了，直到 `asset:write` 又加一个才被发现。
 写未定义或拼错的值会导致**上传校验失败**。遵循最小权限原则。
 
 平台当前只校验取值合法性，尚未据此放行/拦截；但 `ctx.requireScope()` 已经会按

@@ -137,7 +137,7 @@ Databases, KV, R2, secrets and outbound access are **declared in `manifest.json`
 }
 ```
 
-`version` must increase on every upload, `schemaVersion` must be `2` whenever a `backend` section is present, and `scopes` accepts only `analytics:read`, `profile:read`, `user:read` and `ui:notify`. Every field, its limits and the validation rules — mirrored byte-for-byte from the platform into `scripts/rules.json` — are documented in [`AGENTS.md`](./AGENTS.md#manifestjson-字段), and `npm run doctor` checks them before you upload.
+`version` must increase on every upload, `schemaVersion` must be `2` whenever a `backend` section is present, and `scopes` accepts only `analytics:read`, `profile:read`, `user:read`, `ui:notify`, `openapi:read` and `asset:write` — the authoritative list is `validScopes` in `scripts/rules.json`, which is generated from the platform. Every field, its limits and the validation rules — mirrored byte-for-byte from the platform into `scripts/rules.json` — are documented in [`AGENTS.md`](./AGENTS.md#manifestjson-字段), and `npm run doctor` checks them before you upload.
 
 ## Deploy from CI
 
