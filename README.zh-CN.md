@@ -137,7 +137,7 @@ export default createApp<ApiRoutes>({
 }
 ```
 
-`version` 每次上传必须递增；只要有 `backend` 段，`schemaVersion` 就必须是 `2`；`scopes` 的合法值只有 `analytics:read`、`profile:read`、`user:read`、`ui:notify` 四个。每个字段、各项上限，以及与平台逐字同源、落在 `scripts/rules.json` 里的校验规则，都写在 [`AGENTS.md`](./AGENTS.md#manifestjson-字段)；`npm run doctor` 会在你上传之前先拦一遍。
+`version` 每次上传必须递增；只要有 `backend` 段，`schemaVersion` 就必须是 `2`；`scopes` 的合法值是 `analytics:read`、`profile:read`、`user:read`、`ui:notify`、`openapi:read`、`asset:write` —— 以 `scripts/rules.json` 的 `validScopes` 为准，那份是从平台生成的。每个字段、各项上限，以及与平台逐字同源、落在 `scripts/rules.json` 里的校验规则，都写在 [`AGENTS.md`](./AGENTS.md#manifestjson-字段)；`npm run doctor` 会在你上传之前先拦一遍。
 
 ## 在 CI 里发布
 

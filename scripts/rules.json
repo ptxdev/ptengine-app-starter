@@ -57,6 +57,7 @@
         "profile:read",
         "user:read",
         "ui:notify",
-        "openapi:read"
+        "openapi:read",
+        "asset:write"
     ]
 }
