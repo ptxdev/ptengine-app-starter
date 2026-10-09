@@ -88,6 +88,29 @@
 
 ## [3.6.0] - 2026-10-09
 
+> **待办（发版时）**：依赖区间升到含 `backend.jobs` / `jobs:run` / `ctx.pt.jobs` 的 app-sdk / app-backend 版本，
+> doctor 版本下限（`PACKAGE_FLOORS`）同步，starter 版本号确定，兼容矩阵补一行、README 里 clone 的 tag 同步。
+> 在那之前，本段的定时任务能力在 `@ptengine/app-backend` ^0.6 / `@ptengine/app-sdk` ^2.6 上**类型里没有、运行时拿不到**。
+
+### 新增
+
+- **`npx ptx job run <type> [--params '<json>'] [--preview]`**：用本地开发密钥签一枚任务模式令牌
+  （`trg=job`、`job=local`、`run=<uuid>`），POST 到本地 worker 的任务路由，打印状态码、响应体，
+  以及平台会把返回结果判成 `stored / none / invalid（原因）/ too_large`。需要先 `npm run dev`。
+- **`ptx doctor` 定时任务检查**：声明了 `backend.jobs` 却没有 `jobs:run`（bad）；任务路由不在
+  `backend/src` 的 routes 里（bad）；任务路由没有 `requireTrigger(`（warn）；`preview: true` 但没读
+  `ctx.auth.preview`（warn）。
+- **本地 `ctx.pt.jobs.*` 内存桩**：`ptx dev` 在同一个 wrangler 会话里拉起 `ptx-local-gateway`，
+  `backend/wrangler.jsonc` 的 `PT_GATEWAY` 绑到它；重启即清空，不会按时触发。
+  副作用：本地 `ctx.pt.query()` / `ctx.pt.asset.*` 仍是 501 `PT_GATEWAY_NOT_BOUND`，但提示语变笼统，
+  并多一条 `pt-gateway-*-failed` 日志（预期行为）；直接在 `backend/` 里跑 `wrangler dev` 会解析不到该服务，请用 `npm run dev`。
+- **dev token 的 scopes = 默认列表 ∪ `manifest.json` 的 `scopes`**（每次 `ptx dev` 重算），
+  manifest 声明 `jobs:run` 后本地 `ctx.pt.jobs.*` 不再恒为 403。改 `web/.ptx-dev-key.json` 的 `scopes` 不再有效（会被覆盖）。
+- 规则快照同步：`validScopes` 加 `jobs:run`，新增 `jobResult` 上限段；`scripts/job-result.mjs` 按平台口径本地判定任务返回结果。
+- 文档：README / AGENTS.md 新增「定时任务（backend.jobs）」—— `requireTrigger('job')`、用 `ctx.auth.runId` 做幂等
+  （先占位后副作用）、`ctx.auth.preview` 跳过外部副作用、返回 `{ archive: { title?, markdown, files? } }`；
+  `docs/troubleshooting.md` 新增「定时任务与本地网关」一节。
+
 ### 变更
 
 - **新增 `ai:invoke` scope**：应用后端可以调用大模型。

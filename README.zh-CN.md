@@ -73,8 +73,9 @@ npx skills add ptxdev/ptengine-skills          # 大多数助手
 
 | 命令（也可以 `npx ptx <command>`） | 作用 |
 |---|---|
-| `npm run dev` | vite + `wrangler dev` + 本地令牌端点。端口冲突用 `PTX_WEB_PORT` / `PTX_API_PORT` |
+| `npm run dev` | vite + `wrangler dev`（你的 worker 加本地网关桩 `ptx-local-gateway`）+ 本地令牌端点。端口冲突用 `PTX_WEB_PORT` / `PTX_API_PORT` |
 | `npm run doctor` | 查约定与 manifest 自洽性。`--deps` 额外报依赖漂移 |
+| `npx ptx job run <type> [--params '<json>'] [--preview]` | 以定时任务身份在本地调一次任务路由（需 `npm run dev` 在跑）；打印状态码、响应体，以及平台会把返回结果判成什么 |
 | `npm run build` | 类型检查（web + backend + shared）+ vite build + wrangler bundle |
 | `npm run package` | 组装 zip 并做结构自检 |
 | `npm run deploy` | 上传。`--publish` 立即发布，`--stream` 流式打印进度，`--dry-run` 只打印不发请求 |
@@ -84,6 +85,20 @@ npx skills add ptxdev/ptengine-skills          # 大多数助手
 **本地的鉴权是真的，不是绕过的。** `npm run dev` 会生成一对临时 Ed25519 密钥：公钥进 `backend/.dev.vars`，worker 用它真验签；私钥给前端签真 token。所以 `aud` 不匹配、令牌过期、scope 不足这些线上才遇得到的问题，本地就会现形 —— 本地令牌的 scopes 就是 `manifest.json` 里声明的那些。
 
 你自己的配置与密钥写在 `backend/.dev.vars`，一行一个 `KEY=VALUE`；`ptx dev` 只重写它托管的 `PT_` 开头的键，你写的行原样保留。这个文件和 `web/.ptx-dev-key.json` 都在 `.gitignore` 里，**绝不要提交**。完整规则（包括值是怎么注入的、为什么改完要重启）见 [`AGENTS.md`](./AGENTS.md#本地配置backenddevvars)。
+
+dev token 的 scopes = **默认列表 ∪ `manifest.json` 的 `scopes`**，每次 `ptx dev` 重算。本地要新权限（比如 `jobs:run`）就在 manifest 里声明再重启 —— 不要改 `web/.ptx-dev-key.json`，它每次启动都会被重新生成。
+
+`ptx dev` 还会在同一个 `wrangler dev` 会话里常驻一个本地网关桩 `ptx-local-gateway`（`backend/wrangler.jsonc` 的 `PT_GATEWAY` 绑到它）。它只实现 `ctx.pt.jobs.*`，内存存储 —— 重启即清空，也不会按时触发。本地的 `ctx.pt.query()` / `ctx.pt.asset.*` 仍是 501 `PT_GATEWAY_NOT_BOUND`（提示语比以前笼统，还会多一条 `pt-gateway-*-failed` 日志，属预期）。不要绕过 `ptx dev` 直接在 `backend/` 里跑 `wrangler dev`：那样解析不到 `ptx-local-gateway`。
+
+### 定时任务
+
+在 `manifest.json` 里声明任务类型（`backend.jobs`，并在 `scopes` 加 `jobs:run`），在 `shared/api.ts` 与 `backend/src/index.ts` 加一条**同名键**的路由、第一行写 `ctx.requireTrigger('job')`，再在某个用户请求里用 `ctx.pt.jobs.create()` 让用户订阅。然后在 `npm run dev` 跑着的前提下：
+
+```bash
+npx ptx job run weekly-report --params '{"channel":"email"}'   # 加 --preview 走预览运行
+```
+
+它用本地开发密钥签一枚任务模式令牌，把 params 作为 body POST 到 `/api<route>`，打印状态码、响应体和判定：`stored`（平台会采集返回的 `{ archive }`）、`none`（没东西可采集 —— 没有 `archive`、非 2xx 或不是 JSON）、`invalid（原因）`（`archive` 违反规则；运行照样算成功，只是不采集）、`too_large`（响应体超过上限）。用 `ctx.auth.runId` 做幂等、预览分支怎么写等完整步骤见 [`AGENTS.md`](./AGENTS.md#定时任务backendjobs)。`ctx.auth.trigger` / `preview` 与 `ctx.pt.jobs` 需要升级到含定时任务的 `@ptengine/app-backend` 版本后才生效。
 
 ## 前端
 
@@ -122,7 +137,7 @@ export default createApp<ApiRoutes>({
 
 `createApp` 替你兜住：每个请求都验签、`aud` 锁到你这个应用、未声明的路由一律 404、错误统一封装不漏栈，以及内建的 `/api/__health` —— 平台发布后用它探针，失败自动回滚。前端别手写 fetch，用 `web/src/api.ts` 的 `api('GET /orders', { query: { days: '7' } })`：类型来自 `shared/api.ts`，取令牌、续期、401 重试都已经处理好。
 
-数据库、KV、R2、密钥、出站白名单全部**在 `manifest.json` 里声明、由平台创建并注入** —— 你不需要 Cloudflare 账号，`backend/wrangler.jsonc` 只服务本地开发。`ctx` 上有什么、后端**没有**哪些能力（Durable Objects、Cron Triggers、Queues……）、密钥与配置项有什么区别，见 [`AGENTS.md`](./AGENTS.md#后端能用的东西ctx)。
+数据库、KV、R2、密钥、出站白名单全部**在 `manifest.json` 里声明、由平台创建并注入** —— 你不需要 Cloudflare 账号，`backend/wrangler.jsonc` 只服务本地开发。`ctx` 上有什么、后端**没有**哪些能力（Durable Objects、Cron Triggers（定时请用 `backend.jobs`）、Queues……）、密钥与配置项有什么区别，见 [`AGENTS.md`](./AGENTS.md#后端能用的东西ctx)。
 
 ## manifest.json
 
@@ -137,7 +152,7 @@ export default createApp<ApiRoutes>({
 }
 ```
 
-`version` 每次上传必须递增；只要有 `backend` 段，`schemaVersion` 就必须是 `2`；`scopes` 的合法值是 `analytics:read`、`profile:read`、`user:read`、`ui:notify`、`openapi:read`、`asset:write`、`ai:invoke`、`asset:read` —— 以 `scripts/rules.json` 的 `validScopes` 为准，那份是从平台生成的。每个字段、各项上限，以及与平台逐字同源、落在 `scripts/rules.json` 里的校验规则，都写在 [`AGENTS.md`](./AGENTS.md#manifestjson-字段)；`npm run doctor` 会在你上传之前先拦一遍。
+`version` 每次上传必须递增；只要有 `backend` 段，`schemaVersion` 就必须是 `2`；`scopes` 的合法值是 `analytics:read`、`profile:read`、`user:read`、`ui:notify`、`openapi:read`、`asset:write`、`ai:invoke`、`asset:read`、`jobs:run` —— 以 `scripts/rules.json` 的 `validScopes` 为准，那份是从平台生成的。每个字段、各项上限，以及与平台逐字同源、落在 `scripts/rules.json` 里的校验规则，都写在 [`AGENTS.md`](./AGENTS.md#manifestjson-字段)；`npm run doctor` 会在你上传之前先拦一遍。
 
 ## 在 CI 里发布
 

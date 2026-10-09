@@ -50,7 +50,7 @@
 | **`connect()` 建 TCP** | 启用 outbound worker 后运行时自动禁用 |
 | **`caches.default`** | untrusted 隔离（默认隔离模式）下被禁用 |
 | **`request.cf`** | 同上，untrusted 隔离下不可用 |
-| **Cron Triggers / `scheduled()` 处理器** | ⚠️ Workers for Platforms 的 user worker **不支持 cron**：`triggers.crons` 在部署时被**静默丢弃**，无报错无警告、定时永不触发。定时能力要等平台侧调度器（Phase 3） |
+| **Cron Triggers / `scheduled()` 处理器** | ⚠️ Workers for Platforms 的 user worker **不支持 cron**：`triggers.crons` 在部署时被**静默丢弃**，无报错无警告、定时永不触发。定时请用平台调度器：manifest `backend.jobs`，见[定时任务](#定时任务backendjobs) |
 | **Queues / Workflows** | 同上，需要平台侧调度器 |
 | **mTLS certificate binding** | outbound worker 拦不住它 |
 
@@ -189,7 +189,7 @@ const data = await api('GET /orders', { query: { days: '7' } });
 ## 后端能用的东西（ctx）
 
 ```ts
-ctx.auth        // { userId, sid, workspaceId, scopes, email?, name?, frontendVersionId? } —— 已验签；公开路由上读它会抛
+ctx.auth        // { userId, sid, workspaceId, scopes, trigger, jobId, runId, preview, email?, name?, frontendVersionId? } —— 已验签；公开路由上读它会抛
 ctx.authOrNull  // 同上，但公开路由上是 null
 ctx.workspaceId // 这次**调用**来自哪个工作区（≠ ctx.app.workspaceId，那是应用归属）
 ctx.scopes      // 令牌里已获批的 scopes（只读；公开路由上是 []）
@@ -213,8 +213,11 @@ ctx.pt.asset.ensureFolder({ name }) / .create({ folderId, kind, name, content })
 ctx.pt.ai.chat(input) / .stream(input)   // 调大模型（需 ai:invoke；model 必须带 provider 前缀；stream 返回的 Response 直接 return）
 ctx.pt.describe()                    // 服务端取数描述尚未开放（501），前端用 PtApp.data.describe()
 ctx.pt.openApiUrl  // 当前环境的 Ptengine Open API 根地址（需 manifest scopes 含 openapi:read）
+ctx.pt.jobs.*            // 定时任务：create / list / get / update / pause / resume / delete（需 jobs:run）
 
 ctx.requireScope('analytics:read')   // 缺则抛 403 SCOPE_REQUIRED
+ctx.requireTrigger('job') // 任务路由第一行；用户请求打进来 403 JOB_ONLY
+ctx.auth.trigger / runId / preview   // 'job' | 'user'；runId 做幂等键；preview 时不写状态、不碰外部系统
 throw ctx.error(502, 'CODE')         // 受控响应；抛其它 → 500 且详情只进日志（第三参见下）
 throw badRequest('CODE', '给前端看的话')  // 要带说明文字用这类 helper（import 自 @ptengine/app-backend）
 ctx.log('msg', { ... })              // 结构化日志
@@ -309,6 +312,76 @@ const res = await ctx.fetch(`${ctx.pt.openApiUrl}/datacenter/query`, {
 ```json
 "vars": [{ "name": "API_BASE", "required": false, "default": "https://api.example.com", "label": "第三方接口地址" }]
 ```
+
+---
+
+## 定时任务（backend.jobs）
+
+平台调度器按用户订阅的 cron 调你的**任务路由**（`POST /api<route>`，body = 订阅时的 `params`）。
+Worker 自己不能起定时（见[硬边界 3](#3-后端没有的能力写了也不会有)），一律走这条路。
+
+> ⚠️ `ctx.auth.trigger / jobId / runId / preview`、`ctx.requireTrigger()` 与 `ctx.pt.jobs.*` 需要
+> **升级到含定时任务的 `@ptengine/app-backend` 版本**后才生效；manifest 的 `backend.jobs` 与 `jobs:run`
+> 同样需要含定时任务的 `@ptengine/app-sdk`。旧版本上类型里没有这些字段（tsc 报错），运行时也拿不到。
+
+1. **`manifest.json`**：`scopes` 加 `"jobs:run"`；`backend.jobs` 加一项
+   `{ "type": "weekly-report", "route": "POST /jobs/weekly-report", "title": "每周报告" }`。
+   声明了 `backend.jobs` 却没有 `jobs:run`，`npm run doctor` 报 bad。
+2. **`shared/api.ts` + `backend/src/index.ts`**：在 `ApiRoutes` 与 `routes` 里各加**同名键** `'POST /jobs/weekly-report'`
+   （不带 `/api`；`routes` 的键必须与 `ApiRoutes` 一一对应，只加一边 tsc 会报错），handler 第一行
+   `ctx.requireTrigger('job')` —— 否则任何拿到用户 App Token 的人都能手动调它；用户请求打进来得到 403 `JOB_ONLY`。
+3. **幂等**：投递是**至少一次**，同一个 `ctx.auth.runId` 可能到达两次。**先占位、后副作用**：
+   先把 `runId` 写进 D1 / KV（已存在就直接返回），再发消息、写外部系统。
+4. **预览**：`ctx.auth.preview === true` 时是用户在管理页点「预览」—— 照常生成内容并返回，
+   但**跳过外部副作用**（不发邮件 / 消息、不写第三方、不改会影响正式运行的状态）。
+   声明里 `preview: true` 却没读 `ctx.auth.preview`，doctor 会给 warn。
+5. **让用户订阅**：在某个**用户请求**的路由里调 `ctx.pt.jobs.create({ type, cron, timezone, params })`
+   （任务运行中不能创建任务，会得到 `JOB_CREATE_FROM_JOB`）。另有 `list / get / update / pause / resume / delete`。
+6. **把结果交给平台**：在 2xx 的 JSON 响应里返回 `{ archive: { title?, markdown, files? } }`（类型 `JobRunResult`），
+   平台会采集存档。不返回 `archive` 也行，只是没有存档；格式不对不影响运行成败，只是不采集。
+
+```ts
+'POST /jobs/weekly-report': async (ctx) => {
+    ctx.requireTrigger('job');
+    const runId = ctx.auth.runId!;
+    // 先占位：run_id 是主键，重复投递时 INSERT 不生效
+    const claimed = await ctx.db.prepare('INSERT OR IGNORE INTO job_runs (run_id, sid) VALUES (?, ?)')
+        .bind(runId, ctx.auth.sid).run();
+    if (claimed.meta.changes === 0) return {};                      // 重复投递：什么都不做
+    const markdown = await buildReport(ctx);
+    if (!ctx.auth.preview) await sendToChannel(ctx, markdown);       // 预览不碰外部系统
+    return { archive: { title: '每周报告', markdown } };
+}
+```
+
+### 本地调试定时任务
+
+`npm run dev` 跑着时，另开一个终端：
+
+```bash
+npx ptx job run weekly-report --params '{"channel":"x"}'    # 正式运行
+npx ptx job run weekly-report --preview                      # 预览运行（ctx.auth.preview === true）
+```
+
+它读 `manifest.backend.jobs` 找到路由，用 `web/.ptx-dev-key.json` 签一枚任务模式令牌
+（`trigger='job'`、`jobId='local'`、每次新的 `runId`），把 `--params`（JSON 对象，缺省 `{}`）当 body
+POST 到 `http://127.0.0.1:$PTX_API_PORT/api<route>`，然后打印：
+
+- 状态码与响应体（非 2xx 时命令退出码为 1）；
+- **结果判定**（与平台采集同一口径，规则读 `scripts/rules.json` 的 `jobResult`）：
+
+| 判定 | 含义 |
+|---|---|
+| `stored` | 2xx + JSON + 合法的 `archive` —— 平台会采集这份结果 |
+| `none` | 没有可采集的东西：没返回 `archive`，或非 2xx / 不是 JSON / JSON 解析失败（括号里会写哪种） |
+| `invalid（原因）` | 返回了 `archive` 但违反规则（缺 `markdown`、`title` 过长、`files` 类型不对……），原因里点名字段路径。不影响运行成败，但平台不采集 |
+| `too_large` | 响应体超过上限，平台不采集 |
+
+本地的 `ctx.pt.jobs.*` 走 `ptx dev` 拉起的内存桩（见[本地开发](#本地开发)）：重启即清空，不校验 cron / 时区 / 配额，
+**也不会按时触发** —— 要跑任务路由只能用 `npx ptx job run`。
+
+`npm run doctor` 会检查：`jobs:run` 是否声明、任务路由是否在 `backend/src` 的 `routes` 里、
+路由里有没有 `requireTrigger(`、`preview: true` 时有没有读 `ctx.auth.preview`。
 
 ---
 
@@ -413,11 +486,22 @@ npm run dev        # 同时起 vite（前端）与 wrangler dev（后端），�
 所以 `aud` 不匹配、过期、scope 不足这些线上才会遇到的问题，本地就会现形。
 
 - 本地令牌的 `scopes` **照抄 `manifest.json` 的 `scopes`**（视为全部已获授权）：声明了什么本地就有什么，
-  没声明的同样 403 `SCOPE_REQUIRED`。要改权限就改 manifest 再重启 `npm run dev`
+  没声明的同样 403 `SCOPE_REQUIRED`。要改权限（如新增 `jobs:run`）就改 manifest 再重启 `npm run dev`
 - 临时模拟别的站点 / 缺某个权限：直接改 `web/.ptx-dev-key.json` 的 `sid` / `scopes`，**不用重启**
   （`/__ptx/token` 每次签发都现读它）；下次 `npm run dev` 会按 manifest 重写
 - 自己的密钥（如 `SHOPIFY_TOKEN`）写在 `backend/.dev.vars`，`ptx dev` **不会覆盖**它们
 - 这两个文件都在 `.gitignore` 里，**绝不要提交**
+
+**本地网关桩 `ptx-local-gateway`。** `ptx dev` 在同一个 `wrangler dev` 会话里多拉起一个桩 worker
+（`scripts/local-gateway/`），`backend/wrangler.jsonc` 的 `PT_GATEWAY` 按服务名绑到它：
+
+- 本地 `ctx.pt.jobs.*` 走它，**内存存储，重启即清空**，不会按时触发（运行任务路由用 `npx ptx job run`）；
+- 本地 `ctx.pt.query()` / `ctx.pt.asset.*` 仍返回 501 `PT_GATEWAY_NOT_BOUND`。提示语比以前笼统
+  （「本地没有数据网关……请在平台内联调」），并会多一条 `pt-gateway-query-failed` / `pt-gateway-asset-failed`
+  日志 —— 都属预期，不是故障；
+- **不要绕过 `ptx dev` 直接在 `backend/` 里跑 `wrangler dev`**：那样只起了一份配置，
+  `PT_GATEWAY` 指向的 `ptx-local-gateway` 解析不到。
+- 这个桩只在本机存在，从不部署、不进上传包；线上的 `PT_GATEWAY` 由平台按 manifest.scopes 烘入。
 
 平台内 dev 模式（管理页「本地开发」指向本地 dev server）也支持 —— `web/vite.config.ts`
 里 `server.cors: true` 就是为它准备的（平台 app 的 origin 会跨源 fetch 你的 dev server，
@@ -506,7 +590,7 @@ npm run package    # 组装 zip + 结构自检
 
 ### 权限声明（manifest.scopes）
 
-合法值以 `scripts/rules.json` 的 `validScopes` 为准（那份从平台生成，`npm run sync-rules` 同步）：`analytics:read`、`profile:read`、`user:read`、`ui:notify`、`openapi:read`、`asset:write`、`ai:invoke`、`asset:read`。**这里不要再写死一个数字**——「只有四个」这句在 `openapi:read` 加进来时就已经错了，直到 `asset:write` 又加一个才被发现。
+合法值以 `scripts/rules.json` 的 `validScopes` 为准（那份从平台生成，`npm run sync-rules` 同步）：`analytics:read`、`profile:read`、`user:read`、`ui:notify`、`openapi:read`、`asset:write`、`ai:invoke`、`asset:read`、`jobs:run`。**这里不要再写死一个数字**——「只有四个」这句在 `openapi:read` 加进来时就已经错了，直到 `asset:write` 又加一个才被发现。
 写未定义或拼错的值会导致**上传校验失败**。遵循最小权限原则。
 
 | scope | 管什么 | 授权 |

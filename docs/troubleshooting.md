@@ -114,8 +114,13 @@ dev 模式下 `window.PtApp` 是异步挂上的，去掉它 `useMemo(getPtApp, [
 （`DB` / `KV` / `FILES` / `PT_GATEWAY` …），发布期生成了两个同名 binding，把资源遮掉了。改名。
 
 **定时任务不触发？**
-Workers for Platforms 的 user worker 不支持 Cron Triggers，`triggers.crons` 会被**静默丢弃**
-（无报错、定时永不触发）。定时能力要等平台侧调度器。
+先确认你走的是平台调度器（manifest `backend.jobs` + `jobs:run`，见 AGENTS.md 的「定时任务」）。
+Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc` 里写 `triggers.crons`
+会被**静默丢弃**（无报错、定时永不触发）。本地更不会按时触发：本地 `ctx.pt.jobs.*` 只是内存桩，
+要运行任务路由用 `npx ptx job run <type>`。
+
+> `ctx.auth.trigger` / `preview`、`ctx.requireTrigger()` 与 `ctx.pt.jobs.*` 需要升级到含定时任务的
+> `@ptengine/app-backend` 版本后才生效；旧版本上 tsc 会说这些属性不存在。
 
 **出站请求被拒？**
 `backend.egress` 是域名白名单，**缺省或空数组 = 完全禁止出站**。只写主机名，
@@ -124,6 +129,45 @@ Workers for Platforms 的 user worker 不支持 Cron Triggers，`triggers.crons`
 **数据库迁移没跑？**
 `backend/migrations/NNNN_描述.sql` 的序号必须连续不跳号（`npm run package` 会校验）。
 已发布的迁移文件不要改 —— 平台按序号记录「已应用到哪一版」，改旧文件不会重跑，要改就加新文件。
+
+## 定时任务与本地网关
+
+**`npx ptx job run` 报「没找到本地开发密钥」或「请求本地 worker 失败」？**
+它要连正在跑的 `npm run dev`：先在另一个终端启动它；后端端口改过的话，两边用同一个 `PTX_API_PORT`。
+
+**`npx ptx job run` 报「backend.jobs 里没有类型 …」？**
+`<type>` 要与 `manifest.json` 的 `backend.jobs[].type` 完全一致；`--params` 必须是 JSON **对象**
+（shell 里用单引号包住：`--params '{"channel":"email"}'`）。
+
+**`npx ptx job run` 打印的结果是 `none` / `invalid` / `too_large`？**
+
+- `none` —— 平台没东西可采集：没返回 `archive`，或者不是 2xx、不是 JSON（括号里写了是哪种）。
+  只想跑副作用、不需要存档的任务，`none` 就是正常结果。
+- `invalid（原因）` —— 返回了 `archive` 但不合规，原因里点名字段（如 `archive.markdown 必填`）。
+  运行本身不算失败，但平台不会采集。照原因改返回值：`{ archive: { title?, markdown, files? } }`。
+- `too_large` —— 响应体超过上限（见 `scripts/rules.json` 的 `jobResult`），平台不采集。把大内容拆进 `files` 或精简正文。
+- `stored` —— 平台会采集这份结果。
+
+**任务路由返回 403 `JOB_ONLY`？**
+路由第一行是 `ctx.requireTrigger('job')`，而这次请求来自用户（前端 `api()`、curl 带用户令牌）。
+这是设计行为：本地用 `npx ptx job run` 调，线上由平台调度器调。
+
+**本地 `ctx.pt.jobs.*` 报 403 `SCOPE_DENIED`（令牌里没有 `jobs:run`）？**
+本地 dev token 的 scopes = 默认列表 ∪ `manifest.json` 的 `scopes`。在 manifest 里加 `"jobs:run"` 后**重启**
+`npm run dev`。不要去改 `web/.ptx-dev-key.json` 的 `scopes` —— 每次 `ptx dev` 都会重新生成它。
+
+**本地 `ctx.pt.jobs.*` 建的任务重启后没了？**
+本地网关桩 `ptx-local-gateway` 是内存存储，`ptx dev` 重启即清空。它也不校验 cron / 时区 / 配额，以平台为准。
+
+**本地 `ctx.pt.query()` / `ctx.pt.asset.*` 返回 501 `PT_GATEWAY_NOT_BOUND`，日志里还多一条 `pt-gateway-*-failed`？**
+预期如此。本地网关桩只实现 `ctx.pt.jobs.*`，其余路径一律 501；提示语是笼统的
+「本地没有数据网关……请在平台内联调」（不再点名缺哪个 scope），运行时同时记一条
+`pt-gateway-query-failed` / `pt-gateway-asset-failed` 日志。取数与资产写请在平台内联调。
+
+**在 `backend/` 里直接跑 `wrangler dev`，报找不到服务 `ptx-local-gateway` / `ctx.pt.*` 全挂？**
+`backend/wrangler.jsonc` 的 `PT_GATEWAY` 绑的是同会话里的 `ptx-local-gateway`，只有 `ptx dev`
+（`wrangler dev -c wrangler.jsonc -c ../scripts/local-gateway/wrangler.jsonc`）会把它一起拉起来。
+用 `npm run dev`，不要绕过它。
 
 ## 其他
 
