@@ -80,3 +80,24 @@ test('v1（无 backend 段）不受任何新规则影响', () => {
     const m = { schemaVersion: 1, version: '1.0.0', entry: 'index.html' };
     assert.deepEqual(validateManifest(m, rootWith(m)).errors, []);
 });
+
+test('规则快照：validScopes 含 jobs:run（定时任务 1a）', () => {
+    assert.ok(RULES.validScopes.includes('jobs:run'));
+});
+
+test('规则快照：jobResult 段齐全且与 brief §1 逐字一致', () => {
+    assert.deepEqual(RULES.jobResult, {
+        maxBytes: 262144,
+        markdownMaxBytes: 204800,
+        maxFiles: 5,
+        fileTypes: ['text/csv'],
+        titleMax: 200,
+        fileNameMax: 120
+    });
+});
+
+test('scopes 里声明 jobs:run 本地校验通过', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ptx-scope-'));
+    const { errors } = validateManifest({ schemaVersion: 1, version: '1.0.0', entry: 'index.html', scopes: ['jobs:run'] }, root);
+    assert.ok(!errors.some(e => /SCOPE_UNKNOWN/.test(e)), errors.join('\n'));
+});
