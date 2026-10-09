@@ -10,6 +10,7 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/app-backend` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|---|
+| v3.5.0 | `^2.6.0` | `^0.6.0` | `^0.5.0` | **2**（轻应用 1）| 新增 `asset:write` scope：后端可用 `ctx.pt.asset.*` 替使用者往产品资产库写入。`@ptengine/app-sdk` 2.6：manifest 的第六个 scope（2.5 以下声明它会 `SCOPE_UNKNOWN`）；`@ptengine/app-backend` 0.6：`ctx.pt.asset.ensureFolder / create / update / uploadSource` 与 `PtAssetDoc`。**写类 scope 没有 first-party 豁免** —— 哪怕应用是自己传的，也要管理员显式同意过一次，否则写入以 403 `SCOPE_DENIED` 失败。**`0.x` 的 caret 不跨 minor，旧项目要手改区间再 `npm install`** |
 | v3.4.0 | `^2.5.0` | `^0.5.0` | `^0.5.0` | **2**（轻应用 1）| 新增 `openapi:read` scope：后端可用 `ctx.pt.openApiUrl` + 自带的 profile API key 调 Ptengine Open API。`@ptengine/app-sdk` 2.5：manifest 的第五个 scope；`@ptengine/app-backend` 0.5：`ctx.pt.openApiUrl`（未声明 scope 时读它抛 501 `PT_OPENAPI_NOT_DECLARED`）。**`0.x` 的 caret 不跨 minor，旧项目要手改区间再 `npm install`** |
 | v3.3.0 | `^2.4.0` | `^0.4.0` | `^0.5.0` | **2**（轻应用 1）| `@ptengine/app-sdk` 2.4：`context.user { id, email, name }`；取数契约 `requiredScope` 自 2.2.2 起与 manifest 四个 scope 同口径（≤2.2.1 的 `query:read` 已废）。`@ptengine/app-backend` 0.4：`ctx.auth.email / name`；0.3 起 `ctx.files` 前缀带工作区（客户应用不可用，不受影响）。**`0.x` 的 caret 不跨 minor，旧项目要手改区间再 `npm install`** |
 | v3.2.1 | `^2.2.0` | `^0.2.0` | `^0.5.0` | **2**（轻应用 1）| 修复带后端布局下组件样式全丢（Tailwind `content` 改为按包解析绝对路径）|
@@ -32,6 +33,35 @@
 
 - **`ptx doctor` 新增 `@ptengine/*` 版本下限检查**：`package.json` 区间下界与 `node_modules` 实际安装版本都必须 ≥ 脚手架要求（app-sdk ≥ 2.5.0、app-backend ≥ 0.5.0，表在 `scripts/ptx-doctor.mjs` 的 `PACKAGE_FLOORS`，与本文件兼容矩阵同一次改）；低于则 bad 并给出 `npm i` 修法。skill 只写下限、让 AI 开工先核对，避免再出现「文档是新口径、项目装的是老包」。
 - 补回 `.github/workflows/release.yml`：推 `v*` tag 时从本文件抽出对应版本段落建 GitHub Release（只在脚手架仓生效，客户仓不触发）。迁到 GitLab 时它被落下了，`v3.0.0` 起的 tag 都没有 Release 页面。
+
+## [3.5.0] - 2026-10-09
+
+### 变更
+
+- **依赖区间**：`@ptengine/app-sdk` `^2.5.0` → `^2.6.0`，`@ptengine/app-backend` `^0.5.0` → `^0.6.0`；
+  `package-lock.json` 同步，`ptx doctor` 的 `PACKAGE_FLOORS` 抬到 2.6.0 / 0.6.0。
+  - app-sdk 2.6：manifest 的 `scopes` 增加第六个合法值 `asset:write`。
+  - app-backend 0.6：`ctx.pt.asset.ensureFolder / create / update / uploadSource`，以及正文信封类型 `PtAssetDoc`。
+- **规则快照** `scripts/rules.json` 已随平台的 `VALID_SCOPES` 带上 `asset:write`（上一版合入，本版首次随 tag 发出）。
+
+### 为什么这一版必须升（不升会撞上三处，且报错互不相干）
+
+照 README 克隆 v3.4.0 再声明 `asset:write`，会依次遇到：
+
+1. `ptx doctor` → `[x] manifest: SCOPE_UNKNOWN  "asset:write" 不是合法权限值`
+   —— 规则快照是旧的（v3.4.0 的 tag 早于快照更新）。
+2. `npm run build` → `error TS2339: Property 'asset' does not exist on type ...`
+   —— `^0.5.0` 的 caret **拿不到 0.6.0**（`0.x` 的 caret 只放行同 minor），装到的是 0.5.x。
+3. `ptx doctor` 的版本下限 → **`[ok]`**，因为 floor 还写着 ≥2.5.0 / ≥0.5.0。
+   本该提醒你升级的那道检查，自己是旧的。
+
+第 3 条是最费时间的：前两条报错都没指向"你的包太旧"，而唯一会这么说的检查却沉默。
+
+### 关于 `asset:write` 的一条行为差异
+
+读类 scope 对本工作区自建的应用自动豁免同意，**写类没有这条豁免**。所以声明了
+`asset:write` 的应用在管理员点过一次同意之前，写入一律 403 `SCOPE_DENIED` ——
+那是设计行为，不是故障，别做成错误路径。
 
 ## [3.4.0] - 2026-09-21
 
