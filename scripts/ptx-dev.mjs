@@ -16,10 +16,11 @@
  *
  * 本地配置怎么注入的：**这里不做任何注入**。`wrangler dev` 原生读配置文件同目录下的
  * `.dev.vars`，把每一行 `KEY=VALUE` 当成一个 env 变量绑上去（启动日志里那句
- * "Using secrets defined in .dev.vars"）。下面 start('worker', …) 的 cwd 是 `backend/`，
- * 而且**不传 `--var` 也不传 `--config`**，所以 `backend/.dev.vars` 一定会被读到 ——
+ * "Using secrets defined in .dev.vars"）。下面 start('worker', …) 的 cwd 是 `backend/`，不传 `--var`；
+ * `-c wrangler.jsonc` 指的就是 backend/ 下同一份配置（第一份 = 主 worker，.dev.vars 跟它走），
+ * 第二个 `-c` 只是把本地网关桩一起拉起来；所以 `backend/.dev.vars` 仍会被读到 ——
  * 密钥与普通配置共用这一个文件。已实测（wrangler 4.128.0）。
- * 若哪天加了 `--config` 指到别处，就要在这里显式读 `.dev.vars` 并逐条 `--var NAME:VALUE` 补回来。
+ * 若哪天第一份 `-c` 指到别处，就要在这里显式读 `.dev.vars` 并逐条 `--var NAME:VALUE` 补回来。
  */
 import { spawn } from 'node:child_process';
 import { generateDevKeys } from './dev-keys.mjs';
@@ -112,7 +113,10 @@ export function planDev(manifest, root, { webPort = WEB_PORT, apiPort = API_PORT
         procs.push({
             name: 'worker',
             command: npx,
-            args: ['wrangler', 'dev', '--port', apiPort, '--local', ...extraArgs],
+            // 两份配置一个会话：第一份是你的后端（端口、.dev.vars 都跟它走），第二份是本地网关桩，
+            // backend/wrangler.jsonc 的 services[PT_GATEWAY] 按名字绑到它。
+            args: ['wrangler', 'dev', '-c', 'wrangler.jsonc', '-c', '../scripts/local-gateway/wrangler.jsonc',
+                   '--port', apiPort, '--local', ...extraArgs],
             cwd: `${root}/backend`
         });
     } else if (extraArgs.length > 0) {
@@ -157,6 +161,7 @@ export async function run(args, root) {
 
   令牌的 scopes 照抄 manifest.json：要改权限就改 manifest 再重启。
   临时模拟别的站点 / 缺某个权限：直接改 web/.ptx-dev-key.json 的 sid / scopes，不用重启（下次 ptx dev 会重写它）。
+  ctx.pt.jobs.* 走本地内存桩（重启即清空）；运行任务路由：npx ptx job run <type> [--params '{…}'] [--preview]
   密钥与普通配置都写在 backend/.dev.vars（一个文件，一行一个 KEY=VALUE），ptx 不会覆盖它们。
   线上只注入 manifest.backend.secrets / backend.vars 声明过的名字。
 `);

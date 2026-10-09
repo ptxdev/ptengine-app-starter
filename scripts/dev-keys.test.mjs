@@ -64,3 +64,25 @@ test('scopes 形状不对 → 明确报错，且不留下半套密钥文件', ()
     assert.equal(existsSync(join(dir, 'web', '.ptx-dev-key.json')), false);
     assert.equal(existsSync(join(dir, 'backend', '.dev.vars')), false);
 });
+
+// ── 定时任务 1a：jobs:run 同样照抄 manifest（每次 ptx dev 重写 dev key 时按当前 manifest 计算）──
+
+test('manifest 声明了 jobs:run → dev key 的 scopes 含它；没声明 → 不含', () => {
+    const withJobs = project({ scopes: ['analytics:read', 'jobs:run'] });
+    generateDevKeys(withJobs);
+    assert.deepEqual(devKey(withJobs).scopes, ['analytics:read', 'jobs:run']);
+
+    const without = project({ scopes: ['analytics:read', 'ui:notify'] });
+    generateDevKeys(without);
+    assert.ok(!devKey(without).scopes.includes('jobs:run'));
+});
+
+test('每次重写都按当前 manifest 计算：删掉 jobs:run 再生成 → 不再含', () => {
+    const dir = project({ scopes: ['jobs:run'] });
+    generateDevKeys(dir);
+    assert.ok(devKey(dir).scopes.includes('jobs:run'));
+    const m = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
+    writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ ...m, scopes: [] }));
+    generateDevKeys(dir);
+    assert.ok(!devKey(dir).scopes.includes('jobs:run'));
+});

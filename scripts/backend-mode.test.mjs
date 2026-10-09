@@ -86,7 +86,10 @@ test('dev：有后端时 worker 先起、vite 后起（顺序是有意的）', (
     const { hasBackend, procs } = planDev(full, root, { webPort: '5273', apiPort: '8887' });
     assert.equal(hasBackend, true);
     assert.deepEqual(procs.map(p => p.name), ['worker', 'web']);
-    assert.deepEqual(procs[0].args, ['wrangler', 'dev', '--port', '8887', '--local']);
+    assert.deepEqual(procs[0].args, [
+        'wrangler', 'dev', '-c', 'wrangler.jsonc', '-c', '../scripts/local-gateway/wrangler.jsonc',
+        '--port', '8887', '--local'
+    ]);
     assert.equal(procs[0].cwd, `${root}/backend`);
     assert.deepEqual(procs[1].args, ['vite', '--port', '5273', '--strictPort']);
 });

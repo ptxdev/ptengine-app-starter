@@ -1,0 +1,6 @@
+{
+    // ptx dev 专用的本地网关桩。只在本机 `wrangler dev` 里存在，从不部署，也不进上传包。
+    "name": "ptx-local-gateway",
+    "main": "worker.mjs",
+    "compatibility_date": "2026-09-01"
+}
