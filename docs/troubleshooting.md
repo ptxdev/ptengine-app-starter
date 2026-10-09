@@ -133,7 +133,7 @@ Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc`
 ## 定时任务与本地网关
 
 **`npx ptx job run` 报「没找到本地开发密钥」或「请求本地 worker 失败」？**
-它要连正在跑的 `npm run dev`：先在另一个终端启动它；后端端口改过的话，两边用同一个 `PTX_API_PORT`。
+它要连正在跑的 `npm run dev`：先在另一个终端启动它；后端端口改过的话，两边用同一个 `PTX_API_PORT`（缺省 8787）。
 
 **`npx ptx job run` 报「backend.jobs 里没有类型 …」？**
 `<type>` 要与 `manifest.json` 的 `backend.jobs[].type` 完全一致；`--params` 必须是 JSON **对象**
@@ -145,7 +145,8 @@ Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc`
   只想跑副作用、不需要存档的任务，`none` 就是正常结果。
 - `invalid（原因）` —— 返回了 `archive` 但不合规，原因里点名字段（如 `archive.markdown 必填`）。
   运行本身不算失败，但平台不会采集。照原因改返回值：`{ archive: { title?, markdown, files? } }`。
-- `too_large` —— 响应体超过上限（见 `scripts/rules.json` 的 `jobResult`），平台不采集。把大内容拆进 `files` 或精简正文。
+- `too_large` —— **整个响应体**的 UTF-8 字节数超过 `scripts/rules.json` 的 `jobResult.maxBytes`，平台不采集。
+  `files` 也算在响应体里，把内容挪进 `files` 不会变小；要精简正文 / 附件，让整个响应体控制在 `jobResult.maxBytes` 以内。
 - `stored` —— 平台会采集这份结果。
 
 **任务路由返回 403 `JOB_ONLY`？**

@@ -75,7 +75,7 @@ npx skills add ptxdev/ptengine-skills          # 大多数助手
 |---|---|
 | `npm run dev` | vite + `wrangler dev`（你的 worker 加本地网关桩 `ptx-local-gateway`）+ 本地令牌端点。端口冲突用 `PTX_WEB_PORT` / `PTX_API_PORT` |
 | `npm run doctor` | 查约定与 manifest 自洽性。`--deps` 额外报依赖漂移 |
-| `npx ptx job run <type> [--params '<json>'] [--preview]` | 以定时任务身份在本地调一次任务路由（需 `npm run dev` 在跑）；打印状态码、响应体，以及平台会把返回结果判成什么 |
+| `npx ptx job run <type> [--params '<json>'] [--preview]` | 以定时任务身份在本地调一次任务路由（需 `npm run dev` 在跑；端口取 `PTX_API_PORT`，缺省 8787）；打印状态码、响应体，以及平台会把返回结果判成什么 |
 | `npm run build` | 类型检查（web + backend + shared）+ vite build + wrangler bundle |
 | `npm run package` | 组装 zip 并做结构自检 |
 | `npm run deploy` | 上传。`--publish` 立即发布，`--stream` 流式打印进度，`--dry-run` 只打印不发请求 |
@@ -98,7 +98,7 @@ dev token 的 scopes = **默认列表 ∪ `manifest.json` 的 `scopes`**，每�
 npx ptx job run weekly-report --params '{"channel":"email"}'   # 加 --preview 走预览运行
 ```
 
-它用本地开发密钥签一枚任务模式令牌，把 params 作为 body POST 到 `/api<route>`，打印状态码、响应体和判定：`stored`（平台会采集返回的 `{ archive }`）、`none`（没东西可采集 —— 没有 `archive`、非 2xx 或不是 JSON）、`invalid（原因）`（`archive` 违反规则；运行照样算成功，只是不采集）、`too_large`（响应体超过上限）。用 `ctx.auth.runId` 做幂等、预览分支怎么写等完整步骤见 [`AGENTS.md`](./AGENTS.md#定时任务backendjobs)。`ctx.auth.trigger` / `preview` 与 `ctx.pt.jobs` 需要升级到含定时任务的 `@ptengine/app-backend` 版本后才生效。
+它用本地开发密钥签一枚任务模式令牌，把 params 作为 body POST 到 `/api<route>`，打印状态码、响应体和判定：`stored`（平台会采集返回的 `{ archive }`）、`none`（没东西可采集 —— 没有 `archive`、非 2xx 或不是 JSON）、`invalid（原因）`（`archive` 违反规则；运行照样算成功，只是不采集）、`too_large`（**整个**响应体、含 `files`，超过 `jobResult.maxBytes`）。用 `ctx.auth.runId` 做幂等、预览分支怎么写等完整步骤见 [`AGENTS.md`](./AGENTS.md#定时任务backendjobs)。`ctx.auth.trigger` / `preview` 与 `ctx.pt.jobs` 需要升级到含定时任务的 `@ptengine/app-backend` 版本后才生效。
 
 ## 前端
 

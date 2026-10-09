@@ -75,7 +75,7 @@ Plenty of apps need no backend at all. To go front-end only: `rm -rf backend/`, 
 |---|---|
 | `npm run dev` | vite + `wrangler dev` (your worker plus the local gateway stub `ptx-local-gateway`) + a local token endpoint. `PTX_WEB_PORT` / `PTX_API_PORT` move the ports |
 | `npm run doctor` | Checks conventions and manifest consistency. `--deps` also reports dependency drift |
-| `npx ptx job run <type> [--params '<json>'] [--preview]` | Calls a job route locally as a scheduled job (needs `npm run dev` running); prints the status, body and how the platform would classify the returned result |
+| `npx ptx job run <type> [--params '<json>'] [--preview]` | Calls a job route locally as a scheduled job (needs `npm run dev` running; port `PTX_API_PORT`, default 8787); prints the status, body and how the platform would classify the returned result |
 | `npm run build` | Type-check (web + backend + shared) + vite build + wrangler bundle |
 | `npm run package` | Assemble the zip and self-check its structure |
 | `npm run deploy` | Upload. `--publish` releases immediately, `--stream` streams progress, `--dry-run` only prints |
@@ -98,7 +98,7 @@ Declare job types in `manifest.json` (`backend.jobs`, plus the `jobs:run` scope)
 npx ptx job run weekly-report --params '{"channel":"email"}'   # add --preview for a preview run
 ```
 
-It signs a job-mode token with your local dev key, POSTs the params to `/api<route>` and prints the status, the response body and a verdict: `stored` (the platform would archive the returned `{ archive }`), `none` (nothing to collect — no `archive`, non-2xx or non-JSON), `invalid (reason)` (the `archive` breaks a rule; the run still counts, but nothing is archived) or `too_large` (body over the limit). Idempotency via `ctx.auth.runId`, preview handling and the full walkthrough: [`AGENTS.md`](./AGENTS.md#定时任务backendjobs). `ctx.auth.trigger` / `preview` and `ctx.pt.jobs` need an `@ptengine/app-backend` release that includes scheduled jobs.
+It signs a job-mode token with your local dev key, POSTs the params to `/api<route>` and prints the status, the response body and a verdict: `stored` (the platform would archive the returned `{ archive }`), `none` (nothing to collect — no `archive`, non-2xx or non-JSON), `invalid (reason)` (the `archive` breaks a rule; the run still counts, but nothing is archived) or `too_large` (the whole response body, `files` included, exceeds `jobResult.maxBytes`). Idempotency via `ctx.auth.runId`, preview handling and the full walkthrough: [`AGENTS.md`](./AGENTS.md#定时任务backendjobs). `ctx.auth.trigger` / `preview` and `ctx.pt.jobs` need an `@ptengine/app-backend` release that includes scheduled jobs.
 
 ## Front end
 

@@ -217,7 +217,7 @@ ctx.pt.jobs.*            // 定时任务：create / list / get / update / pause 
 
 ctx.requireScope('analytics:read')   // 缺则抛 403 SCOPE_REQUIRED
 ctx.requireTrigger('job') // 任务路由第一行；用户请求打进来 403 JOB_ONLY
-ctx.auth.trigger / runId / preview   // 'job' | 'user'；runId 做幂等键；preview 时不写状态、不碰外部系统
+ctx.auth.trigger / runId / preview   // 'job' | 'user'；runId 做幂等键；preview 时不要写会影响正式运行的状态、不碰外部系统
 throw ctx.error(502, 'CODE')         // 受控响应；抛其它 → 500 且详情只进日志（第三参见下）
 throw badRequest('CODE', '给前端看的话')  // 要带说明文字用这类 helper（import 自 @ptengine/app-backend）
 ctx.log('msg', { ... })              // 结构化日志
@@ -325,34 +325,67 @@ Worker 自己不能起定时（见[硬边界 3](#3-后端没有的能力写了�
 > 同样需要含定时任务的 `@ptengine/app-sdk`。旧版本上类型里没有这些字段（tsc 报错），运行时也拿不到。
 
 1. **`manifest.json`**：`scopes` 加 `"jobs:run"`；`backend.jobs` 加一项
-   `{ "type": "weekly-report", "route": "POST /jobs/weekly-report", "title": "每周报告" }`。
+   `{ "type": "weekly-report", "route": "POST /jobs/weekly-report", "title": "每周报告", "preview": true }`
+   （`preview: true` 表示允许用户在管理页点「预览」跑一次，此时任务路由里 `ctx.auth.preview === true`）。
    声明了 `backend.jobs` 却没有 `jobs:run`，`npm run doctor` 报 bad。
 2. **`shared/api.ts` + `backend/src/index.ts`**：在 `ApiRoutes` 与 `routes` 里各加**同名键** `'POST /jobs/weekly-report'`
    （不带 `/api`；`routes` 的键必须与 `ApiRoutes` 一一对应，只加一边 tsc 会报错），handler 第一行
    `ctx.requireTrigger('job')` —— 否则任何拿到用户 App Token 的人都能手动调它；用户请求打进来得到 403 `JOB_ONLY`。
+   `ApiRoutes` 里的条目（body 是订阅时的 `params`，响应类型用 `JobRunResult`）：
+
+   ```ts
+   import type { JobRunResult } from '@ptengine/app-backend';
+
+   export interface ApiRoutes {
+       // ...
+       'POST /jobs/weekly-report': { body: { channel?: string }; response: JobRunResult };
+   }
+   ```
 3. **幂等**：投递是**至少一次**，同一个 `ctx.auth.runId` 可能到达两次。**先占位、后副作用**：
    先把 `runId` 写进 D1 / KV（已存在就直接返回），再发消息、写外部系统。
 4. **预览**：`ctx.auth.preview === true` 时是用户在管理页点「预览」—— 照常生成内容并返回，
-   但**跳过外部副作用**（不发邮件 / 消息、不写第三方、不改会影响正式运行的状态）。
+   但**不要写会影响正式运行的状态、不碰外部系统**（不发邮件 / 消息、不写第三方）。
    声明里 `preview: true` 却没读 `ctx.auth.preview`，doctor 会给 warn。
 5. **让用户订阅**：在某个**用户请求**的路由里调 `ctx.pt.jobs.create({ type, cron, timezone, params })`
    （任务运行中不能创建任务，会得到 `JOB_CREATE_FROM_JOB`）。另有 `list / get / update / pause / resume / delete`。
 6. **把结果交给平台**：在 2xx 的 JSON 响应里返回 `{ archive: { title?, markdown, files? } }`（类型 `JobRunResult`），
    平台会采集存档。不返回 `archive` 也行，只是没有存档；格式不对不影响运行成败，只是不采集。
 
+示例用 D1 记占位，需要 manifest 的 `backend.resources.database: true`，并加一个迁移
+（序号接在已有迁移之后，例如 `backend/migrations/0002_job_runs.sql`）：
+
+```sql
+CREATE TABLE IF NOT EXISTS job_runs (run_id TEXT PRIMARY KEY, sid TEXT NOT NULL);
+```
+
 ```ts
 'POST /jobs/weekly-report': async (ctx) => {
     ctx.requireTrigger('job');
+    const markdown = await buildReport(ctx);
+    if (ctx.auth.preview) {
+        // 预览：只生成内容并返回；不占位（不写会影响正式运行的状态），不碰外部系统
+        return { archive: { title: '每周报告（预览）', markdown } };
+    }
     const runId = ctx.auth.runId!;
     // 先占位：run_id 是主键，重复投递时 INSERT 不生效
     const claimed = await ctx.db.prepare('INSERT OR IGNORE INTO job_runs (run_id, sid) VALUES (?, ?)')
         .bind(runId, ctx.auth.sid).run();
-    if (claimed.meta.changes === 0) return {};                      // 重复投递：什么都不做
-    const markdown = await buildReport(ctx);
-    if (!ctx.auth.preview) await sendToChannel(ctx, markdown);       // 预览不碰外部系统
+    if (claimed.meta.changes === 0) return {};                      // 重复投递：什么都不做（判为 none，不采集）
+    try {
+        await sendToChannel(ctx, markdown);                          // 外部副作用
+    } catch (e) {
+        // 想让重投重做：失败时先删占位再抛错。不删 = 这次的副作用与存档都丢了
+        await ctx.db.prepare('DELETE FROM job_runs WHERE run_id = ?').bind(runId).run();
+        throw e;
+    }
     return { archive: { title: '每周报告', markdown } };
 }
 ```
+
+**取舍**：「先占位、后副作用」得到的是**至多一次**。占位之后副作用失败或超时（例如 worker 被掐断、
+来不及走到 `catch`），重投会撞上占位直接返回 `{}` —— 这次的副作用与存档都会丢；重复投递返回的 `{}`
+被判为 `none`，平台不采集。希望失败后由重投重做，就像上面那样在失败时先删除占位再抛错；
+宁可偶尔重复也不能漏的场景，改为先做副作用、再记 `runId`（至少一次，副作用自身要能容忍重复）。
 
 ### 本地调试定时任务
 
@@ -365,7 +398,7 @@ npx ptx job run weekly-report --preview                      # 预览运行（ct
 
 它读 `manifest.backend.jobs` 找到路由，用 `web/.ptx-dev-key.json` 签一枚任务模式令牌
 （`trigger='job'`、`jobId='local'`、每次新的 `runId`），把 `--params`（JSON 对象，缺省 `{}`）当 body
-POST 到 `http://127.0.0.1:$PTX_API_PORT/api<route>`，然后打印：
+POST 到 `http://127.0.0.1:$PTX_API_PORT/api<route>`（`PTX_API_PORT` 缺省 8787，要与 `npm run dev` 用的一致），然后打印：
 
 - 状态码与响应体（非 2xx 时命令退出码为 1）；
 - **结果判定**（与平台采集同一口径，规则读 `scripts/rules.json` 的 `jobResult`）：
@@ -375,7 +408,7 @@ POST 到 `http://127.0.0.1:$PTX_API_PORT/api<route>`，然后打印：
 | `stored` | 2xx + JSON + 合法的 `archive` —— 平台会采集这份结果 |
 | `none` | 没有可采集的东西：没返回 `archive`，或非 2xx / 不是 JSON / JSON 解析失败（括号里会写哪种） |
 | `invalid（原因）` | 返回了 `archive` 但违反规则（缺 `markdown`、`title` 过长、`files` 类型不对……），原因里点名字段路径。不影响运行成败，但平台不采集 |
-| `too_large` | 响应体超过上限，平台不采集 |
+| `too_large` | **整个响应体**的 UTF-8 字节数超过 `jobResult.maxBytes`（`files` 也算在内），平台不采集 |
 
 本地的 `ctx.pt.jobs.*` 走 `ptx dev` 拉起的内存桩（见[本地开发](#本地开发)）：重启即清空，不校验 cron / 时区 / 配额，
 **也不会按时触发** —— 要跑任务路由只能用 `npx ptx job run`。
