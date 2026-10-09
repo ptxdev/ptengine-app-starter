@@ -76,7 +76,8 @@ export function validateJobRunResult(body, rules) {
 }
 
 /**
- * 一次任务响应会被平台判成什么。口径与 scheduler 的采集一致（brief §11.7）：只有 2xx + JSON content-type
+ * 一次任务响应会被平台判成什么。口径照 scheduler 的采集写（真值在 custom-app-platform 仓的
+ * `workers/workers/scheduler/src/response.ts`，brief §11.7）：只有 2xx + JSON content-type
  * 才看结果，按 UTF-8 字节判超限，JSON 解析失败视为无结果。
  */
 export function classifyJobResponse({ status, contentType, text }, rules) {

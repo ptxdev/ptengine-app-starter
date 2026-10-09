@@ -326,7 +326,7 @@ Worker 自己不能起定时（见[硬边界 3](#3-后端没有的能力写了�
 
 1. **`manifest.json`**：`scopes` 加 `"jobs:run"`；`backend.jobs` 加一项
    `{ "type": "weekly-report", "route": "POST /jobs/weekly-report", "title": "每周报告", "preview": true }`
-   （`preview: true` 表示允许用户在管理页点「预览」跑一次，此时任务路由里 `ctx.auth.preview === true`）。
+   （声明 `preview: true` 表示该任务类型可预览；预览入口 1b 起提供，预览运行时任务路由里 `ctx.auth.preview === true`）。
    声明了 `backend.jobs` 却没有 `jobs:run`，`npm run doctor` 报 bad。
 2. **`shared/api.ts` + `backend/src/index.ts`**：在 `ApiRoutes` 与 `routes` 里各加**同名键** `'POST /jobs/weekly-report'`
    （不带 `/api`；`routes` 的键必须与 `ApiRoutes` 一一对应，只加一边 tsc 会报错），handler 第一行
@@ -343,7 +343,7 @@ Worker 自己不能起定时（见[硬边界 3](#3-后端没有的能力写了�
    ```
 3. **幂等**：投递是**至少一次**，同一个 `ctx.auth.runId` 可能到达两次。**先占位、后副作用**：
    先把 `runId` 写进 D1 / KV（已存在就直接返回），再发消息、写外部系统。
-4. **预览**：`ctx.auth.preview === true` 时是用户在管理页点「预览」—— 照常生成内容并返回，
+4. **预览**：声明 `preview: true` 表示该任务类型可预览；预览入口 1b 起提供。`ctx.auth.preview === true` 时是预览运行 —— 照常生成内容并返回，
    但**不要写会影响正式运行的状态、不碰外部系统**（不发邮件 / 消息、不写第三方）。
    声明里 `preview: true` 却没读 `ctx.auth.preview`，doctor 会给 warn。
 5. **让用户订阅**：在某个**用户请求**的路由里调 `ctx.pt.jobs.create({ type, cron, timezone, params })`
