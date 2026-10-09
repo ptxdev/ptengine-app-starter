@@ -58,6 +58,7 @@
         "user:read",
         "ui:notify",
         "openapi:read",
-        "asset:write"
+        "asset:write",
+        "ai:invoke"
     ]
 }
