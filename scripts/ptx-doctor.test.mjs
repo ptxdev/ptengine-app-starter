@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkMigrationsAdditive, checkTailwindContent, checkPackageFloors, PACKAGE_FLOORS } from './ptx-doctor.mjs';
+import { checkMigrationsAdditive, checkTailwindContent, checkPackageFloors, PACKAGE_FLOORS, checkJobs, findRouteHandler } from './ptx-doctor.mjs';
 
 function fixture(files) {
     const root = mkdtempSync(join(tmpdir(), 'ptx-doctor-'));
@@ -180,4 +180,102 @@ test('包版本 floor：floor 表与 package.json 模板的区间一致（改一
     for (const [name, floor] of Object.entries(PACKAGE_FLOORS)) {
         assert.equal(pkg.dependencies[name], `^${floor.min}`, `${name} 的模板区间应为 ^${floor.min}`);
     }
+});
+
+// ─── 定时任务（backend.jobs）────────────────────────────────────────────
+
+function jobsProject(files) {
+    const root = mkdtempSync(join(tmpdir(), 'ptx-jobs-'));
+    for (const [rel, text] of Object.entries(files)) {
+        mkdirSync(join(root, rel, '..'), { recursive: true });
+        writeFileSync(join(root, rel), text);
+    }
+    return root;
+}
+const JOB = { type: 'weekly-report', route: 'POST /jobs/weekly-report', title: '周报' };
+const mf = (jobs, scopes = ['jobs:run']) => ({ schemaVersion: 2, scopes, backend: { entry: '_backend/worker.js', routes: ['/api/*'], jobs } });
+const INDEX_OK = `export default createApp({ routes: {
+    'GET /orders': async ctx => [],
+    'POST /jobs/weekly-report': async ctx => {
+        ctx.requireTrigger('job');
+        return {};
+    },
+    'POST /settings': async ctx => ({})
+} });`;
+
+test('没有 backend.jobs：不产出任何结果', () => {
+    assert.deepEqual(checkJobs(jobsProject({ 'backend/src/index.ts': INDEX_OK }), { backend: {} }), []);
+});
+
+test('全部合规 → 一条 ok', () => {
+    const out = checkJobs(jobsProject({ 'backend/src/index.ts': INDEX_OK }), mf([JOB]));
+    assert.deepEqual(out.map(r => r.level), ['ok']);
+});
+
+test('声明了 jobs 却没有 jobs:run → bad', () => {
+    const out = checkJobs(jobsProject({ 'backend/src/index.ts': INDEX_OK }), mf([JOB], ['analytics:read']));
+    assert.ok(out.some(r => r.level === 'bad' && /jobs:run/.test(r.msg)));
+});
+
+test('任务路由不在 routes 里 → bad，并点名任务类型', () => {
+    const out = checkJobs(jobsProject({ 'backend/src/index.ts': INDEX_OK }), mf([{ ...JOB, type: 'gone', route: 'POST /jobs/gone' }]));
+    assert.ok(out.some(r => r.level === 'bad' && r.msg.includes('gone') && r.msg.includes('POST /jobs/gone')));
+});
+
+test('路由只出现在注释或普通字符串里不算（必须是对象键）', () => {
+    const src = `// 'POST /jobs/weekly-report': 以后再写\nconst s = 'POST /jobs/weekly-report';\nexport default createApp({ routes: {} });`;
+    const out = checkJobs(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]));
+    assert.ok(out.some(r => r.level === 'bad'));
+});
+
+test('路由只出现在块注释里也不算', () => {
+    const src = `/*\n  'POST /jobs/weekly-report': async ctx => { ctx.requireTrigger('job'); }\n*/\nexport default createApp({ routes: {} });`;
+    const out = checkJobs(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]));
+    assert.ok(out.some(r => r.level === 'bad' && r.msg.includes('POST /jobs/weekly-report')));
+});
+
+test('字符串里含 // 的 URL 不影响路由识别（剥注释不误伤字符串）', () => {
+    const src = `const API = 'https://api.example.com/v1'; const B = "http://x.test//y"; export default createApp({ routes: { 'POST /jobs/weekly-report': async ctx => { ctx.requireTrigger('job'); await fetch(\`https://hook.test/\${API}\`); } } });`;
+    const out = checkJobs(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]));
+    assert.deepEqual(out.map(r => r.level), ['ok']);
+});
+
+test('requireTrigger / ctx.auth.preview 只写在注释里不算数', () => {
+    const src = `export default createApp({ routes: {
+    'POST /jobs/weekly-report': async ctx => {
+        // TODO ctx.requireTrigger('job'); 以后读 ctx.auth.preview
+        return {};
+    }
+} });`;
+    const out = checkJobs(jobsProject({ 'backend/src/index.ts': src }), mf([{ ...JOB, preview: true }]));
+    assert.deepEqual(out.map(r => r.level), ['warn', 'warn']);
+});
+
+test('路由写在 backend/src 的子文件里（双引号 / 反引号键）也能找到', () => {
+    const sub = 'export const jobRoutes = {\n  "POST /jobs/weekly-report": async (ctx) => { ctx.requireTrigger("job"); }\n};';
+    const out = checkJobs(jobsProject({ 'backend/src/index.ts': 'export default createApp({ routes: { ...jobRoutes } });', 'backend/src/jobs/routes.ts': sub }), mf([JOB]));
+    assert.deepEqual(out.map(r => r.level), ['ok']);
+    const tick = 'export const r = {\n  `POST /jobs/weekly-report`: async ctx => { ctx.requireTrigger("job"); }\n};';
+    assert.deepEqual(checkJobs(jobsProject({ 'backend/src/index.ts': tick }), mf([JOB])).map(r => r.level), ['ok']);
+});
+
+test('任务路由片段里没有 requireTrigger( → warn；下一条路由里的 requireTrigger 不算数', () => {
+    const src = `export default createApp({ routes: {
+    'POST /jobs/weekly-report': async ctx => ({}),
+    'POST /other': async ctx => { ctx.requireTrigger('user'); }
+} });`;
+    const out = checkJobs(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]));
+    assert.ok(out.some(r => r.level === 'warn' && /requireTrigger/.test(r.msg)));
+});
+
+test('preview: true 但路由所在文件没读 ctx.auth.preview → warn；读了就不报', () => {
+    const noPreview = checkJobs(jobsProject({ 'backend/src/index.ts': INDEX_OK }), mf([{ ...JOB, preview: true }]));
+    assert.ok(noPreview.some(r => r.level === 'warn' && /ctx\.auth\.preview/.test(r.msg)));
+    const withPreview = INDEX_OK.replace("ctx.requireTrigger('job');", "ctx.requireTrigger('job'); if (ctx.auth.preview) return {};");
+    assert.deepEqual(checkJobs(jobsProject({ 'backend/src/index.ts': withPreview }), mf([{ ...JOB, preview: true }])).map(r => r.level), ['ok']);
+});
+
+test('findRouteHandler：路由里的正则元字符被转义（. 不当通配）', () => {
+    const sources = [{ rel: 'a.ts', text: "{ 'POST /jobsXweekly': 1 }" }];
+    assert.equal(findRouteHandler(sources, 'POST /jobs.weekly'), null);
 });

@@ -12,7 +12,7 @@
  *   npx ptx doctor --deps     额外检查 @ptengine/* 依赖是否落后于 npm 最新版（需要网络）
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { RULES, readManifest, resolveBackend, validateManifest } from './manifest.mjs';
@@ -463,6 +463,119 @@ function checkScopeConsistency(root, manifest) {
     );
 }
 
+// ─── 定时任务（backend.jobs）────────────────────────────────────────────
+//
+// 收录理由：这四条在本地都「能跑」，问题只在平台按时调用时才出现 ——
+//   · 没声明 jobs:run：上传第 1 步 MANIFEST_JOBS_SCOPE_MISSING；
+//   · 路由不存在：上传照样成功（平台不读你的代码），之后**每一次**运行都是 404 → JOB_ROUTE_NOT_FOUND；
+//   · 没有 requireTrigger('job')：任何拿到用户令牌的人都能手动触发任务路由；
+//   · 声明了 preview 却从不读 ctx.auth.preview：预览会真的写状态 / 推外部系统。
+
+function listSourceFiles(dir) {
+    if (!existsSync(dir)) return [];
+    const out = [];
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, e.name);
+        if (e.isDirectory()) { if (e.name !== 'node_modules') out.push(...listSourceFiles(p)); }
+        else if (/\.(ts|mts|js|mjs)$/.test(e.name)) out.push(p);
+    }
+    return out;
+}
+
+/**
+ * 把 JS/TS 源码里的 `//` 行注释与块注释换成空格（换行保留），字符串 / 模板字面量原样保留。
+ * 逐字符扫描而不是正则：`'https://…'` 里的 `//` 不是注释，正则一刀切会把后半行一起吃掉。
+ * 已知不处理：正则字面量里未转义的 `//`、模板字面量 `${}` 里再嵌套反引号 —— 静态检查够用。
+ */
+function stripJsComments(src) {
+    let out = '';
+    let i = 0;
+    const n = src.length;
+    while (i < n) {
+        const c = src[i];
+        const d = src[i + 1];
+        if (c === '/' && d === '/') {
+            while (i < n && src[i] !== '\n') { out += ' '; i++; }
+        } else if (c === '/' && d === '*') {
+            const end = src.indexOf('*/', i + 2);
+            const stop = end === -1 ? n : end + 2;
+            for (; i < stop; i++) out += src[i] === '\n' ? '\n' : ' ';
+        } else if (c === '\'' || c === '"' || c === '`') {
+            out += c; i++;
+            while (i < n && src[i] !== c) {
+                if (src[i] === '\\' && i + 1 < n) { out += src[i] + src[i + 1]; i += 2; continue; }
+                if (src[i] === '\n' && c !== '`') break; // 未闭合的单行字符串：到行尾为止
+                out += src[i]; i++;
+            }
+            if (i < n && src[i] === c) { out += c; i++; }
+        } else {
+            out += c; i++;
+        }
+    }
+    return out;
+}
+
+/**
+ * 在源码里找 `'<route>':`（单 / 双 / 反引号的对象键），返回从键之后到**下一个路由键**之前的片段。
+ * 只认对象键：注释或普通字符串里出现同一串字符不算「声明了路由」。
+ * 匹配前先剥注释，所以返回的 segment / fileText 都是**去掉注释后**的文本 ——
+ * 注释里写的 requireTrigger( / ctx.auth.preview 同样不算数。
+ */
+export function findRouteHandler(sources, route) {
+    const esc = route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const keyRe = new RegExp(`(['"\`])${esc}\\1\\s*:`);
+    const nextKeyRe = /(['"`])(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) \/[^'"`]*\1\s*:/;
+    for (const s of sources) {
+        const text = stripJsComments(s.text);
+        const m = keyRe.exec(text);
+        if (!m) continue;
+        const rest = text.slice(m.index + m[0].length);
+        const next = nextKeyRe.exec(rest);
+        return { file: s.rel, segment: next ? rest.slice(0, next.index) : rest, fileText: text };
+    }
+    return null;
+}
+
+export function checkJobs(root, manifest) {
+    const jobs = manifest?.backend?.jobs;
+    if (!Array.isArray(jobs) || jobs.length === 0) return [];
+    const out = [];
+    if (!(manifest.scopes ?? []).includes('jobs:run')) {
+        out.push({
+            level: 'bad', msg: 'manifest 声明了 backend.jobs，但 scopes 里没有 jobs:run',
+            why: '平台上传第 1 步会以 MANIFEST_JOBS_SCOPE_MISSING 拒收。把 "jobs:run" 加进 manifest.json 的 scopes。'
+        });
+    }
+    const sources = listSourceFiles(join(root, 'backend', 'src'))
+        .map(p => ({ rel: relative(root, p), text: readFileSync(p, 'utf8') }));
+    for (const job of jobs) {
+        if (!job || typeof job.route !== 'string') continue;
+        const hit = findRouteHandler(sources, job.route);
+        if (!hit) {
+            out.push({
+                level: 'bad', msg: `任务 ${job.type} 的路由 "${job.route}" 不在 backend/src 的 routes 里`,
+                why: '上传不会报错（平台不读代码），但之后每一次运行都是 404，运行记录里是 JOB_ROUTE_NOT_FOUND。' +
+                     '在 createApp 的 routes 里加上这个键（不带 /api 前缀），或改 manifest 里的 route。'
+            });
+            continue;
+        }
+        if (!/requireTrigger\s*\(/.test(hit.segment)) {
+            out.push({
+                level: 'warn', msg: `任务路由 "${job.route}"（${hit.file}）没有调用 requireTrigger(`,
+                why: "第一行写 ctx.requireTrigger('job')。否则任何拿到用户 App Token 的人都能手动调这条路由。"
+            });
+        }
+        if (job.preview === true && !/ctx\.auth\.preview/.test(hit.fileText)) {
+            out.push({
+                level: 'warn', msg: `任务 ${job.type} 声明了 preview: true，但 ${hit.file} 里没有读 ctx.auth.preview`,
+                why: '声明 preview 即承诺预览模式下不写会影响正式运行的状态、不向外部系统写数据。用 ctx.auth.preview 分支跳过这些副作用。'
+            });
+        }
+    }
+    if (out.length === 0) out.push({ level: 'ok', msg: `定时任务声明与代码对得上（${jobs.length} 个任务类型）` });
+    return out;
+}
+
 /**
  * 迁移必须**可加**（只增不减）。
  *
@@ -764,6 +877,7 @@ export async function run(args, root) {
     results.push(...checkPackageFloors(root));
     results.push(checkVars(root, manifest));
     checkScopeConsistency(root, manifest);
+    results.push(...checkJobs(root, manifest));
     checkMigrationsAdditive(root, manifest, results);
     checkGitignore(root);
     checkTokenLeak(root);
