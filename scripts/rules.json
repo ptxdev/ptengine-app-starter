@@ -60,5 +60,9 @@
         "openapi:read",
         "asset:write",
         "ai:invoke"
+    ],
+    "aiModels": [
+        "anthropic/claude-haiku-4-5-20251001",
+        "anthropic/claude-sonnet-5"
     ]
 }
