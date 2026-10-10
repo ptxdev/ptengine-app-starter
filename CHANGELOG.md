@@ -10,6 +10,7 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/app-backend` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|---|
+| v3.6.1 | `^2.7.0` | `^0.7.0` | `^0.5.0` | **2**（轻应用 1）| 修正 `ai:invoke` 的可用模型清单：v3.6.0 带的 28 项里**只有 4 项真能调通**，其余是地域封锁 / 前缀写错 / 版本号写法不存在。依赖区间不变 |
 | v3.6.0 | `^2.7.0` | `^0.7.0` | `^0.5.0` | **2**（轻应用 1）| 新增 `ai:invoke` scope：后端可用 `ctx.pt.ai.chat()` / `.stream()` 调大模型，**凭据在平台侧，应用看不到也传不了**。`@ptengine/app-sdk` 2.7：manifest 的第七个 scope（2.6 以下声明它会 `SCOPE_UNKNOWN`）；`@ptengine/app-backend` 0.7：`ctx.pt.ai.chat / stream` 与 `PtAiChatInput` / `PtAiChatResult`。**与 manifest 里那个 `ai` 段无关** —— 那段讲右侧 AI 助手要不要集成，这条讲你的后端能不能调大模型。它是**写类** scope（没有 first-party 豁免），因为它**花钱**：额度由平台垫付、按工作区计量，用完返回 `AI_BUDGET_EXCEEDED`（要去提额，不是重试能好的）。**`0.x` 的 caret 不跨 minor，旧项目要手改区间再 `npm install`** |
 | v3.5.0 | `^2.6.0` | `^0.6.0` | `^0.5.0` | **2**（轻应用 1）| 新增 `asset:write` scope：后端可用 `ctx.pt.asset.*` 替使用者往产品资产库写入。`@ptengine/app-sdk` 2.6：manifest 的第六个 scope（2.5 以下声明它会 `SCOPE_UNKNOWN`）；`@ptengine/app-backend` 0.6：`ctx.pt.asset.ensureFolder / create / update / uploadSource` 与 `PtAssetDoc`。**写类 scope 没有 first-party 豁免** —— 哪怕应用是自己传的，也要管理员显式同意过一次，否则写入以 403 `SCOPE_DENIED` 失败。**`0.x` 的 caret 不跨 minor，旧项目要手改区间再 `npm install`** |
 | v3.4.0 | `^2.5.0` | `^0.5.0` | `^0.5.0` | **2**（轻应用 1）| 新增 `openapi:read` scope：后端可用 `ctx.pt.openApiUrl` + 自带的 profile API key 调 Ptengine Open API。`@ptengine/app-sdk` 2.5：manifest 的第五个 scope；`@ptengine/app-backend` 0.5：`ctx.pt.openApiUrl`（未声明 scope 时读它抛 501 `PT_OPENAPI_NOT_DECLARED`）。**`0.x` 的 caret 不跨 minor，旧项目要手改区间再 `npm install`** |
@@ -34,6 +35,25 @@
 
 - **`ptx doctor` 新增 `@ptengine/*` 版本下限检查**：`package.json` 区间下界与 `node_modules` 实际安装版本都必须 ≥ 脚手架要求（app-sdk ≥ 2.5.0、app-backend ≥ 0.5.0，表在 `scripts/ptx-doctor.mjs` 的 `PACKAGE_FLOORS`，与本文件兼容矩阵同一次改）；低于则 bad 并给出 `npm i` 修法。skill 只写下限、让 AI 开工先核对，避免再出现「文档是新口径、项目装的是老包」。
 - 补回 `.github/workflows/release.yml`：推 `v*` tag 时从本文件抽出对应版本段落建 GitHub Release（只在脚手架仓生效，客户仓不触发）。迁到 GitLab 时它被落下了，`v3.0.0` 起的 tag 都没有 Release 页面。
+
+## [3.6.1] - 2026-10-10
+
+### 修复
+
+- **可用 AI 模型清单改为实测调通的 16 项。** v3.6.0 带的那份有 28 项，是照 Cloudflare
+  模型目录整理的 —— 实打下来**只有 4 项能用**：
+
+  | 问题 | 数量 | 实测结果 |
+  |---|---|---|
+  | OpenAI 整家 | 12 | 403 `unsupported_country_region_territory`（地域封锁）|
+  | Google | 8 | 400 `Model not found`（前缀应是 `google-ai-studio/`，不是 `google/`）|
+  | Anthropic 点号写法 | 4 | 404（要写 `claude-sonnet-5-5`，不是 `claude-sonnet-5.5`）|
+
+  **OpenAI 按调用来源判地域**，所以同一个模型会「有人能用有人不能」—— 开发时测通、
+  上线后部分客户报错，而报错指向上游。这类不该留在清单里。
+
+  影响：`scripts/rules.json` 与 `ptx doctor` 打出来的清单。**依赖区间没变**，
+  从 v3.6.0 升上来只需要替换这个文件（或重新 clone）。
 
 ## [3.6.0] - 2026-10-09
 
