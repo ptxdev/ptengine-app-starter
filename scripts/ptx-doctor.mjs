@@ -580,8 +580,8 @@ export function checkVars(root, manifest) {
  *   2. node_modules 里实际安装的版本 ≥ floor 且 ≥ 区间下界（lock 落后 / 没跑 npm install）。
  */
 export const PACKAGE_FLOORS = {
-    '@ptengine/app-sdk': { min: '2.6.0', why: '新增 asset:write scope（2.5 以下的 manifest schema 不认它，声明了会 SCOPE_UNKNOWN）；2.5 起 openapi:read；2.4 起 context.user' },
-    '@ptengine/app-backend': { min: '0.6.0', why: 'ctx.pt.asset.*（写资产）与 PtAssetDoc；0.5 起 ctx.pt.openApiUrl；0.4 起 ctx.auth.email / name' }
+    '@ptengine/app-sdk': { min: '2.7.0', why: '新增 ai:invoke scope（2.6 以下的 manifest schema 不认它，声明了会 SCOPE_UNKNOWN）；2.6 起 asset:write；2.5 起 openapi:read；2.4 起 context.user' },
+    '@ptengine/app-backend': { min: '0.7.0', why: 'ctx.pt.ai.chat/stream（调大模型）；0.6 起 ctx.pt.asset.* 与 PtAssetDoc；0.5 起 ctx.pt.openApiUrl；0.4 起 ctx.auth.email / name' }
 };
 
 function parseVersion(v) {
