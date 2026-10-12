@@ -15,7 +15,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
-import { readManifest, resolveBackend, validateManifest } from './manifest.mjs';
+import { RULES, readManifest, resolveBackend, validateManifest } from './manifest.mjs';
 import { parseJsonc } from './jsonc.mjs';
 
 const results = [];
@@ -398,6 +398,42 @@ function checkBackend(root, manifest) {
 }
 
 /**
+ * 声明了 `ai:invoke` 的应用：把**可用模型清单**打出来，并检查后端里写的模型名在不在清单里。
+ *
+ * 为什么要在这里打：网关的 `AI_MODEL_NOT_ALLOWED` 报错里也会列出可用模型，但那只在
+ * **出错之后**才看得到。写代码的人（以及替他写代码的 AI agent）需要在**写之前**就知道。
+ *
+ * 清单来自 `scripts/rules.json`，由 contract 包生成并同步进来 —— 平台的 cross-repo
+ * 检查盯着两边一致，所以它不会悄悄漂。
+ *
+ * 模型名用的是宽匹配（扫源码里的 `'<provider>/<model>'` 字面量），所以**只 warn 不 bad**：
+ * 漏报比误报好，真正的闸在网关。
+ */
+function checkAiModels(root, manifest) {
+    if (!(manifest.scopes ?? []).includes('ai:invoke')) return;
+
+    const models = RULES.aiModels ?? [];
+    if (models.length === 0) {
+        return warn('规则快照里没有 aiModels', '`npm run sync-rules` 同步一次（需要 PT_CONTRACT_DIR）。');
+    }
+    ok(`可用 AI 模型：${models.join('、')}`);
+
+    const idx = read(root, 'backend/src/index.ts');
+    if (!idx) return;
+    // 只看「带 provider 前缀的字面量」，这是 model 参数唯一合法的形态。
+    const used = new Set();
+    for (const m of idx.matchAll(/['"]([a-z0-9-]+\/[A-Za-z0-9._-]+)['"]/g)) used.add(m[1]);
+    const unknown = [...used].filter(x => !models.includes(x));
+    if (unknown.length > 0) {
+        warn(
+            `后端里出现了不在清单里的模型名：${unknown.join('、')}`,
+            `可用的是：${models.join('、')}。不在清单里的会被网关以 400 AI_MODEL_NOT_ALLOWED 拒掉。` +
+            '（本检查是宽匹配，如果这些字符串根本不是模型名，忽略即可。）'
+        );
+    }
+}
+
+/**
  * 后端 `ctx.requireScope(...)` 用到的权限，必须在 manifest.scopes 里声明过。
  *
  * 不一致的后果很别扭：manifest 没声明 -> 平台不会把该权限放进 token ->
@@ -544,8 +580,8 @@ export function checkVars(root, manifest) {
  *   2. node_modules 里实际安装的版本 ≥ floor 且 ≥ 区间下界（lock 落后 / 没跑 npm install）。
  */
 export const PACKAGE_FLOORS = {
-    '@ptengine/app-sdk': { min: '2.6.0', why: '新增 asset:write scope（2.5 以下的 manifest schema 不认它，声明了会 SCOPE_UNKNOWN）；2.5 起 openapi:read；2.4 起 context.user' },
-    '@ptengine/app-backend': { min: '0.6.0', why: 'ctx.pt.asset.*（写资产）与 PtAssetDoc；0.5 起 ctx.pt.openApiUrl；0.4 起 ctx.auth.email / name' }
+    '@ptengine/app-sdk': { min: '2.7.0', why: '新增 ai:invoke scope（2.6 以下的 manifest schema 不认它，声明了会 SCOPE_UNKNOWN）；2.6 起 asset:write；2.5 起 openapi:read；2.4 起 context.user' },
+    '@ptengine/app-backend': { min: '0.7.0', why: 'ctx.pt.ai.chat/stream（调大模型）；0.6 起 ctx.pt.asset.* 与 PtAssetDoc；0.5 起 ctx.pt.openApiUrl；0.4 起 ctx.auth.email / name' }
 };
 
 function parseVersion(v) {
@@ -724,6 +760,7 @@ export async function run(args, root) {
     checkPtUiScope(root);
     checkRouting(root);
     checkBackend(root, manifest);
+    checkAiModels(root, manifest);
     results.push(...checkPackageFloors(root));
     results.push(checkVars(root, manifest));
     checkScopeConsistency(root, manifest);
