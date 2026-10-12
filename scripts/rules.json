@@ -59,7 +59,8 @@
         "ui:notify",
         "openapi:read",
         "asset:write",
-        "ai:invoke"
+        "ai:invoke",
+        "asset:read"
     ],
     "aiModels": [
         "anthropic/claude-opus-5-5",
