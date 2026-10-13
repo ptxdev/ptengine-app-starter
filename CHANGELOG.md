@@ -10,6 +10,7 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/app-backend` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|---|
+| v3.7.1 | `^2.8.0` | `^0.8.0` | `^0.5.0` | **2**（轻应用 1）| 本地 dev token 的 `scopes` 改为照抄 `manifest.json`（以前写死四项，声明了 `asset:read` / `asset:write` / `ai:invoke` 的应用本地 403）；`AGENTS.md` 与后端模板头注释的能力清单对齐到 app-sdk 2.8 / app-backend 0.8 的实际导出。依赖区间不变 |
 | v3.7.0 | `^2.8.0` | `^0.8.0` | `^0.5.0` | **2**（轻应用 1）| 新增 `asset:read` scope：以**当前使用者**身份读 Ptengine Drive 资产树（文件夹 / 落地页 / 页面组 / 图片 / 组件 / 字体 / Studio 知识资产 / 快捷方式），可见范围等于他在产品里能看到的。前端 `PtApp.asset.list / sharedWithMe / get`（`@ptengine/app-sdk` 2.8），后端 `ctx.pt.asset.list / sharedWithMe / get`（`@ptengine/app-backend` 0.8）。它是**读类** scope：本工作区自建应用自动视为已授权，外部 / 商店应用需管理员同意。字段与错误码见包内 `asset-read.llms.txt`。**`0.x` 的 caret 不跨 minor，旧项目要手改区间再 `npm install`** |
 | v3.6.1 | `^2.7.0` | `^0.7.0` | `^0.5.0` | **2**（轻应用 1）| 修正 `ai:invoke` 的可用模型清单：v3.6.0 带的 28 项里**只有 4 项真能调通**，其余是地域封锁 / 前缀写错 / 版本号写法不存在。依赖区间不变 |
 | v3.6.0 | `^2.7.0` | `^0.7.0` | `^0.5.0` | **2**（轻应用 1）| 新增 `ai:invoke` scope：后端可用 `ctx.pt.ai.chat()` / `.stream()` 调大模型，**凭据在平台侧，应用看不到也传不了**。`@ptengine/app-sdk` 2.7：manifest 的第七个 scope（2.6 以下声明它会 `SCOPE_UNKNOWN`）；`@ptengine/app-backend` 0.7：`ctx.pt.ai.chat / stream` 与 `PtAiChatInput` / `PtAiChatResult`。**与 manifest 里那个 `ai` 段无关** —— 那段讲右侧 AI 助手要不要集成，这条讲你的后端能不能调大模型。它是**写类** scope（没有 first-party 豁免），因为它**花钱**：额度由平台垫付、按工作区计量，用完返回 `AI_BUDGET_EXCEEDED`（要去提额，不是重试能好的）。**`0.x` 的 caret 不跨 minor，旧项目要手改区间再 `npm install`** |
@@ -36,6 +37,29 @@
 
 - **`ptx doctor` 新增 `@ptengine/*` 版本下限检查**：`package.json` 区间下界与 `node_modules` 实际安装版本都必须 ≥ 脚手架要求（app-sdk ≥ 2.5.0、app-backend ≥ 0.5.0，表在 `scripts/ptx-doctor.mjs` 的 `PACKAGE_FLOORS`，与本文件兼容矩阵同一次改）；低于则 bad 并给出 `npm i` 修法。skill 只写下限、让 AI 开工先核对，避免再出现「文档是新口径、项目装的是老包」。
 - 补回 `.github/workflows/release.yml`：推 `v*` tag 时从本文件抽出对应版本段落建 GitHub Release（只在脚手架仓生效，客户仓不触发）。迁到 GitLab 时它被落下了，`v3.0.0` 起的 tag 都没有 Release 页面。
+
+## [3.7.1] - 2026-10-13
+
+### 修复
+
+- **本地 dev token 的 `scopes` 照抄 `manifest.json`。** 以前 `scripts/dev-keys.mjs` 写死
+  `['analytics:read','profile:read','user:read','ui:notify']`，声明了 `asset:read` / `asset:write` /
+  `ai:invoke` 的应用本地一调 `ctx.requireScope(...)` 就 403 `SCOPE_REQUIRED`，线上却是通的。
+  - 现在按「声明的全部已获授权」签；没有 `scopes` 字段或空数组 → 令牌不带 scope（合法的最小权限，线上同样如此）；
+    `scopes` 不是字符串数组 → 启动时直接报错，不回退到任何默认集合（回退只会让本地与线上再次不一致）。
+  - `ptx dev` 横幅打印本次令牌的 scopes。
+  - 订正说明：改 `web/.ptx-dev-key.json` **不用重启**（`/__ptx/token` 每次签发都现读它），
+    以前写的「改完重启」反而会被 `ptx dev` 重写掉。
+- **`AGENTS.md` / `backend/src/index.ts` 头注释与运行时对齐**（以 `@ptengine/app-sdk` 2.8 /
+  `@ptengine/app-backend` 0.8 的实际导出为准）：
+  - `ctx` 清单补 `ctx.pt.asset.*`（读 `list / sharedWithMe / get`，写 `ensureFolder / create / update / uploadSource`）、
+    `ctx.pt.ai.chat / stream`、`ctx.vars`、`ctx.authOrNull`、`ctx.workspaceId`、`ctx.scopes`、`ctx.requestId`；
+    删掉「`ctx.pt.query` Phase 2 尚未开放」（早已开放）。
+  - `PtApp` 契约补 `asset.*` 与 `context.user`。
+  - scope 列表补 `ai:invoke`（README 同步），并加一张「scope → 能力 → 授权方式」表。
+  - 写明 **`ctx.error(status, code, detail)` 的第三参只进日志、不回给前端**（前端 message 就是 code），
+    要给前端看的说明用 `badRequest(code, message)` 等 helper。
+  - 写明本地 `wrangler dev` 没有数据网关，`ctx.pt.query / asset / ai` 本地一律 501 `PT_GATEWAY_NOT_BOUND`，与 scope 无关。
 
 ## [3.7.0] - 2026-10-13
 

@@ -9,17 +9,53 @@
  *   web/.ptx-dev-key.json    ← 私钥 + 假身份，vite 的 /__ptx/token 端点用它签 token
  *
  * 每次 `ptx dev` 重新生成一对，进程结束即作废 —— 密钥不会长期留在磁盘上被误用。
+ *
+ * 令牌里的 `scopes` 取自根目录 `manifest.json` 的 `scopes`（见 `devTokenScopes`），
+ * 不再写死 —— 写死的那份没有 `asset:read` / `asset:write` / `ai:invoke`，声明了这些
+ * scope 的应用本地一调就 403 `SCOPE_REQUIRED`，而线上是通的。
  */
 import { generateKeyPairSync, createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseJsonc } from './jsonc.mjs';
+import { readManifest } from './manifest.mjs';
 
 /** .dev.vars 里由 ptx 管理的键。其余行（比如你自己填的 SHOPIFY_TOKEN）原样保留。 */
 const MANAGED_KEYS = ['PT_JWKS_JSON'];
 const MARKER = '# --- 以下由 ptx dev 自动生成，请勿手改 ---';
 
+/**
+ * 本地 dev token 的 `scopes`：**照抄 manifest.json 的 `scopes`**。
+ *
+ * 线上令牌里的 scopes 是「manifest 声明过、且已获授权」的那些；本地没有授权这一步，
+ * 所以按「声明的全部已批准」签 —— 与线上最常见的状态（自建应用、管理员已同意）一致。
+ * 声明了什么本地就有什么，忘了声明的 scope 本地同样 403，问题在本地就现形。
+ *
+ * 回退规则（理由写在每条旁边）：
+ *   - 没有 `scopes` 字段 / 空数组 → `[]`。不报错：manifest schema 不要求这个字段，
+ *     「什么都不声明」是合法的最小权限；线上这样的应用令牌里也是空的。
+ *   - 不是数组、或元素不是非空字符串 → 抛错。这种 manifest 上传必被拒，
+ *     本地若悄悄回退成某个默认集合，只会让本地与线上再次不一致。
+ * 值是否在合法 scope 表里不在这里管：`npm run doctor` / `package` 会按 rules.json 拦。
+ *
+ * @returns {string[]}
+ */
+export function devTokenScopes(manifest) {
+    const scopes = manifest?.scopes;
+    if (scopes === undefined || scopes === null) return [];
+    if (!Array.isArray(scopes) || scopes.some(s => typeof s !== 'string' || s.length === 0)) {
+        throw new Error(
+            `manifest.json 的 scopes 必须是字符串数组（如 ["analytics:read", "ui:notify"]），` +
+            `当前是 ${JSON.stringify(scopes)}。本地 dev token 的 scopes 照抄它，所以先把它改对。`
+        );
+    }
+    return [...new Set(scopes)];
+}
+
 export function generateDevKeys(root) {
+    // 先读 manifest：scopes 写错时在生成任何文件之前就失败，不留半套密钥。
+    const scopes = devTokenScopes(readManifest(root));
+
     const { publicKey, privateKey } = generateKeyPairSync('ed25519');
     const publicJwk = publicKey.export({ format: 'jwk' });
     const privateJwk = privateKey.export({ format: 'jwk' });
@@ -73,11 +109,13 @@ export function generateDevKeys(root) {
                 privateJwk,
                 iss,
                 aud,
-                // 本地假身份。想模拟别的站点 / 权限，改这里再重启 ptx dev。
+                // 本地假身份。vite 的 /__ptx/token 每次签发都现读这个文件，所以想临时模拟
+                // 别的站点 / 缺某个权限，直接改这里即可、**不用重启**；下次 ptx dev 会重写它。
+                // scopes 照抄 manifest.json —— 要长期改权限就改 manifest 再重启。
                 sub: 'local-user',
                 sid: 'local-site',
                 wid: vars.PT_APP?.workspaceId ?? 'local-ws',
-                scopes: ['analytics:read', 'profile:read', 'user:read', 'ui:notify'],
+                scopes,
                 ver: vars.PT_APP?.versionId ?? 'local'
             },
             null,
@@ -86,5 +124,5 @@ export function generateDevKeys(root) {
         { encoding: 'utf8', mode: 0o600 }
     );
 
-    return { kid, aud, iss, devVarsPath, devKeyPath };
+    return { kid, aud, iss, scopes, devVarsPath, devKeyPath };
 }

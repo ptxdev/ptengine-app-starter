@@ -81,7 +81,7 @@ npx skills add ptxdev/ptengine-skills          # 大多数助手
 
 ## 本地开发
 
-**本地的鉴权是真的，不是绕过的。** `npm run dev` 会生成一对临时 Ed25519 密钥：公钥进 `backend/.dev.vars`，worker 用它真验签；私钥给前端签真 token。所以 `aud` 不匹配、令牌过期、scope 不足这些线上才遇得到的问题，本地就会现形。
+**本地的鉴权是真的，不是绕过的。** `npm run dev` 会生成一对临时 Ed25519 密钥：公钥进 `backend/.dev.vars`，worker 用它真验签；私钥给前端签真 token。所以 `aud` 不匹配、令牌过期、scope 不足这些线上才遇得到的问题，本地就会现形 —— 本地令牌的 scopes 就是 `manifest.json` 里声明的那些。
 
 你自己的配置与密钥写在 `backend/.dev.vars`，一行一个 `KEY=VALUE`；`ptx dev` 只重写它托管的 `PT_` 开头的键，你写的行原样保留。这个文件和 `web/.ptx-dev-key.json` 都在 `.gitignore` 里，**绝不要提交**。完整规则（包括值是怎么注入的、为什么改完要重启）见 [`AGENTS.md`](./AGENTS.md#本地配置backenddevvars)。
 
@@ -137,7 +137,7 @@ export default createApp<ApiRoutes>({
 }
 ```
 
-`version` 每次上传必须递增；只要有 `backend` 段，`schemaVersion` 就必须是 `2`；`scopes` 的合法值是 `analytics:read`、`profile:read`、`user:read`、`ui:notify`、`openapi:read`、`asset:write`、`asset:read` —— 以 `scripts/rules.json` 的 `validScopes` 为准，那份是从平台生成的。每个字段、各项上限，以及与平台逐字同源、落在 `scripts/rules.json` 里的校验规则，都写在 [`AGENTS.md`](./AGENTS.md#manifestjson-字段)；`npm run doctor` 会在你上传之前先拦一遍。
+`version` 每次上传必须递增；只要有 `backend` 段，`schemaVersion` 就必须是 `2`；`scopes` 的合法值是 `analytics:read`、`profile:read`、`user:read`、`ui:notify`、`openapi:read`、`asset:write`、`ai:invoke`、`asset:read` —— 以 `scripts/rules.json` 的 `validScopes` 为准，那份是从平台生成的。每个字段、各项上限，以及与平台逐字同源、落在 `scripts/rules.json` 里的校验规则，都写在 [`AGENTS.md`](./AGENTS.md#manifestjson-字段)；`npm run doctor` 会在你上传之前先拦一遍。
 
 ## 在 CI 里发布
 
