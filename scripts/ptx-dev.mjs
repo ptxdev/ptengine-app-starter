@@ -144,7 +144,7 @@ export async function run(args, root) {
   想加后端：恢复 backend/ 目录，并在 manifest.json 里补回 backend 段 + schemaVersion: 2。
 `);
     } else {
-        const { kid, aud, iss } = generateDevKeys(root);
+        const { kid, aud, iss, scopes } = generateDevKeys(root);
         console.log(`
   本地开发已就绪（鉴权是真的，不是绕过的）
 
@@ -153,8 +153,10 @@ export async function run(args, root) {
     令牌    kid = ${kid}
             iss = ${iss}
             aud = ${aud}
+            scopes = ${scopes.length ? scopes.join(', ') : '（无 —— manifest.json 没有声明 scopes）'}
 
-  想模拟别的站点 / 权限：改 web/.ptx-dev-key.json 的 sid / scopes 后重启。
+  令牌的 scopes 照抄 manifest.json：要改权限就改 manifest 再重启。
+  临时模拟别的站点 / 缺某个权限：直接改 web/.ptx-dev-key.json 的 sid / scopes，不用重启（下次 ptx dev 会重写它）。
   密钥与普通配置都写在 backend/.dev.vars（一个文件，一行一个 KEY=VALUE），ptx 不会覆盖它们。
   线上只注入 manifest.backend.secrets / backend.vars 声明过的名字。
 `);

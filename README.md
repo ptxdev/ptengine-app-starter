@@ -81,7 +81,7 @@ Plenty of apps need no backend at all. To go front-end only: `rm -rf backend/`, 
 
 ## Local development
 
-**Local auth is real, not bypassed.** `npm run dev` generates a throwaway Ed25519 key pair: the public key goes into `backend/.dev.vars` so the worker really verifies signatures, the private key signs real tokens for the front end. `aud` mismatches, expiry and missing scopes therefore surface locally instead of in production.
+**Local auth is real, not bypassed.** `npm run dev` generates a throwaway Ed25519 key pair: the public key goes into `backend/.dev.vars` so the worker really verifies signatures, the private key signs real tokens for the front end. `aud` mismatches, expiry and missing scopes therefore surface locally instead of in production — the local token carries exactly the `scopes` declared in `manifest.json`.
 
 Your own configuration and secrets go in `backend/.dev.vars`, one `KEY=VALUE` per line; `ptx dev` only rewrites the `PT_`-prefixed keys it manages and leaves your lines untouched. That file and `web/.ptx-dev-key.json` are gitignored — never commit them. Full rules, including how values are injected and why a restart is needed: [`AGENTS.md`](./AGENTS.md#本地配置backenddevvars).
 
@@ -137,7 +137,7 @@ Databases, KV, R2, secrets and outbound access are **declared in `manifest.json`
 }
 ```
 
-`version` must increase on every upload, `schemaVersion` must be `2` whenever a `backend` section is present, and `scopes` accepts only `analytics:read`, `profile:read`, `user:read`, `ui:notify`, `openapi:read`, `asset:write` and `asset:read` — the authoritative list is `validScopes` in `scripts/rules.json`, which is generated from the platform. Every field, its limits and the validation rules — mirrored byte-for-byte from the platform into `scripts/rules.json` — are documented in [`AGENTS.md`](./AGENTS.md#manifestjson-字段), and `npm run doctor` checks them before you upload.
+`version` must increase on every upload, `schemaVersion` must be `2` whenever a `backend` section is present, and `scopes` accepts only `analytics:read`, `profile:read`, `user:read`, `ui:notify`, `openapi:read`, `asset:write`, `ai:invoke` and `asset:read` — the authoritative list is `validScopes` in `scripts/rules.json`, which is generated from the platform. Every field, its limits and the validation rules — mirrored byte-for-byte from the platform into `scripts/rules.json` — are documented in [`AGENTS.md`](./AGENTS.md#manifestjson-字段), and `npm run doctor` checks them before you upload.
 
 ## Deploy from CI
 

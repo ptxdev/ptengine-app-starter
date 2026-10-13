@@ -128,15 +128,21 @@ rm -rf backend/
 ```ts
 window.PtApp = {
     version: string;
-    context: { appId, sid, locale, theme, initialPath };
-    ui:   { toast(message, type?), confirm({ title?, message }), overlay(theme | null) };
-    nav:  { push(path), syncRoute(subPath) };
-    data: { query(req), describe() };        // 前端取数
-    ai:   { provideContext(fn | null) };     // 页面内容抽取的覆盖入口（多数应用不用碰）
-    auth: { getAppToken() };                 // ⚠️ 调自己后端用；需 app-sdk ^2.0.0
+    context: { appId, sid, locale, theme, initialPath, user? };  // user = { id, email, name }（email / name 可能为 null）；需 app-sdk ≥ 2.4
+    ui:    { toast(message, type?), confirm({ title?, message }), overlay(theme | null) };
+    nav:   { push(path), syncRoute(subPath) };
+    data:  { query(req), describe() };       // 前端取数
+    asset: { list(input?), sharedWithMe(input?), get({ type, id }) };  // 以使用者身份读 Drive 资产；需 asset:read、app-sdk ≥ 2.8
+    ai:    { provideContext(fn | null) };    // 页面内容抽取的覆盖入口（多数应用不用碰）
+    auth:  { getAppToken() };                // ⚠️ 调自己后端用；需 app-sdk ^2.0.0
     on(event: 'context' | 'route' | 'overlay.click', cb);
 };
 ```
+
+- `PtApp.ai` **不是**调大模型的入口（它只管右侧 AI 助手怎么抽取本页内容）。
+  调大模型只能在后端用 `ctx.pt.ai.chat / stream`（需 `ai:invoke`），见下面的 [ctx](#后端能用的东西ctx)。
+- `PtApp.asset.*` 与后端 `ctx.pt.asset.list / sharedWithMe / get` 入参与返回同形；字段表、分页规则（**以 `hasMore` 为准**，
+  短页正常）、错误码见 `node_modules/@ptengine/app-sdk/asset-read.llms.txt`，写代码前先读它。
 
 ⚠️ 两个就绪语义的坑：
 
@@ -183,24 +189,52 @@ const data = await api('GET /orders', { query: { days: '7' } });
 ## 后端能用的东西（ctx）
 
 ```ts
-ctx.auth        // { userId, sid, workspaceId, scopes }  —— 已验签，没有"未验证"状态
+ctx.auth        // { userId, sid, workspaceId, scopes, email?, name?, frontendVersionId? } —— 已验签；公开路由上读它会抛
+ctx.authOrNull  // 同上，但公开路由上是 null
+ctx.workspaceId // 这次**调用**来自哪个工作区（≠ ctx.app.workspaceId，那是应用归属）
+ctx.scopes      // 令牌里已获批的 scopes（只读；公开路由上是 []）
 ctx.app         // { appId, workspaceId, versionId, env }
 ctx.params      // 路径参数        ctx.query  查询串（值恒为 string）   ctx.body  已解析的 body
+ctx.request / ctx.requestId          // 原始请求 / 本次请求 id（错误信封与日志里都有它）
 ctx.db          // D1（需 manifest backend.resources.database: true）
 ctx.kv          // KV（需 backend.resources.kv: true）
-ctx.files       // R2（需 backend.resources.files: true；前缀已限定）
+ctx.files       // R2（需 backend.resources.files: true；前缀已限定；客户应用不可用）
 ctx.secrets.X   // manifest backend.secrets 里声明过的密钥
+ctx.vars.X      // manifest backend.vars 里声明过的配置项
 ctx.fetch()     // 出站（受 egress 白名单管，带超时与日志）
-ctx.pt.query()  // Ptengine 取数（Phase 2，尚未开放）
+
+// —— 以下经平台数据网关，以**调用者身份**执行：应用没有网关 binding → 501 PT_GATEWAY_NOT_BOUND；
+//    有网关但这条 scope 没声明 / 没获授权 → 网关拒，403 SCOPE_DENIED ——
+ctx.pt.query(queryType, params)      // Ptengine 取数（需 analytics:read / profile:read / user:read 中对应的）
+ctx.pt.asset.list(input?) / .sharedWithMe(input?) / .get({ type, id })   // 读 Drive 资产（需 asset:read）
+ctx.pt.asset.ensureFolder({ name }) / .create({ folderId, kind, name, content })
+            / .update({ assetId, name?, content? }) / .uploadSource({ assetId, filename, contentType, body })
+                                     // 写资产（需 asset:write；写类 scope 没有 first-party 豁免，要管理员显式同意）
+ctx.pt.ai.chat(input) / .stream(input)   // 调大模型（需 ai:invoke；model 必须带 provider 前缀；stream 返回的 Response 直接 return）
+ctx.pt.describe()                    // 服务端取数描述尚未开放（501），前端用 PtApp.data.describe()
 ctx.pt.openApiUrl  // 当前环境的 Ptengine Open API 根地址（需 manifest scopes 含 openapi:read）
-ctx.requireScope('analytics:read')   // 缺则抛 403
-ctx.error(502, 'CODE')               // 抛它 → 受控响应；抛其它 → 500 且详情只进日志
+
+ctx.requireScope('analytics:read')   // 缺则抛 403 SCOPE_REQUIRED
+throw ctx.error(502, 'CODE')         // 受控响应；抛其它 → 500 且详情只进日志（第三参见下）
+throw badRequest('CODE', '给前端看的话')  // 要带说明文字用这类 helper（import 自 @ptengine/app-backend）
 ctx.log('msg', { ... })              // 结构化日志
 ctx.waitUntil(promise)               // 后台任务（如写缓存，不阻塞响应）
 ```
 
-没在 manifest 里声明就访问 `ctx.db` / `ctx.kv` / `ctx.secrets.X`，会抛**说得清原因的错误**
-（`RESOURCE_NOT_DECLARED` / `SECRET_NOT_DECLARED`），不是 `undefined is not a function`。
+没在 manifest 里声明就访问 `ctx.db` / `ctx.kv` / `ctx.secrets.X` / `ctx.vars.X`，会抛**说得清原因的错误**
+（`RESOURCE_NOT_DECLARED` / `SECRET_NOT_DECLARED` / `VAR_NOT_DECLARED`），不是 `undefined is not a function`。
+
+⚠️ **`ctx.error(status, code, detail)` 的第三参只进日志，不回给客户端** —— 前端拿到的
+`message` 就是 `code` 本身。要让前端看到一句说明，用 `badRequest(code, message)` /
+`unauthorized` / `forbidden` / `notFound`（都从 `@ptengine/app-backend` 导出），
+或 `new AppError(status, code, message)`。`message` 会原样进响应体，别往里放内部细节。
+
+资产读写、调大模型的入参字段、错误码与示例以 `node_modules/@ptengine/app-backend/README.md`
+和 `node_modules/@ptengine/app-sdk/asset-read.llms.txt` 为准，不要凭印象写。
+
+⚠️ 本地 `wrangler dev` **没有数据网关**：`ctx.pt.query` / `ctx.pt.asset.*` / `ctx.pt.ai.*` 在本地
+一律 501 `PT_GATEWAY_NOT_BOUND`，即使 manifest 已经声明了 scope —— 那是本地缺 binding，不是 scope 没写。
+这几条要发布到平台上验（平台内 dev 模式的 `/api` 仍然代理到本地 wrangler，同样没有网关）。
 
 ### 资源由平台注入
 
@@ -330,8 +364,10 @@ const res = await window.PtApp.data.query({
 ⚠️ 用户级（`user_*`）场景返回的是**单个用户的明细**（可能含 email、跨会话轨迹）。
 只在应用确实要讲某个人的行为时用，面向运营的看板一律用聚合场景。
 
-**什么时候该改用后端取数**：需要跨源 join、需要超过 5000 行、或者不想把用户级明细
-暴露到浏览器时。那是 `ctx.pt.query()`（Phase 2，尚未开放）。
+**什么时候该改用后端取数**：需要和自己的数据 / 第三方数据合在一起算、或者不想把用户级明细
+暴露到浏览器时，用后端的 `ctx.pt.query(queryType, params)`（已开放；同一套 queryType 与 params，
+以调用者身份执行，需 manifest 声明对应的数据类 scope；参数规则见
+`node_modules/@ptengine/app-backend/README.md` 的 `ctx.pt.query()` 一节）。
 
 ---
 
@@ -376,7 +412,10 @@ npm run dev        # 同时起 vite（前端）与 wrangler dev（后端），�
 公钥进 `backend/.dev.vars`（worker 用它真验签），私钥给 vite 的 `/__ptx/token` 端点签 token。
 所以 `aud` 不匹配、过期、scope 不足这些线上才会遇到的问题，本地就会现形。
 
-- 想模拟别的站点 / 权限：改 `web/.ptx-dev-key.json` 的 `sid` / `scopes` 后重启
+- 本地令牌的 `scopes` **照抄 `manifest.json` 的 `scopes`**（视为全部已获授权）：声明了什么本地就有什么，
+  没声明的同样 403 `SCOPE_REQUIRED`。要改权限就改 manifest 再重启 `npm run dev`
+- 临时模拟别的站点 / 缺某个权限：直接改 `web/.ptx-dev-key.json` 的 `sid` / `scopes`，**不用重启**
+  （`/__ptx/token` 每次签发都现读它）；下次 `npm run dev` 会按 manifest 重写
 - 自己的密钥（如 `SHOPIFY_TOKEN`）写在 `backend/.dev.vars`，`ptx dev` **不会覆盖**它们
 - 这两个文件都在 `.gitignore` 里，**绝不要提交**
 
@@ -467,11 +506,22 @@ npm run package    # 组装 zip + 结构自检
 
 ### 权限声明（manifest.scopes）
 
-合法值以 `scripts/rules.json` 的 `validScopes` 为准（那份从平台生成，`npm run sync-rules` 同步）：`analytics:read`、`profile:read`、`user:read`、`ui:notify`、`openapi:read`、`asset:write`、`asset:read`。**这里不要再写死一个数字**——「只有四个」这句在 `openapi:read` 加进来时就已经错了，直到 `asset:write` 又加一个才被发现。
+合法值以 `scripts/rules.json` 的 `validScopes` 为准（那份从平台生成，`npm run sync-rules` 同步）：`analytics:read`、`profile:read`、`user:read`、`ui:notify`、`openapi:read`、`asset:write`、`ai:invoke`、`asset:read`。**这里不要再写死一个数字**——「只有四个」这句在 `openapi:read` 加进来时就已经错了，直到 `asset:write` 又加一个才被发现。
 写未定义或拼错的值会导致**上传校验失败**。遵循最小权限原则。
 
-平台当前只校验取值合法性，尚未据此放行/拦截；但 `ctx.requireScope()` 已经会按
-token 里的 scopes 强制校验，所以后端可以现在就写。
+| scope | 管什么 | 授权 |
+|---|---|---|
+| `analytics:read` / `profile:read` / `user:read` | 前端 `PtApp.data` 与后端 `ctx.pt.query` 的取数 | 读类：本工作区自建应用自动视为已授权；外部 / 商店应用需管理员同意 |
+| `asset:read` | `PtApp.asset.*` / `ctx.pt.asset.list / sharedWithMe / get` | 读类，同上 |
+| `openapi:read` | `ctx.pt.openApiUrl`（自带 profile API key 调 Open API） | 见[调 Ptengine 自己的 Open API](#调-ptengine-自己的-open-api) |
+| `ui:notify` | 宿主 UI 能力（`PtApp.ui` 的 toast / confirm） | — |
+| `asset:write` | `ctx.pt.asset.ensureFolder / create / update / uploadSource` | **写类，没有 first-party 豁免**：管理员必须显式同意，否则 403 `SCOPE_DENIED` |
+| `ai:invoke` | `ctx.pt.ai.chat / stream` | **写类**（花钱），同上；额度用完返回 `AI_BUDGET_EXCEEDED` |
+
+数据类 scope（取数 / 资产 / AI / Open API）决定平台给不给后端挂数据网关或 Open API 地址：
+一条都没声明 → 没有 binding，501（`PT_GATEWAY_NOT_BOUND` / `PT_OPENAPI_NOT_DECLARED`）；
+有网关但缺这一条、或声明了没获授权 → 403 `SCOPE_DENIED`。
+`ctx.requireScope()` 按 token 里的 scopes 强制校验，缺则 403 `SCOPE_REQUIRED`。
 
 ### 校验规则从哪来
 

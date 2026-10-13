@@ -3,11 +3,20 @@
  *
  * 运行时（`@ptengine/app-backend`）已经兜住了验签、路由、错误规范化、日志与健康探针 ——
  * 你只写 handler。`ctx` 上的每一样东西都是已经安全的：
- *   ctx.auth      已验签的调用者身份（userId / sid / workspaceId / scopes）
+ *   ctx.auth      已验签的调用者身份（userId / sid / workspaceId / scopes / email? / name?）
  *   ctx.db        你自己的数据库      ctx.kv   你自己的 KV
- *   ctx.secrets   你在 manifest 里声明的密钥
+ *   ctx.secrets   你在 manifest 里声明的密钥      ctx.vars  声明过的配置项
  *   ctx.fetch     出站请求（受 manifest.backend.egress 白名单管）
- *   ctx.pt.query  Ptengine 取数（Phase 2）
+ *   ctx.pt.query      Ptengine 取数（需 analytics:read / profile:read / user:read）
+ *   ctx.pt.asset.*    读 Drive 资产 list / sharedWithMe / get（需 asset:read）；
+ *                     写 ensureFolder / create / update / uploadSource（需 asset:write）
+ *   ctx.pt.ai.*       调大模型 chat / stream（需 ai:invoke）
+ *   ctx.pt.openApiUrl Ptengine Open API 根地址（需 openapi:read）
+ * query / asset / ai 经平台数据网关、以调用者身份执行；本地 wrangler dev 没有网关，一律 501
+ * PT_GATEWAY_NOT_BOUND。完整清单见 AGENTS.md「后端能用的东西（ctx）」。
+ *
+ * 错误：`throw ctx.error(status, code, detail)` 的 detail **只进日志**，前端拿到的
+ * message 就是 code；要给前端一句说明用 `badRequest(code, message)` 等 helper。
  *
  * 落库时**务必带上 `ctx.auth.sid`**：一个应用会被同一个工作区下的多个站点使用，
  * sid 是它们之间的隔离键。漏了它，A 站点会看到 B 站点的数据。
