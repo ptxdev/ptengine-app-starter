@@ -31,7 +31,7 @@ export default {
         }
         return json(501, { error: {
             code: 'PT_GATEWAY_NOT_BOUND',
-            message: '本地没有数据网关（ptx dev 只为 ctx.pt.jobs.* 提供内存桩）。取数与资产写请在平台内联调。'
+            message: '本地没有数据网关（ptx dev 只为 ctx.pt.jobs.* 提供内存桩）。取数、资产读写与 AI 调用请在平台部署后联调。'
         } });
     }
 };

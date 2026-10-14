@@ -9,13 +9,13 @@
  *
  * 身份（iss / aud / kid / sub / wid / sid / ver）全部取自 dev key —— 与 vite 的 /__ptx/token 签发同源，
  * 所以本地 worker 的 app-backend 用 backend/.dev.vars 里的 JWKS 能验过。
- * scopes 取 devScopes(root)（默认列表 ∪ manifest.scopes）：线上任务 token 的 scopes = manifest ∩ 同意，
- * 本地按「全部同意」处理，与 ptx dev 的交互 token 一致。
+ * scopes 取 devTokenScopes(manifest)（照抄 manifest.scopes）：线上任务 token 的 scopes = manifest ∩ 同意，
+ * 本地按「全部同意」处理，与 ptx dev 的交互 token 同一口径（没声明的 scope 本地同样拿不到）。
  */
 import { createPrivateKey, randomUUID, sign as nodeSign } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { devScopes } from './dev-keys.mjs';
+import { devTokenScopes } from './dev-keys.mjs';
 import { classifyJobResponse } from './job-result.mjs';
 import { readManifest } from './manifest.mjs';
 
@@ -109,7 +109,7 @@ export async function run(args, root) {
     }
     const devKey = JSON.parse(readFileSync(keyPath, 'utf8'));
     const runId = randomUUID();
-    const token = signDevToken(devKey, buildJobClaims(devKey, devScopes(root), { preview, runId }));
+    const token = signDevToken(devKey, buildJobClaims(devKey, devTokenScopes(manifest), { preview, runId }));
 
     const port = process.env.PTX_API_PORT || '8787';
     const url = `http://127.0.0.1:${port}/api${path}`;

@@ -86,9 +86,9 @@ npx skills add ptxdev/ptengine-skills          # 大多数助手
 
 你自己的配置与密钥写在 `backend/.dev.vars`，一行一个 `KEY=VALUE`；`ptx dev` 只重写它托管的 `PT_` 开头的键，你写的行原样保留。这个文件和 `web/.ptx-dev-key.json` 都在 `.gitignore` 里，**绝不要提交**。完整规则（包括值是怎么注入的、为什么改完要重启）见 [`AGENTS.md`](./AGENTS.md#本地配置backenddevvars)。
 
-dev token 的 scopes = **默认列表 ∪ `manifest.json` 的 `scopes`**，每次 `ptx dev` 重算。本地要新权限（比如 `jobs:run`）就在 manifest 里声明再重启 —— 不要改 `web/.ptx-dev-key.json`，它每次启动都会被重新生成。
+定时任务同一条规则：本地要用 `ctx.pt.jobs.*`，就在 manifest 里声明 `jobs:run` 再重启 —— dev token（以及 `npx ptx job run` 签的任务 token）的 scopes 照抄 manifest 的 `scopes`。
 
-`ptx dev` 还会在同一个 `wrangler dev` 会话里常驻一个本地网关桩 `ptx-local-gateway`（`backend/wrangler.jsonc` 的 `PT_GATEWAY` 绑到它）。它只实现 `ctx.pt.jobs.*`，内存存储 —— 重启即清空，也不会按时触发。本地的 `ctx.pt.query()` / `ctx.pt.asset.*` 仍是 501 `PT_GATEWAY_NOT_BOUND`（提示语比以前笼统，还会多一条 `pt-gateway-*-failed` 日志，属预期）。不要绕过 `ptx dev` 直接在 `backend/` 里跑 `wrangler dev`：那样解析不到 `ptx-local-gateway`。
+`ptx dev` 还会在同一个 `wrangler dev` 会话里常驻一个本地网关桩 `ptx-local-gateway`（`backend/wrangler.jsonc` 的 `PT_GATEWAY` 绑到它）。它只实现 `ctx.pt.jobs.*`，内存存储 —— 重启即清空，也不会按时触发。本地的 `ctx.pt.query()` / `ctx.pt.asset.*` / `ctx.pt.ai.*` 仍是 501 `PT_GATEWAY_NOT_BOUND`（提示语比以前笼统，还会多一条 `pt-gateway-*-failed` 日志，属预期）。不要绕过 `ptx dev` 直接在 `backend/` 里跑 `wrangler dev`：那样解析不到 `ptx-local-gateway`。
 
 ### 定时任务
 

@@ -86,9 +86,9 @@ Plenty of apps need no backend at all. To go front-end only: `rm -rf backend/`, 
 
 Your own configuration and secrets go in `backend/.dev.vars`, one `KEY=VALUE` per line; `ptx dev` only rewrites the `PT_`-prefixed keys it manages and leaves your lines untouched. That file and `web/.ptx-dev-key.json` are gitignored — never commit them. Full rules, including how values are injected and why a restart is needed: [`AGENTS.md`](./AGENTS.md#本地配置backenddevvars).
 
-The dev token's scopes are **the default list ∪ `manifest.json` `scopes`**, recomputed on every `ptx dev`. To get a new scope locally (e.g. `jobs:run`), declare it in the manifest and restart — don't edit `web/.ptx-dev-key.json`, it is regenerated on every start.
+Scheduled jobs follow the same rule: to use `ctx.pt.jobs.*` locally, declare `jobs:run` in the manifest and restart — the dev token (and the job token `npx ptx job run` signs) carries exactly the manifest's `scopes`.
 
-`ptx dev` also starts a local gateway stub, `ptx-local-gateway`, in the same `wrangler dev` session (`PT_GATEWAY` in `backend/wrangler.jsonc` binds to it). It only implements `ctx.pt.jobs.*`, in memory — a restart wipes it, and nothing ever fires on schedule. Locally `ctx.pt.query()` / `ctx.pt.asset.*` still answer 501 `PT_GATEWAY_NOT_BOUND` (with a more generic message than before, plus a `pt-gateway-*-failed` log line — expected). Don't run `wrangler dev` directly inside `backend/`: without `ptx dev` the `ptx-local-gateway` service can't be resolved.
+`ptx dev` also starts a local gateway stub, `ptx-local-gateway`, in the same `wrangler dev` session (`PT_GATEWAY` in `backend/wrangler.jsonc` binds to it). It only implements `ctx.pt.jobs.*`, in memory — a restart wipes it, and nothing ever fires on schedule. Locally `ctx.pt.query()` / `ctx.pt.asset.*` / `ctx.pt.ai.*` still answer 501 `PT_GATEWAY_NOT_BOUND` (with a more generic message than before, plus a `pt-gateway-*-failed` log line — expected). Don't run `wrangler dev` directly inside `backend/`: without `ptx dev` the `ptx-local-gateway` service can't be resolved.
 
 ### Scheduled jobs
 

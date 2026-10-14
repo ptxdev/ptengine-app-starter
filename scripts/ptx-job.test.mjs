@@ -8,7 +8,7 @@ import { generateKeyPairSync, verify as nodeVerify, webcrypto } from 'node:crypt
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { generateDevKeys, DEFAULT_DEV_SCOPES } from './dev-keys.mjs';
+import { generateDevKeys } from './dev-keys.mjs';
 import { buildJobClaims, findJobRoute, formatVerdict, parseJobArgs, run, signDevToken, LOCAL_JOB_TOKEN_TTL_SEC } from './ptx-job.mjs';
 
 const MANIFEST = {
@@ -140,9 +140,8 @@ test('run：POST 到本地 worker 的 /api<path>，带任务 token，打印状�
     const claims = decode(seen.auth);
     assert.deepEqual([claims.trg, claims.job, claims.mode], ['job', 'local', 'run']);
     assert.match(claims.run, /^[0-9a-f-]{36}$/);
-    // scopes = devScopes(root)：默认列表 ∪ manifest.scopes
-    assert.ok(claims.scopes.includes('jobs:run'));
-    for (const s of DEFAULT_DEV_SCOPES) assert.ok(claims.scopes.includes(s), s);
+    // scopes 照抄 manifest.scopes（与 ptx dev 的交互 token 同一口径，没有额外默认项）
+    assert.deepEqual(claims.scopes, MANIFEST.scopes);
     assert.match(out, /状态码：200/);
     assert.match(out, /# ok/);
     assert.match(out, /结果：stored/);

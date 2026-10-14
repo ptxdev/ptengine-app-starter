@@ -154,16 +154,16 @@ Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc`
 这是设计行为：本地用 `npx ptx job run` 调，线上由平台调度器调。
 
 **本地 `ctx.pt.jobs.*` 报 403 `SCOPE_DENIED`（令牌里没有 `jobs:run`）？**
-本地 dev token 的 scopes = 默认列表 ∪ `manifest.json` 的 `scopes`。在 manifest 里加 `"jobs:run"` 后**重启**
-`npm run dev`。不要去改 `web/.ptx-dev-key.json` 的 `scopes` —— 每次 `ptx dev` 都会重新生成它。
+本地 dev token 的 scopes 照抄 `manifest.json` 的 `scopes`。在 manifest 里加 `"jobs:run"` 后**重启**
+`npm run dev`（临时改 `web/.ptx-dev-key.json` 的 `scopes` 只影响前端拿到的令牌，下次 `ptx dev` 会被重写；`npx ptx job run` 始终按 manifest 算）。
 
 **本地 `ctx.pt.jobs.*` 建的任务重启后没了？**
 本地网关桩 `ptx-local-gateway` 是内存存储，`ptx dev` 重启即清空。它也不校验 cron / 时区 / 配额，以平台为准。
 
-**本地 `ctx.pt.query()` / `ctx.pt.asset.*` 返回 501 `PT_GATEWAY_NOT_BOUND`，日志里还多一条 `pt-gateway-*-failed`？**
+**本地 `ctx.pt.query()` / `ctx.pt.asset.*` / `ctx.pt.ai.*` 返回 501 `PT_GATEWAY_NOT_BOUND`，日志里还多一条 `pt-gateway-*-failed`？**
 预期如此。本地网关桩只实现 `ctx.pt.jobs.*`，其余路径一律 501；提示语是笼统的
-「本地没有数据网关……请在平台内联调」（不再点名缺哪个 scope），运行时同时记一条
-`pt-gateway-query-failed` / `pt-gateway-asset-failed` 日志。取数与资产写请在平台内联调。
+「本地没有数据网关……请在平台部署后联调」（不再点名缺哪个 scope），运行时同时记一条
+`pt-gateway-query-failed` / `pt-gateway-asset-failed` 日志。取数、资产读写与 AI 调用请在平台部署后联调。
 
 **在 `backend/` 里直接跑 `wrangler dev`，报找不到服务 `ptx-local-gateway` / `ctx.pt.*` 全挂？**
 `backend/wrangler.jsonc` 的 `PT_GATEWAY` 绑的是同会话里的 `ptx-local-gateway`，只有 `ptx dev`

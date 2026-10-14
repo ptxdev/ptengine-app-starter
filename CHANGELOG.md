@@ -102,10 +102,10 @@
   `ctx.auth.preview`（warn）。
 - **本地 `ctx.pt.jobs.*` 内存桩**：`ptx dev` 在同一个 wrangler 会话里拉起 `ptx-local-gateway`，
   `backend/wrangler.jsonc` 的 `PT_GATEWAY` 绑到它；重启即清空，不会按时触发。
-  副作用：本地 `ctx.pt.query()` / `ctx.pt.asset.*` 仍是 501 `PT_GATEWAY_NOT_BOUND`，但提示语变笼统，
+  副作用：本地 `ctx.pt.query()` / `ctx.pt.asset.*` / `ctx.pt.ai.*` 仍是 501 `PT_GATEWAY_NOT_BOUND`，但提示语变笼统，
   并多一条 `pt-gateway-*-failed` 日志（预期行为）；直接在 `backend/` 里跑 `wrangler dev` 会解析不到该服务，请用 `npm run dev`。
-- **dev token 的 scopes = 默认列表 ∪ `manifest.json` 的 `scopes`**（每次 `ptx dev` 重算），
-  manifest 声明 `jobs:run` 后本地 `ctx.pt.jobs.*` 不再恒为 403。改 `web/.ptx-dev-key.json` 的 `scopes` 不再有效（会被覆盖）。
+- `npx ptx job run` 签的任务 token 与 dev token 同一口径：scopes 照抄 `manifest.json` 的 `scopes`（3.7.1 起），
+  manifest 声明 `jobs:run` 后本地 `ctx.pt.jobs.*` 即可用。
 - 规则快照同步：`validScopes` 加 `jobs:run`，新增 `jobResult` 上限段；`scripts/job-result.mjs` 按平台口径本地判定任务返回结果。
 - 文档：README / AGENTS.md 新增「定时任务（backend.jobs）」—— `requireTrigger('job')`、用 `ctx.auth.runId` 做幂等
   （先占位后副作用）、`ctx.auth.preview` 跳过外部副作用、返回 `{ archive: { title?, markdown, files? } }`；

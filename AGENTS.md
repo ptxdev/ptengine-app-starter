@@ -529,8 +529,8 @@ npm run dev        # 同时起 vite（前端）与 wrangler dev（后端），�
 （`scripts/local-gateway/`），`backend/wrangler.jsonc` 的 `PT_GATEWAY` 按服务名绑到它：
 
 - 本地 `ctx.pt.jobs.*` 走它，**内存存储，重启即清空**，不会按时触发（运行任务路由用 `npx ptx job run`）；
-- 本地 `ctx.pt.query()` / `ctx.pt.asset.*` 仍返回 501 `PT_GATEWAY_NOT_BOUND`。提示语比以前笼统
-  （「本地没有数据网关……请在平台内联调」），并会多一条 `pt-gateway-query-failed` / `pt-gateway-asset-failed`
+- 本地 `ctx.pt.query()` / `ctx.pt.asset.*` / `ctx.pt.ai.*` 仍返回 501 `PT_GATEWAY_NOT_BOUND`。提示语比以前笼统
+  （「本地没有数据网关……请在平台部署后联调」），并会多一条 `pt-gateway-query-failed` / `pt-gateway-asset-failed`
   日志 —— 都属预期，不是故障；
 - **不要绕过 `ptx dev` 直接在 `backend/` 里跑 `wrangler dev`**：那样只起了一份配置，
   `PT_GATEWAY` 指向的 `ptx-local-gateway` 解析不到。
