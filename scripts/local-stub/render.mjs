@@ -28,13 +28,18 @@ function renderRules(rules) {
     return rules;
 }
 
-/** 深度口径与平台一致：option 本身算第 1 层，每进一层对象 / 数组 +1。 */
+/**
+ * 口径与平台 sanitizeChartOption 一致：
+ * - 深度：option 本身算第 1 层，每进一层对象 / 数组 +1；只有对象 / 数组判深度，标量叶子不判。
+ * - 禁用前缀：字符串去掉前导空白、转小写后再比（`IMAGE://x`、`  image://x` 一样拒）。
+ */
 function scan(v, depth, path, r) {
-    if (depth > r.maxDepth) return `option 嵌套超过 ${r.maxDepth} 层（${path}）`;
     if (typeof v === 'string') {
-        const hit = r.forbiddenStringPrefixes.find(p => v.startsWith(p));
+        const lower = v.trimStart().toLowerCase();
+        const hit = r.forbiddenStringPrefixes.find(p => lower.startsWith(p));
         return hit ? `${path} 以 ${hit} 开头，平台不允许` : null;
     }
+    if ((Array.isArray(v) || isObj(v)) && depth > r.maxDepth) return `option 嵌套超过 ${r.maxDepth} 层（${path}）`;
     if (Array.isArray(v)) {
         for (let i = 0; i < v.length; i++) { const e = scan(v[i], depth + 1, `${path}[${i}]`, r); if (e) return e; }
         return null;
@@ -77,21 +82,24 @@ export async function loadEchartsRenderer() {
     } catch (e) {
         const out = new Error(
             '本地渲染需要 echarts 与 @resvg/resvg-js（脚手架的 optionalDependencies），这次没装上' +
-            `（${e?.code ?? e?.message ?? e}）。重跑 npm install，或手动 npm i -D echarts@^5.6.0 @resvg/resvg-js@^2.6.2。` +
+            `（${e?.code ?? e?.message ?? e}）。重跑 npm install，或手动 npm i --save-optional echarts@^5.6.0 @resvg/resvg-js@^2.6.2。` +
             '线上渲染在平台侧，不受影响。');
         out.code = 'PTX_RENDER_DEPS_MISSING';
         throw out;
     }
 }
 
+/** 与平台渲染同口径：主题名原样交给 echarts.init（light 也传 'light'），PNG 背景按主题铺底（echarts 内置 dark 主题的底色）。 */
+const BACKGROUND = { light: '#ffffff', dark: '#100c2a' };
+
 export function renderPng({ echarts, Resvg }, { option, width, height, theme }) {
-    const chart = echarts.init(null, theme === 'dark' ? 'dark' : null, { renderer: 'svg', ssr: true, width, height });
+    const chart = echarts.init(null, theme, { renderer: 'svg', ssr: true, width, height });
     try {
         chart.setOption(option);
         const svg = chart.renderToSVGString();
         // 与平台同口径：≤ 200 万像素按 2× 输出（高分屏清晰），更大按 1×
         const zoom = width * height <= 2_000_000 ? 2 : 1;
-        return new Resvg(svg, { fitTo: { mode: 'zoom', value: zoom }, font: { loadSystemFonts: true } }).render().asPng();
+        return new Resvg(svg, { fitTo: { mode: 'zoom', value: zoom }, background: BACKGROUND[theme], font: { loadSystemFonts: true } }).render().asPng();
     } finally {
         chart.dispose();
     }

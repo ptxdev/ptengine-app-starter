@@ -44,9 +44,27 @@ test('checkChartInput：rules.forbiddenKeys 里的键 / forbiddenStringPrefixes 
     for (const bad of [undefined, null, [1], 'x']) assert.equal(codeOf(checkChartInput({ option: bad })), 'RENDER_OPTION_INVALID');
 });
 
+test('checkChartInput：禁用前缀与平台同口径 —— 忽略大小写与前导空白（IMAGE://x、"  image://x" 也拒）', () => {
+    const [prefix] = RULES.render.forbiddenStringPrefixes;
+    for (const s of [`${prefix.toUpperCase()}x`, `  ${prefix}x`, `\t${prefix.toUpperCase()}x`]) {
+        assert.equal(codeOf(checkChartInput({ option: { series: [{ symbol: s }] } })), 'RENDER_OPTION_INVALID', JSON.stringify(s));
+    }
+});
+
 test('checkChartInput：深度以 rules.maxDepth 为界 —— 恰好 maxDepth 层通过，多一层拒', () => {
     assert.equal(checkChartInput({ option: nest(RULES.render.maxDepth) }).ok, true);
     assert.equal(codeOf(checkChartInput({ option: nest(RULES.render.maxDepth + 1) })), 'RENDER_OPTION_INVALID');
+});
+
+test('checkChartInput：标量不计深度 —— 恰好 maxDepth 层、最内层对象 / 数组带标量叶子 → 通过（与平台同口径）', () => {
+    const withLeaf = nest(RULES.render.maxDepth);
+    let d = withLeaf; while (d.a) d = d.a;
+    Object.assign(d, { n: 1, s: 'x', b: true, z: null });
+    assert.equal(checkChartInput({ option: withLeaf }).ok, true);
+    const arr = nest(RULES.render.maxDepth - 1);
+    let e = arr; while (e.a) e = e.a;
+    e.list = [1, 'x', null];
+    assert.equal(checkChartInput({ option: arr }).ok, true);
 });
 
 test('checkChartInput：白名单完全由传入的 rules 决定（换一组规则行为跟着变，证明没有写死）', () => {
@@ -70,16 +88,18 @@ test('checkChartInput：宽高不是范围内整数 / 主题不认识 → RENDER
     assert.equal(codeOf(big), 'RENDER_TOO_LARGE');
 });
 
-test('renderPng：SVG SSR 参数逐字；≤ 200 万像素按 2× 输出，更大按 1×；用完 dispose', async () => {
+test('renderPng：与平台同口径 —— 主题名原样传 init、resvg 背景按主题；≤ 200 万像素按 2× 输出，更大按 1×；用完 dispose', async () => {
     const seen = {};
     const renderer = await fakeRenderer(seen)();
     assert.equal(renderPng(renderer, { option: OPTION, width: 800, height: 400, theme: 'dark' }).toString(), 'PNG');
     assert.equal(seen.theme, 'dark');
     assert.deepEqual(seen.opts, { renderer: 'svg', ssr: true, width: 800, height: 400 });
     assert.equal(seen.resvg.fitTo.value, 2);
+    assert.equal(seen.resvg.background, '#100c2a');
     assert.equal(seen.disposed, true);
     renderPng(renderer, { option: OPTION, width: 2000, height: 2000, theme: 'light' });
-    assert.equal(seen.theme, null);
+    assert.equal(seen.theme, 'light');
+    assert.equal(seen.resvg.background, '#ffffff');
     assert.equal(seen.resvg.fitTo.value, 1);
 });
 
@@ -93,7 +113,7 @@ test('handleRenderChart：本 run 超过 maxPerRun → 409 NOTIFY_RUN_LIMIT_EXCE
 });
 
 test('handleRenderChart：可选依赖没装上 → 501 PTX_RENDER_DEPS_MISSING，提示怎么装', async () => {
-    const missing = async () => { const e = new Error('本地渲染需要 echarts 与 @resvg/resvg-js：npm i -D echarts@^5.6.0 @resvg/resvg-js@^2.6.2'); e.code = 'PTX_RENDER_DEPS_MISSING'; throw e; };
+    const missing = async () => { const e = new Error('本地渲染需要 echarts 与 @resvg/resvg-js：npm i --save-optional echarts@^5.6.0 @resvg/resvg-js@^2.6.2'); e.code = 'PTX_RENDER_DEPS_MISSING'; throw e; };
     const r = await handleRenderChart(createStubState(), { claims: {}, body: { option: OPTION }, loadRenderer: missing });
     assert.equal(r.status, 501);
     assert.equal(codeOf(r), 'PTX_RENDER_DEPS_MISSING');
