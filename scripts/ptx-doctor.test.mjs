@@ -361,3 +361,16 @@ test('测试文件里的 mock 不算', () => {
     });
     assert.deepEqual(checkNotifyScope(root, mf([JOB])), []);
 });
+
+test('插值里先有嵌套对象字面量、同一插值内再真调用 → bad（花括号深度回归，最终评审 Minor 13）', () => {
+    const src = 'const a = `x${ f({ k: 1 }) + ctx.pt.notify.email(x) }z`;';
+    assert.equal(checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]))[0]?.level, 'bad');
+});
+
+test('*.d.ts 里的类型声明不算（最终评审 Minor 13）', () => {
+    const root = jobsProject({
+        'backend/src/index.ts': 'export default createApp({ routes: {} });',
+        'backend/src/env.d.ts': 'declare const ctx: { pt: { notify: { email(x: unknown): Promise<void> } } };\ntype X = typeof ctx.pt.notify;'
+    });
+    assert.deepEqual(checkNotifyScope(root, mf([JOB])), []);
+});

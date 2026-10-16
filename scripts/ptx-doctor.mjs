@@ -649,11 +649,12 @@ const NOTIFY_USE_RES = [
  * 用了 `ctx.pt.notify.*` / `ctx.pt.render.*` 就必须声明 `notify:send`（定时任务 1b，brief §13.3）。
  * 不声明：平台不把这个 scope 放进令牌 → 线上恒 403 SCOPE_DENIED；而本地令牌照抄 manifest，同样 403，
  * 但报错落在运行时某一次发信上，不如在 doctor 里一次说清楚。注释与字符串里出现的不算（模板插值里的算），
- * `*.test.*` / `*.spec.*` 不扫；识别范围见 NOTIFY_USE_RES。
+ * `*.test.*` / `*.spec.*` 与 `*.d.ts` 不扫；识别范围见 NOTIFY_USE_RES。
  */
 export function checkNotifyScope(root, manifest) {
     const hits = listSourceFiles(join(root, 'backend', 'src'))
         .filter(p => !/\.(?:test|spec)\.[^.\/\\]+$/.test(p))   // 测试里的 mock 不算
+        .filter(p => !/\.d\.[cm]?ts$/.test(p))                    // 类型声明文件里只有类型，不是调用
         .map(p => ({ rel: relative(root, p), text: maskJsCode(readFileSync(p, 'utf8')) }))
         .filter(s => NOTIFY_USE_RES.some(re => re.test(s.text)))
         .map(s => s.rel);
