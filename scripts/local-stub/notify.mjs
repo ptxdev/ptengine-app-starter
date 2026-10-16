@@ -40,14 +40,14 @@ export function runCounters(state, runId) {
 
 export function validateNotifyInput(body, rules = RULES.notify) {
     const n = notifyRules(rules);
-    if (!isObj(body)) return err(400, 'NOTIFY_CONTENT_INVALID', '请求体必须是 JSON 对象');
+    if (!isObj(body)) return err(400, 'NOTIFY_RECIPIENT_INVALID', '请求体必须是 JSON 对象（含 to 数组）');   // 与 backend 同序：先判收件人
     const ref = new RegExp(n.refPattern);
     if (!Array.isArray(body.to) || body.to.length < 1 || body.to.length > n.maxRefsPerCall ||
         !body.to.every(x => typeof x === 'string' && ref.test(x))) {
         return err(400, 'NOTIFY_RECIPIENT_INVALID',
             `to 必须是 1..${n.maxRefsPerCall} 项的数组，每项形如 user:<accountId> 或 role:${n.roles.join('|')}（不能写邮箱）`);
     }
-    if (body.replyTo !== undefined && (typeof body.replyTo !== 'string' || !new RegExp(n.replyToPattern).test(body.replyTo))) {
+    if (body.replyTo != null && (typeof body.replyTo !== 'string' || !new RegExp(n.replyToPattern).test(body.replyTo))) {
         return err(400, 'NOTIFY_RECIPIENT_INVALID', 'replyTo 只能是单个 user:<accountId>');
     }
     if (typeof body.subject !== 'string' || body.subject.trim() === '' || /[\r\n]/.test(body.subject) || codePoints(body.subject) > n.subjectMax) {
@@ -122,6 +122,9 @@ const UNSUB = {
 
 /** 简化外框：结构（页眉 / 正文锚点 / 页脚 / 两个退订占位符）与平台一致，样式不是。 */
 export function frameLocally({ subject, bodyHtml, appName, jobTitle, locale }) {
+    if (!Object.hasOwn(FOOTER, locale) || !Object.hasOwn(UNSUB, locale)) {
+        throw new Error(`规则快照的语言比本地文案新：${locale}。请升级 starter（scripts/local-stub/notify.mjs 的 FOOTER / UNSUB 需补该语言）。`);
+    }
     const [unsubJob, unsubApp] = UNSUB[locale];
     const links = `${jobTitle ? `<a href="%%PT_UNSUBSCRIBE_JOB_URL%%">${unsubJob}</a> · ` : ''}<a href="%%PT_UNSUBSCRIBE_APP_URL%%">${unsubApp}</a>`;
     return '<!doctype html>' +

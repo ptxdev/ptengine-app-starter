@@ -16,6 +16,7 @@ test('validateNotifyInput：合法 → null', () => {
     assert.equal(validateNotifyInput(OK), null);
     assert.equal(validateNotifyInput({ ...OK, text: 't', replyTo: 'user:u1', locale: 'en-US' }), null);
     assert.equal(validateNotifyInput({ ...OK, text: null, locale: null }), null);
+    assert.equal(validateNotifyInput({ ...OK, replyTo: null }), null);                       // 与 backend 一致：replyTo:null 合法
 });
 
 test('validateNotifyInput：收件人形状 → NOTIFY_RECIPIENT_INVALID（先于内容判）', () => {
@@ -23,6 +24,9 @@ test('validateNotifyInput：收件人形状 → NOTIFY_RECIPIENT_INVALID（先�
         assert.equal(codeOf(validateNotifyInput({ ...OK, to, subject: '' })), 'NOTIFY_RECIPIENT_INVALID', JSON.stringify(to)?.slice(0, 40));
     }
     assert.equal(codeOf(validateNotifyInput({ ...OK, replyTo: 'role:admin' })), 'NOTIFY_RECIPIENT_INVALID');
+    for (const body of [null, 'x', 42, [OK]]) {                                               // 与 backend 同序：非对象先按收件人判
+        assert.equal(codeOf(validateNotifyInput(body)), 'NOTIFY_RECIPIENT_INVALID', JSON.stringify(body)?.slice(0, 20));
+    }
 });
 
 test('validateNotifyInput：内容 → NOTIFY_CONTENT_INVALID（码点 / 字节都按 rules）', () => {
@@ -77,6 +81,11 @@ test('frameLocally：三语页脚、正文锚点、退订占位符（草稿 / �
     const user = frameLocally({ subject: 's', bodyHtml: 'b', appName: 'A', jobTitle: null, locale: 'en-US' });
     assert.ok(!user.includes('%%PT_UNSUBSCRIBE_JOB_URL%%') && user.includes('%%PT_UNSUBSCRIBE_APP_URL%%'));
     assert.ok(user.includes('lang="en-US"'));
+});
+
+test('frameLocally：规则快照有、本地文案没有的语言 → 抛可读错误', () => {
+    assert.throws(() => frameLocally({ subject: 's', bodyHtml: 'b', appName: 'A', jobTitle: null, locale: 'ko-KR' }),
+        /规则快照的语言比本地文案新：ko-KR/);
 });
 
 test('textFromHtml：去标签、块级换行、实体还原', () => {
