@@ -440,25 +440,26 @@ const r = await ctx.pt.notify.email({
 'POST /jobs/weekly-report': async (ctx) => {
     ctx.requireTrigger('job');
     ctx.log('开始生成', { channel: ctx.body.channel });
-    const runId = ctx.auth.runId!;
+    const runId = ctx.auth.runId!;   // 任务触发时总有值（预览也有）；下面只在正式运行里用它占位
     if (!ctx.auth.preview) {
         // 幂等占位只在正式运行里写（预览不写会影响正式运行的状态）；放在渲染之前，重复投递不再多耗图表配额
         const claimed = await ctx.db.prepare('INSERT OR IGNORE INTO job_runs (run_id, sid) VALUES (?, ?)')
             .bind(runId, ctx.auth.sid).run();
         if (claimed.meta.changes === 0) return {};                  // 重复投递：什么都不做
     }
-    const data = await ctx.pt.query('traffic_insight', { /* … */ });
-    const chart = await ctx.pt.render.chart(buildOption(data), { width: 600, height: 300 });
     try {
+        // 占位之后的每一步（取数 / 渲染 / 发信）都在 try 里：任何一步失败都删占位，重投才能重做
+        const data = await ctx.pt.query('traffic_insight', { /* … */ });
+        const chart = await ctx.pt.render.chart(buildOption(data), { width: 600, height: 300 });
         // 预览里照常调用：平台拦截并显示在面板里
         await ctx.pt.notify.email({ to: ['role:admin'], subject: '每周报告', html: renderHtml(data, chart) });
+        ctx.log('完成');
+        return { archive: { title: '每周报告', markdown: renderMarkdown(data) } };
     } catch (e) {
         // 想让重投重做：失败时先删占位再抛错（预览没占位，不用删）
         if (!ctx.auth.preview) await ctx.db.prepare('DELETE FROM job_runs WHERE run_id = ?').bind(runId).run();
         throw e;
     }
-    ctx.log('完成');
-    return { archive: { title: '每周报告', markdown: renderMarkdown(data) } };
 }
 ```
 
