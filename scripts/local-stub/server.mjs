@@ -18,6 +18,10 @@
  *   2. 写盘 / 读盘路径只用通过校验的 runId（[A-Za-z0-9_-]{1,64}）、自己生成的 32 hex 文件名与数字序号，
  *      拼接后再确认仍在 .ptx 目录内（insidePtx），防穿越。
  *   3. Host 只认 127.0.0.1:<port> / localhost:<port>，其余 421（防 DNS rebinding 读 outbox）。
+ *
+ * 并发闸（与线上网关同口径，最终评审 I1）：邮件、渲染各一道「每应用在途数」闸，上限读 rules.json 的
+ * `notify.maxConcurrentPerApp` / `render.maxConcurrentPerApp`；打满回 429 `TOO_MANY_CONCURRENT_QUERIES`（app-backend 会有界退避重试）。
+ * 规则快照里没有这两个键时**不模拟**这道闸（不写字面量兜底），启动时提示一行。
  */
 import { createServer } from 'node:http';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -26,6 +30,7 @@ import { randomBytes } from 'node:crypto';
 import { decodeClaims } from '../local-gateway/jobs-store.mjs';
 import { createStubState, handleNotifyEmail } from './notify.mjs';
 import { handleRenderChart } from './render.mjs';
+import { RULES } from '../manifest.mjs';
 
 export const LOCAL_STUB_PORT = 8788;
 export const LOCAL_STUB_ORIGIN = `http://127.0.0.1:${LOCAL_STUB_PORT}`;
@@ -93,8 +98,19 @@ function outboxIndex(ptxDir, dir, id) {
         '<p style="color:#888;font:12px sans-serif">本地简化外框；逐字的最终邮件以产品里的预览面板为准。</p>';
 }
 
-export function createLocalStub({ root, appName = 'local-dev', loadRenderer, log = m => console.log(m) }) {
+/** rules 段里的每应用并发上限；没有（快照过旧 / 平台未导出）返回 null = 不模拟闸。 */
+const concurrencyLimit = section => (Number.isInteger(section?.maxConcurrentPerApp) && section.maxConcurrentPerApp > 0
+    ? section.maxConcurrentPerApp : null);
+
+export function createLocalStub({ root, appName = 'local-dev', loadRenderer, log = m => console.log(m), rules = RULES }) {
     const state = createStubState();
+    const gateMax = { notify: concurrencyLimit(rules.notify), render: concurrencyLimit(rules.render) };
+    const inflight = { notify: 0, render: 0 };
+    const missingGate = Object.keys(gateMax).filter(k => gateMax[k] === null);
+    if (missingGate.length) {
+        log(`[ptx] [!] scripts/rules.json 没有 ${missingGate.map(k => `${k}.maxConcurrentPerApp`).join(' / ')}：` +
+            '本地不模拟线上「每应用在途邮件 / 渲染数」并发闸（线上超出会 429 TOO_MANY_CONCURRENT_QUERIES）。请顺序调用，不要 Promise.all。');
+    }
     const ptxDir = join(root, '.ptx');
     const server = createServer(async (req, res) => {
         try {
@@ -116,6 +132,20 @@ export function createLocalStub({ root, appName = 'local-dev', loadRenderer, log
                     return fail(res, 403, 'SCOPE_DENIED',
                         '令牌里没有 notify:send。在 manifest.json 的 scopes 里声明 notify:send 后重启 ptx dev（本地令牌的 scopes 照抄 manifest）。',
                         { requiredScope: 'notify:send' });
+                }
+                // 并发闸：线上网关在读体、转发之前判，这里同样在读体之前占位，响应发出后释放。
+                const kind = isMail ? 'notify' : 'render';
+                if (gateMax[kind] !== null) {
+                    if (inflight[kind] >= gateMax[kind]) {
+                        req.resume();
+                        return fail(res, 429, 'TOO_MANY_CONCURRENT_QUERIES',
+                            `该应用${isMail ? '通知' : '图表渲染'}并发过高(>${gateMax[kind]})，请减少同时发起的${isMail ? '邮件发送' : '渲染'}`);
+                    }
+                    inflight[kind]++;
+                    let released = false;
+                    const releaseGate = () => { if (!released) { released = true; inflight[kind]--; } };
+                    res.once('finish', releaseGate);
+                    res.once('close', releaseGate);
                 }
                 let body;
                 try {

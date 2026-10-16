@@ -134,3 +134,64 @@ test('maybeStartLocalStub：没有后端不起；起不来（端口被占）只�
     assert.match(busy, /EADDRINUSE/);
     assert.match(busy, /8788 被占（可能是另一个 ptx dev）：notify \/ render 可能写到别处或 503/);
 });
+
+// ── 最终评审 I1：每应用并发闸（与线上网关同口径，上限读 rules.json 的 notify / render 段 maxConcurrentPerApp） ──
+import { RULES as STUB_RULES } from './manifest.mjs';
+
+async function withGatedStub(rules, loadRenderer, fn) {
+    const root = mkdtempSync(join(tmpdir(), 'ptx-stub-'));
+    const logs = [];
+    const server = createLocalStub({ root, appName: 'a', loadRenderer, log: m => logs.push(m), rules });
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    try { return await fn({ base, logs }); } finally { await new Promise(r => server.close(r)); }
+}
+
+test('并发闸：render 在途数达到 rules.render.maxConcurrentPerApp → 429 TOO_MANY_CONCURRENT_QUERIES；完成后释放', async () => {
+    let release;
+    const gate = new Promise(r => { release = r; });
+    const slowRenderer = async () => { await gate; return fakeRenderer(); };
+    const rules = { ...STUB_RULES, render: { ...STUB_RULES.render, maxConcurrentPerApp: 1 } };
+    await withGatedStub(rules, slowRenderer, async ({ base }) => {
+        const first = post(base, '/render/chart', PREVIEW, { option: { series: [] } });
+        await new Promise(r => setTimeout(r, 50));
+        const second = await Promise.race([post(base, '/render/chart', PREVIEW, { option: { series: [] } }), new Promise(r => setTimeout(() => r(null), 2000))]);
+        release();   // 先放行：断言失败时也不让第一个请求挂住服务器
+        assert.ok(second, '第二个渲染应被闸立即拒绝，而不是排队等待');
+        assert.equal(second.status, 429);
+        assert.equal((await second.json()).error.code, 'TOO_MANY_CONCURRENT_QUERIES');
+        assert.equal((await first).status, 200);
+        assert.equal((await post(base, '/render/chart', PREVIEW, { option: { series: [] } })).status, 200);
+    });
+});
+
+test('并发闸：notify 与 render 各走各的闸（render 打满不挡邮件）', async () => {
+    let release;
+    const gate = new Promise(r => { release = r; });
+    const slowRenderer = async () => { await gate; return fakeRenderer(); };
+    const rules = { ...STUB_RULES, notify: { ...STUB_RULES.notify, maxConcurrentPerApp: 1 }, render: { ...STUB_RULES.render, maxConcurrentPerApp: 1 } };
+    await withGatedStub(rules, slowRenderer, async ({ base }) => {
+        const first = post(base, '/render/chart', PREVIEW, { option: { series: [] } });
+        await new Promise(r => setTimeout(r, 50));
+        assert.equal((await post(base, '/notify/email', PREVIEW, MAIL)).status, 200);
+        release();
+        await first;
+    });
+});
+
+test('并发闸：rules.json 缺 maxConcurrentPerApp → 不模拟闸（不写字面量兜底），启动时打一行提示', async () => {
+    const strip = ({ maxConcurrentPerApp, ...rest }) => rest;
+    const rules = { ...STUB_RULES, notify: strip(STUB_RULES.notify), render: strip(STUB_RULES.render) };
+    let release;
+    const gate = new Promise(r => { release = r; });
+    const slowRenderer = async () => { await gate; return fakeRenderer(); };
+    await withGatedStub(rules, slowRenderer, async ({ base, logs }) => {
+        assert.equal(logs.filter(l => l.includes('maxConcurrentPerApp')).length, 1);
+        const a = post(base, '/render/chart', PREVIEW, { option: { series: [] } });
+        const b = post(base, '/render/chart', PREVIEW, { option: { series: [] } });
+        const c = post(base, '/render/chart', PREVIEW, { option: { series: [] } });
+        await new Promise(r => setTimeout(r, 50));
+        release();
+        for (const r of await Promise.all([a, b, c])) assert.equal(r.status, 200);
+    });
+});

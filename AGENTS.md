@@ -429,6 +429,11 @@ const r = await ctx.pt.notify.email({
   另有结构上限：节点 ≤ 100 000、单个数组 ≤ 50 000 项、单个字符串 ≤ 16 384 字符；`__proto__` / `constructor` / `prototype` 键一律拒。本地桩按同一份规则（`scripts/rules.json`）校验。
 - 限额：每次调用 ≤ 50 人；**一次运行** ≤ 20 次 `notify.email`、累计 ≤ 50 人、≤ 20 张图（`NOTIFY_RUN_LIMIT_EXCEEDED`）；
   工作区每天 2000 封、1000 张图（`NOTIFY_QUOTA_EXCEEDED`）。
+- **并发：每个应用同一时刻最多 2 个在途的邮件调用、2 个在途的渲染调用**——是**整个应用**的额度，所有用户的所有 run 共用，
+  不是每个 run 各 2 个。很多订阅同一时刻到点（如 `0 9 * * 1`）时会互相挤：网关回 429 `TOO_MANY_CONCURRENT_QUERIES`
+  （转发前拒绝，什么都没发），app-backend 会有界退避重试（最多 3 次、总等待 ≤ 8 秒、不越过 run 截止），仍满才抛出。
+  所以**按顺序 `await` 调用 `render.chart` / `notify.email`，不要 `Promise.all` 并发发**。本地桩按 `scripts/rules.json`
+  的 `notify` / `render` 段 `maxConcurrentPerApp` 模拟同一道闸（快照里没有这个键时不模拟，`ptx dev` 启动时会提示）。
 - 本地（`npm run dev`）：邮件写进 `.ptx/outbox/<runId|interactive>/<seq>.json` 与 `.html`（**不真实发信**，终端打印预览地址），
   图表用同一套 echarts + resvg 渲染进 `.ptx/media/`，返回 `http://localhost:8788/__ptx/media/<hex>.png`。
   `role:*` 本地一律解析成你自己，`user:<id>` 解析成 `<id>@local.ptx` —— 只看「长什么样」，不代表线上发给谁。
