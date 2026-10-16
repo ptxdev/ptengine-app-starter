@@ -119,7 +119,7 @@ export function extractBody(html) {
 }
 
 const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0' };
-/** 解属性值里的字符引用。不认识的命名实体返回 null（调用方按「不安全」处理 —— 比平台严）。 */
+/** 解属性值里的字符引用。带分号但不认识的命名实体返回 null（调用方按「不安全」处理 —— 比平台严）；不带分号的 `&name` 原样保留。 */
 function decodeAttr(v) {
     let unknown = false;
     const out = v.replace(/&(#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);?/g, (m, ref) => {
@@ -127,8 +127,10 @@ function decodeAttr(v) {
             const cp = ref[1] === 'x' || ref[1] === 'X' ? parseInt(ref.slice(2), 16) : parseInt(ref.slice(1), 10);
             return cp > 0 && cp <= 0x10ffff && !(cp >= 0xd800 && cp <= 0xdfff) ? String.fromCodePoint(cp) : '\ufffd';
         }
-        if (Object.hasOwn(NAMED_ENTITIES, ref) && m.endsWith(';')) return NAMED_ENTITIES[ref];
-        unknown = true;
+        // 不带分号的 `&name`（查询串 `&b=2`、`&utm_source=`）按字面量保留：HTML 旧式实体规则下属性里它不是字符引用
+        if (!m.endsWith(';')) return m;
+        if (Object.hasOwn(NAMED_ENTITIES, ref)) return NAMED_ENTITIES[ref];
+        unknown = true;                                                             // 带分号且不认识：判不安全（比平台严）
         return m;
     });
     return unknown ? null : out;
@@ -442,8 +444,16 @@ export function textFromHtml(html) {
         .replace(/<\/(p|div|h[1-6]|li|tr|table)>/gi, '\n')
         .replace(/<[^>]+>/g, '')
         .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&')
-        .replace(/[ \t]+\n/g, '\n').replace(/\n{2,}/g, '\n')
+        .split('\n').map(trimLineEnd).join('\n')
+        .replace(/\n{2,}/g, '\n')
         .trim();
+}
+
+/** 去行尾空格 / 制表符（手写线性；`/[ \t]+\n/g` 遇到超长空白串是平方级）。 */
+function trimLineEnd(line) {
+    let e = line.length;
+    while (e > 0 && (line[e - 1] === ' ' || line[e - 1] === '\t')) e--;
+    return e === line.length ? line : line.slice(0, e);
 }
 
 export function localAppName(manifest) {

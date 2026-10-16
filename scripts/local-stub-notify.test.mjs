@@ -210,3 +210,19 @@ test('handleNotifyEmail：hasJob 口径、正文与标题里伪造的退订占�
     assert.ok(!user.outbox.payload.html.includes('%%PT_UNSUBSCRIBE_JOB_URL%%'));
     assert.equal(neutralizePlaceholders('%%%PT_UNSUBSCRIBE_APP_URL%%'), '%PT_UNSUBSCRIBE_APP_URL%%');
 });
+
+test('sanitizeLocally：不带分号的 &name（查询串）按字面量保留属性；带分号的未知实体才判不安全', () => {
+    const { html } = sanitizeLocally('<a href="https://x.com/?a=1&b=2">q</a><img src="https://x.com/i.png?w=1&h=2&utm_source=m">' +
+        '<a href="https://x.com/&bogus;">bad</a>');
+    assert.ok(html.includes('href="https://x.com/?a=1&amp;b=2"'), html);
+    assert.ok(html.includes('src="https://x.com/i.png?w=1&amp;h=2&amp;utm_source=m"'), html);
+    assert.ok(!html.includes('&bogus'), html);
+});
+
+test('textFromHtml：超长空白线性处理（~26 万空白 < 200ms），行尾空白照样去掉', () => {
+    assert.equal(textFromHtml('a  \t<br>b'), 'a\nb');
+    const big = `x${' '.repeat(260_000)}y`;
+    const t0 = performance.now();
+    textFromHtml(big);
+    assert.ok(performance.now() - t0 < 200, `${performance.now() - t0}ms`);
+});

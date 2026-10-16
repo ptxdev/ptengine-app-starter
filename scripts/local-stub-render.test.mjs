@@ -229,3 +229,16 @@ test('renderPng：渲染产物先过 SVG 闸 —— 闸拒时抛错，handleRend
     assert.equal(codeOf(r), 'PTX_RENDER_FAILED');
     assert.match(r.body.error.message, /SVG 不允许/);
 });
+
+test('checkChartInput：多个坏键名时报第一个（与平台同序）', () => {
+    const r = checkChartInput({ option: JSON.parse('{"ok":1,"a<1":1,"b>2":2}') });
+    assert.match(r.body.error.message, /option\.a<1 键名/);
+});
+
+test('renderPng：resvg 开系统字体（starter 不带字体）且 logLevel off', async () => {
+    const seen = {};
+    const renderer = await fakeRenderer(seen)();
+    renderPng(renderer, { option: OPTION, width: 200, height: 100, theme: 'light' });
+    assert.equal(seen.resvg.font.loadSystemFonts, true);
+    assert.equal(seen.resvg.logLevel, 'off');
+});

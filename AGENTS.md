@@ -416,7 +416,7 @@ const r = await ctx.pt.notify.email({
 - 平台会**清洗 html** 并套统一外框（页眉、「本邮件由应用 X 发送」、退订链接、法定表示）：`<script>`、`<style>` 块、表单、非 https 图片一律去掉 ——
   **样式写内联 `style`**。本地桩会把它删掉的东西打印出来。
 - 内联样式逐条过滤：**不支持 CSS 自定义属性（`--x: …`）与 `var()` / `attr()`**（整条声明丢掉，样式请直接写值）；
-  `url(…)` 与 CSS 函数里的字符串**必须是 https**；含反斜杠、`@import`、`expression` 的样式整段 / 整条丢。链接只放 https 与 mailto，图片只放 https。
+  `url(…)` 与 CSS 函数里的字符串**必须是 https**；含反斜杠的整段丢；含 `@` 的声明（如 `@import`）、含 `expression` 的声明、`behavior` / `binding` 属性（含 `-ms-` 等厂商前缀写法）整条丢。链接只放 https 与 mailto，图片只放 https。
 - `option` 必须是纯 JSON：函数（`formatter: p => …`）在 app-backend 里就 400 `RENDER_OPTION_INVALID`；`image` 键 / `image://` 被平台拒。图片 90 天后失效。
 - `option` 里的**字符串（含键名）不能含 `"` `<` `>` 与控制字符**（`\t` `\n` 除外），也不能含 `&#`；**颜色 / 字体字段**
   （`color`、以 `Color` 结尾的键、`fill`、`stroke`、`font` / `fontFamily` / `fontSize` / `fontWeight` / `fontStyle`，及其整个子树）不能含 `;` —— 否则 400 `RENDER_OPTION_INVALID`。标题要写比较关系请用「≤」「大于」之类。

@@ -102,18 +102,18 @@ function sanitize(option, r) {
             continue;
         }
         if (!isJsonObject(v)) return invalid(`${path} 不是 JSON 对象`);
-        // 逆序入栈，出栈时按键序检查 —— 第一条内容违规与书写顺序一致
-        const keys = Object.keys(v);
-        for (let ki = keys.length - 1; ki >= 0; ki--) {
-            const k = keys[ki];
+        // 先正序检查键名（第一条坏键与平台报的一致），再逆序入栈（出栈按书写顺序）
+        const children = [];
+        for (const k of Object.keys(v)) {
             const kp = `${path}.${k.length > 64 ? `${k.slice(0, 64)}…` : k}`;
             if (k.length > r.maxStringLength) { note(`${kp} 键名长度超过 ${r.maxStringLength}`); continue; }
             const badKey = forbiddenChars.exec(k);
             if (badKey) { note(`${kp} 键名含不允许的字符 ${describeChar(badKey[0])}`); continue; }
             if (r.protoKeys.includes(k)) { note(`${kp} 不允许`); continue; }
             if (r.forbiddenKeys.includes(k)) { note(`${path}.${k}：平台不允许 ${k} 键`); continue; }
-            stack.push({ v: v[k], depth: depth + 1, path: kp, css: css || cssKey.test(k) });
+            children.push({ v: v[k], depth: depth + 1, path: kp, css: css || cssKey.test(k) });
         }
+        for (let ci = children.length - 1; ci >= 0; ci--) stack.push(children[ci]);
         if (Object.getOwnPropertySymbols(v).length) return invalid(`${path} 含 Symbol 键（不是 JSON 值）`);
     }
     const json = JSON.stringify(option);
@@ -167,7 +167,9 @@ export function renderPng({ echarts, Resvg }, { option, width, height, theme }, 
         assertSvgSelfContained(svg, rules);
         // 与平台同口径：≤ 200 万像素按 2× 输出（高分屏清晰），更大按 1×
         const zoom = width * height <= 2_000_000 ? 2 : 1;
-        return new Resvg(svg, { fitTo: { mode: 'zoom', value: zoom }, background: BACKGROUND[theme], font: { loadSystemFonts: true } }).render().asPng();
+        // 字体：starter 不带字体文件，本地只能开系统字体（平台只用镜像里打包的 Noto CJK）。开系统字体不引入外部资源 ——
+        // 外部 href / url( 已由上面的 SVG 闸挡住；字形与线上可能略有差异，以产品里的预览面板为准。logLevel off 同平台。
+        return new Resvg(svg, { fitTo: { mode: 'zoom', value: zoom }, background: BACKGROUND[theme], logLevel: 'off', font: { loadSystemFonts: true } }).render().asPng();
     } finally {
         chart.dispose();
     }
