@@ -150,6 +150,46 @@
             "toolbox",
             "brush",
             "timeline"
+        ],
+        "jsonOnly": true,
+        "maxNodes": 100000,
+        "maxArrayLength": 50000,
+        "maxStringLength": 16384,
+        "forbiddenCharsPattern": "[\"<>\\u0000-\\u0008\\u000b-\\u001f]",
+        "forbiddenSubstrings": [
+            "&#"
+        ],
+        "cssFieldKeyPattern": "^(?:color|fill|stroke|font|fontFamily|fontWeight|fontStyle|fontSize)$|Color$",
+        "cssFieldForbiddenChars": [
+            ";"
+        ],
+        "protoKeys": [
+            "__proto__",
+            "constructor",
+            "prototype"
+        ],
+        "svgAllowedElements": [
+            "svg",
+            "g",
+            "path",
+            "rect",
+            "circle",
+            "ellipse",
+            "line",
+            "polyline",
+            "polygon",
+            "text",
+            "tspan",
+            "defs",
+            "linearGradient",
+            "radialGradient",
+            "stop",
+            "clipPath",
+            "pattern",
+            "filter",
+            "feDropShadow",
+            "title",
+            "desc"
         ]
     },
     "jobLog": {

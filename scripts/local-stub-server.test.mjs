@@ -11,7 +11,7 @@ const tok = claims => `Bearer h.${Buffer.from(JSON.stringify(claims)).toString('
 const PREVIEW = tok({ sub: 'local-user', scopes: ['notify:send'], trg: 'job', job: 'local', run: 'run-1', mode: 'preview' });
 const NO_SCOPE = tok({ sub: 'local-user', scopes: ['jobs:run'] });
 const fakeRenderer = async () => ({
-    echarts: { init: () => ({ setOption() {}, renderToSVGString: () => '<svg/>', dispose() {} }) },
+    echarts: { init: () => ({ setOption() {}, getZr: () => ({ painter: { renderToString: () => '<svg/>' } }), dispose() {} }) },
     Resvg: class { render() { return { asPng: () => Buffer.from([0x89, 0x50, 0x4e, 0x47]) }; } }
 });
 
