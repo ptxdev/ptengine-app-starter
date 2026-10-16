@@ -26,6 +26,7 @@ test('create → 201 JobView（创建者 / 工作区取自令牌，title 缺省�
         { id: undefined, appId: 'local-dev', workspaceId: 'local-ws', type: 'weekly-report', title: 'weekly-report',
           cron: '0 9 * * 1', timezone: 'Asia/Tokyo', params: { channel: 'c' }, createdBy: 'local-user', status: 'active',
           pauseReason: null, consecutiveFailures: 0, nextRunAt: null, lastRunAt: null,
+          archiveToAssets: false,
           scheduleDescription: { zh: '（本地桩）cron 0 9 * * 1 · Asia/Tokyo', en: '(local stub) cron 0 9 * * 1 · Asia/Tokyo', ja: '（ローカルスタブ）cron 0 9 * * 1 · Asia/Tokyo' },
           createdAt: undefined, updatedAt: undefined });
 });
@@ -148,4 +149,13 @@ test('PTX_STUB_ORIGIN 为空 → 直接 503 PTX_STUB_UNAVAILABLE，提示 wrangl
         }
     } finally { globalThis.fetch = orig; }
     assert.equal(called, 0);
+});
+
+test('1b+：create / update 接受 archiveToAssets（布尔）；非布尔 → 400 JOB_OP_INVALID', () => {
+    const s = createJobsStore();
+    const job = call(s, USER, { ...CREATE, archiveToAssets: true }).body;
+    assert.equal(job.archiveToAssets, true);
+    assert.equal(call(s, USER, { op: 'update', jobId: job.id, archiveToAssets: false }).body.archiveToAssets, false);
+    assert.equal(call(s, USER, { op: 'update', jobId: job.id, archiveToAssets: 'yes' }).body.error.code, 'JOB_OP_INVALID');
+    assert.equal(call(s, USER, { ...CREATE, archiveToAssets: 1 }).body.error.code, 'JOB_OP_INVALID');
 });

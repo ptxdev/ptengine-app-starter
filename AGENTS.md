@@ -354,6 +354,12 @@ Worker 自己不能起定时（见[硬边界 3](#3-后端没有的能力写了�
    （任务运行中不能创建任务，会得到 `JOB_CREATE_FROM_JOB`）。另有 `list / get / update / pause / resume / delete`。
 6. **把结果交给平台**：在 2xx 的 JSON 响应里返回 `{ archive: { title?, markdown, files? } }`（类型 `JobRunResult`），
    平台会采集存档。不返回 `archive` 也行，只是没有存档；格式不对不影响运行成败，只是不采集。
+   **结果归档**（平台 1b+）：任务创建者在管理页或预览面板里勾「保存到资产库」后，每次成功运行的邮件内容与返回的 `archive`
+   （markdown、CSV、图表图片）会自动存进**创建者本人**的资产库（「我的知识资产 / 应用名 / 任务标题」，最多留 100 份），
+   **应用代码不用改**。在应用里用 `PtApp.jobs.openPreview()` 让用户订阅时，把结果里的 `archiveToAssets` 原样传给
+   `ctx.pt.jobs.create({ …, archiveToAssets })`；只有创建者本人能改它。归档失败不影响运行成败，运行记录里会显示归档状态。
+   本地与线上的差异：本地 `ctx.pt.jobs.*` 桩只存取 `archiveToAssets` 这个开关（非布尔同样 400 `JOB_OP_INVALID`），
+   **不做真实归档**、也没有运行记录与归档状态；`npx ptx job run` 打印的 `stored` 只表示「线上平台会采集这份结果」。
 
 示例用 D1 记占位，需要 manifest 的 `backend.resources.database: true`，并加一个迁移
 （序号接在已有迁移之后，例如 `backend/migrations/0002_job_runs.sql`）：

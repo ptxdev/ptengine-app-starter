@@ -53,6 +53,7 @@
   应用内容里伪造的退订占位符被中和。
 - 文档：`AGENTS.md` 新增「推送：邮件与图表」「预览模式写法」；定时任务第 4 条改为「预览里照常调用 notify.email（平台拦截）」；
   `docs/troubleshooting.md` 新增「推送 / 图表本地桩」。`.gitignore` 加 `.ptx/`。
+- 本地 `ctx.pt.jobs.*` 桩接受 `archiveToAssets`（布尔，JobView 缺省 false；非布尔 400 `JOB_OP_INVALID`）；`AGENTS.md` 补「结果归档」说明（定时任务 1b+）。
 
 ## [3.7.1] - 2026-10-13
 

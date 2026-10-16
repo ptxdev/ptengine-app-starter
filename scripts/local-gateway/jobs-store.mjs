@@ -47,6 +47,7 @@ function checkFields(b, { partial }) {
     if (has('title') && (typeof b.title !== 'string' || b.title.length === 0 || [...b.title].length > MAX_TITLE)) {
         return err(400, 'JOB_TITLE_INVALID', `title 必须是 1..${MAX_TITLE} 字符`);
     }
+    if (has('archiveToAssets') && typeof b.archiveToAssets !== 'boolean') return err(400, 'JOB_OP_INVALID', 'archiveToAssets 必须是布尔值');
     return null;
 }
 
@@ -69,6 +70,8 @@ export function handleJobsRequest(store, { appId, authorization, body, now = new
             id: uuid(), appId, workspaceId: String(claims.wid ?? ''), type: b.type, title: b.title ?? b.type,
             cron: b.cron, timezone: b.timezone, params: b.params ?? {}, createdBy: me, status: 'active',
             pauseReason: null, consecutiveFailures: 0, nextRunAt: null, lastRunAt: null,
+            // 本地只模拟本人视角，「只有创建者能改 archiveToAssets」天然满足；本地不做真实归档
+            archiveToAssets: b.archiveToAssets ?? false,
             scheduleDescription: stubDescription(b.cron, b.timezone), createdAt: iso, updatedAt: iso
         };
         store.jobs.set(job.id, job);
@@ -95,7 +98,7 @@ export function handleJobsRequest(store, { appId, authorization, body, now = new
         case 'update': {
             const bad = checkFields(b, { partial: true });
             if (bad) return bad;
-            for (const k of ['title', 'cron', 'timezone', 'params']) if (b[k] !== undefined) job[k] = b[k];
+            for (const k of ['title', 'cron', 'timezone', 'params', 'archiveToAssets']) if (b[k] !== undefined) job[k] = b[k];
             job.scheduleDescription = stubDescription(job.cron, job.timezone);
             job.updatedAt = iso;
             return { status: 200, body: job };
