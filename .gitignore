@@ -12,3 +12,6 @@ web/.ptx-dev-key.json
 # ptx package 的暂存目录：<manifest.id>-<version>/，与同名 .zip 一起产出。
 # 只匹配脚手架根下带语义化版本后缀的目录，不会误伤 web/ backend/ shared/。
 /*-[0-9]*.[0-9]*.[0-9]*/
+
+# ptx dev 的本地推送 / 图表桩产物（邮件存档与图片），可随时删除
+.ptx/

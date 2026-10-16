@@ -92,3 +92,44 @@ test('缺 jobs:run 的提示指向 manifest.json（.ptx-dev-key.json 每次 ptx 
     assert.match(msg, /重启 ptx dev/);
     assert.doesNotMatch(msg, /\.ptx-dev-key\.json/);
 });
+
+import { readFileSync } from 'node:fs';
+import worker from './local-gateway/worker.mjs';
+import { parseJsonc } from './jsonc.mjs';
+import { LOCAL_STUB_ORIGIN } from './local-stub/server.mjs';
+
+test('网关桩把 /notify/email、/render/chart 原样转给 PTX_STUB_ORIGIN（authorization / x-pt-app-id / body）', async () => {
+    const seen = [];
+    const orig = globalThis.fetch;
+    globalThis.fetch = async (url, init) => { seen.push({ url, init }); return new Response('{"ok":1}', { status: 200, headers: { 'content-type': 'application/json' } }); };
+    try {
+        for (const p of ['/notify/email', '/render/chart']) {
+            const res = await worker.fetch(new Request(`https://gateway${p}`, {
+                method: 'POST', headers: { authorization: 'Bearer t', 'x-pt-app-id': 'local-dev', 'content-type': 'application/json' }, body: '{"a":1}'
+            }), { PTX_STUB_ORIGIN: 'http://127.0.0.1:9999' });
+            assert.equal(res.status, 200);
+        }
+    } finally { globalThis.fetch = orig; }
+    assert.deepEqual(seen.map(s => s.url), ['http://127.0.0.1:9999/notify/email', 'http://127.0.0.1:9999/render/chart']);
+    const h = new Headers(seen[0].init.headers);
+    assert.equal(h.get('authorization'), 'Bearer t');
+    assert.equal(h.get('x-pt-app-id'), 'local-dev');
+    assert.equal(seen[0].init.body, '{"a":1}');
+});
+
+test('桩服务连不上 → 503 PTX_STUB_UNAVAILABLE，提示用 npm run dev', async () => {
+    const orig = globalThis.fetch;
+    globalThis.fetch = async () => { throw new TypeError('fetch failed'); };
+    try {
+        const res = await worker.fetch(new Request('https://gateway/notify/email', { method: 'POST', body: '{}' }), { PTX_STUB_ORIGIN: 'http://127.0.0.1:9' });
+        assert.equal(res.status, 503);
+        const body = await res.json();
+        assert.equal(body.error.code, 'PTX_STUB_UNAVAILABLE');
+        assert.match(body.error.message, /npm run dev/);
+    } finally { globalThis.fetch = orig; }
+});
+
+test('local-gateway/wrangler.jsonc 的 PTX_STUB_ORIGIN 与 server.mjs 的 LOCAL_STUB_ORIGIN 一致（改一处必须改另一处）', () => {
+    const cfg = parseJsonc(readFileSync(new URL('./local-gateway/wrangler.jsonc', import.meta.url), 'utf8'));
+    assert.equal(cfg.vars.PTX_STUB_ORIGIN, LOCAL_STUB_ORIGIN);
+});
