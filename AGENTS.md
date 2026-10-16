@@ -415,7 +415,12 @@ const r = await ctx.pt.notify.email({
 - **收件人只能是工作区成员**：离职 / 没邮箱的不报错，进 `unresolved`；结果里**永远没有邮箱地址**。每人一封（各带自己的退订链接），退订了的人不会收到。
 - 平台会**清洗 html** 并套统一外框（页眉、「本邮件由应用 X 发送」、退订链接、法定表示）：`<script>`、`<style>` 块、表单、非 https 图片一律去掉 ——
   **样式写内联 `style`**。本地桩会把它删掉的东西打印出来。
+- 内联样式逐条过滤：**不支持 CSS 自定义属性（`--x: …`）与 `var()` / `attr()`**（整条声明丢掉，样式请直接写值）；
+  `url(…)` 与 CSS 函数里的字符串**必须是 https**；含反斜杠、`@import`、`expression` 的样式整段 / 整条丢。链接只放 https 与 mailto，图片只放 https。
 - `option` 必须是纯 JSON：函数（`formatter: p => …`）在 app-backend 里就 400 `RENDER_OPTION_INVALID`；`image` 键 / `image://` 被平台拒。图片 90 天后失效。
+- `option` 里的**字符串（含键名）不能含 `"` `<` `>` 与控制字符**（`\t` `\n` 除外），也不能含 `&#`；**颜色 / 字体字段**
+  （`color`、以 `Color` 结尾的键、`fill`、`stroke`、`font` / `fontFamily` / `fontSize` / `fontWeight` / `fontStyle`，及其整个子树）不能含 `;` —— 否则 400 `RENDER_OPTION_INVALID`。标题要写比较关系请用「≤」「大于」之类。
+  另有结构上限：节点 ≤ 100 000、单个数组 ≤ 50 000 项、单个字符串 ≤ 16 384 字符；`__proto__` / `constructor` / `prototype` 键一律拒。本地桩按同一份规则（`scripts/rules.json`）校验。
 - 限额：每次调用 ≤ 50 人；**一次运行** ≤ 20 次 `notify.email`、累计 ≤ 50 人、≤ 20 张图（`NOTIFY_RUN_LIMIT_EXCEEDED`）；
   工作区每天 2000 封、1000 张图（`NOTIFY_QUOTA_EXCEEDED`）。
 - 本地（`npm run dev`）：邮件写进 `.ptx/outbox/<runId|interactive>/<seq>.json` 与 `.html`（**不真实发信**，终端打印预览地址），
