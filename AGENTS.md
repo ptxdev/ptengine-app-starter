@@ -352,6 +352,20 @@ Worker 自己不能起定时（见[硬边界 3](#3-后端没有的能力写了�
    声明里 `preview: true` 却没读 `ctx.auth.preview`，doctor 会给 warn。
 5. **让用户订阅**：在某个**用户请求**的路由里调 `ctx.pt.jobs.create({ type, cron, timezone, params })`
    （任务运行中不能创建任务，会得到 `JOB_CREATE_FROM_JOB`）。另有 `list / get / update / pause / resume / delete`。
+   订阅前可先在前端弹平台的预览面板（签名、错误码详见 `@ptengine/app-sdk` README「Previewing a scheduled job」）：
+
+   ```ts
+   const draft = { type: 'weekly-report', cron: '0 9 * * 1', timezone: 'Asia/Tokyo', params: { channel: 'all' } };
+   let archiveToAssets: boolean | undefined;
+   if (window.PtApp.jobs) {                                   // 旧宿主上没有 jobs：跳过预览，直接订阅
+       const r = await window.PtApp.jobs.openPreview(draft);  // 不设超时（用户交互）
+       if (!r.confirmed) return;                              // 用户关了面板：不是错误
+       archiveToAssets = r.archiveToAssets;
+   }
+   await api('POST /subscriptions', { body: { ...draft, archiveToAssets } });   // 后端把 archiveToAssets 原样传给 ctx.pt.jobs.create
+   ```
+   reject 的码：`PT_BAD_PAYLOAD`（草稿结构不对）、`JOB_TYPE_UNKNOWN` / `JOB_APP_NOT_PUBLISHED` / `JOB_SCOPE_MISSING` /
+   `JOB_CRON_INVALID` / `JOB_TIMEZONE_INVALID`、`PT_PREVIEW_IN_PROGRESS`、`PT_PREVIEW_UNAVAILABLE`。
 6. **把结果交给平台**：在 2xx 的 JSON 响应里返回 `{ archive: { title?, markdown, files? } }`（类型 `JobRunResult`），
    平台会采集存档。不返回 `archive` 也行，只是没有存档；格式不对不影响运行成败，只是不采集。
    **结果归档**（平台 1b+）：任务创建者在管理页或预览面板里勾「保存到资产库」后，每次成功运行的邮件内容与返回的 `archive`
@@ -472,7 +486,9 @@ const r = await ctx.pt.notify.email({
         ctx.log('完成');
         return { archive: { title: '每周报告', markdown: renderMarkdown(data) } };
     } catch (e) {
-        // 想让重投重做：失败时先删占位再抛错（预览没占位，不用删）
+        // 想让重投重做：失败时先删占位再抛错（预览没占位，不用删）。
+        // ⚠️ notify.email 回 502 NOTIFY_SEND_FAILED / 504 时邮件**可能已部分送达**：宁可漏发也不愿重复发的应用，
+        //    在 notify.email 调用之后失败就别删占位。
         if (!ctx.auth.preview) await ctx.db.prepare('DELETE FROM job_runs WHERE run_id = ?').bind(runId).run();
         throw e;
     }
