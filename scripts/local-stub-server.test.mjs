@@ -217,3 +217,22 @@ test('并发闸：真实 rules.json 快照（platform 2da3983 导出）已带 no
         for (const r of await Promise.all(held)) assert.equal(r.status, 200);
     });
 });
+
+test('并发闸的 429 带 x-pt-gate: concurrency（与线上网关同口径：app-backend 只对带这个头的 429 退避重试）；其它错误不带', async () => {
+    let release;
+    const gate = new Promise(r => { release = r; });
+    const slowRenderer = async () => { await gate; return fakeRenderer(); };
+    const rules = { ...STUB_RULES, render: { ...STUB_RULES.render, maxConcurrentPerApp: 1 } };
+    await withGatedStub(rules, slowRenderer, async ({ base }) => {
+        const first = post(base, '/render/chart', PREVIEW, { option: { series: [] } });
+        await new Promise(r => setTimeout(r, 50));
+        const over = await post(base, '/render/chart', PREVIEW, { option: { series: [] } });
+        release();
+        assert.equal(over.status, 429);
+        assert.equal(over.headers.get('x-pt-gate'), 'concurrency');
+        assert.equal((await first).status, 200);
+        const bad = await post(base, '/render/chart', PREVIEW, { option: 'not-an-object' });
+        assert.equal(bad.status, 400);
+        assert.equal(bad.headers.get('x-pt-gate'), null);
+    });
+});

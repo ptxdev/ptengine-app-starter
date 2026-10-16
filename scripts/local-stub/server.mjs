@@ -20,7 +20,8 @@
  *   3. Host 只认 127.0.0.1:<port> / localhost:<port>，其余 421（防 DNS rebinding 读 outbox）。
  *
  * 并发闸（与线上网关同口径，最终评审 I1）：邮件、渲染各一道「每应用在途数」闸，上限读 rules.json 的
- * `notify.maxConcurrentPerApp` / `render.maxConcurrentPerApp`；打满回 429 `TOO_MANY_CONCURRENT_QUERIES`（app-backend 会有界退避重试）。
+ * `notify.maxConcurrentPerApp` / `render.maxConcurrentPerApp`；打满回 429 `TOO_MANY_CONCURRENT_QUERIES` + 头 `x-pt-gate: concurrency`
+ * （与线上网关一致；app-backend 只对带这个头的 429 有界退避重试）。
  * 规则快照里没有这两个键时**不模拟**这道闸（不写字面量兜底），启动时提示一行。
  */
 import { createServer } from 'node:http';
@@ -52,8 +53,15 @@ const PREVIEW_CSP = "sandbox allow-popups allow-popups-to-escape-sandbox; defaul
     "form-action 'none'; base-uri 'none'; frame-ancestors 'none'";
 const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-function send(res, status, body, type = 'application/json; charset=utf-8') {
-    const headers = { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' };
+/**
+ * 线上网关并发闸 429 的专属头（逐字等于 workers `shared/contract.ts` 的 `GATEWAY_GATE_HEADER` / `GATEWAY_GATE_CONCURRENCY`，
+ * 待 contract 登记；rules.json 目前不导出它）。app-backend 只对「429 + TOO_MANY_CONCURRENT_QUERIES + 这个头」退避重试，
+ * 本地闸不带它的话本地永远看不到重试。
+ */
+const GATE_HEADERS = { 'x-pt-gate': 'concurrency' };
+
+function send(res, status, body, type = 'application/json; charset=utf-8', extraHeaders = {}) {
+    const headers = { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...extraHeaders };
     if (type.startsWith('text/html')) headers['content-security-policy'] = PREVIEW_CSP;
     res.writeHead(status, headers);
     res.end(type.startsWith('application/json') ? JSON.stringify(body) : body);
@@ -138,8 +146,9 @@ export function createLocalStub({ root, appName = 'local-dev', loadRenderer, log
                 if (gateMax[kind] !== null) {
                     if (inflight[kind] >= gateMax[kind]) {
                         req.resume();
-                        return fail(res, 429, 'TOO_MANY_CONCURRENT_QUERIES',
-                            `该应用${isMail ? '通知' : '图表渲染'}并发过高(>${gateMax[kind]})，请减少同时发起的${isMail ? '邮件发送' : '渲染'}`);
+                        return send(res, 429, { error: { code: 'TOO_MANY_CONCURRENT_QUERIES',
+                            message: `该应用${isMail ? '通知' : '图表渲染'}并发过高(>${gateMax[kind]})，请减少同时发起的${isMail ? '邮件发送' : '渲染'}` } },
+                        undefined, GATE_HEADERS);
                     }
                     inflight[kind]++;
                     let released = false;
