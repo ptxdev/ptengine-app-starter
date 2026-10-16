@@ -214,13 +214,15 @@ ctx.pt.ai.chat(input) / .stream(input)   // 调大模型（需 ai:invoke；model
 ctx.pt.describe()                    // 服务端取数描述尚未开放（501），前端用 PtApp.data.describe()
 ctx.pt.openApiUrl  // 当前环境的 Ptengine Open API 根地址（需 manifest scopes 含 openapi:read）
 ctx.pt.jobs.*            // 定时任务：create / list / get / update / pause / resume / delete（需 jobs:run）
+ctx.pt.notify.email({ to, subject, html, text?, replyTo?, locale? })   // 以 Ptengine 名义给工作区成员发邮件（需 notify:send）
+ctx.pt.render.chart(option, { width?, height?, theme? })              // 平台渲染 ECharts 为 PNG，返回 { url, width, height }（需 notify:send）
 
 ctx.requireScope('analytics:read')   // 缺则抛 403 SCOPE_REQUIRED
 ctx.requireTrigger('job') // 任务路由第一行；用户请求打进来 403 JOB_ONLY
 ctx.auth.trigger / runId / preview   // 'job' | 'user'；runId 做幂等键；preview 时不要写会影响正式运行的状态、不碰外部系统
 throw ctx.error(502, 'CODE')         // 受控响应；抛其它 → 500 且详情只进日志（第三参见下）
 throw badRequest('CODE', '给前端看的话')  // 要带说明文字用这类 helper（import 自 @ptengine/app-backend）
-ctx.log('msg', { ... })              // 结构化日志
+ctx.log('msg', { ... })              // 结构化日志；预览运行里还会显示在预览面板
 ctx.waitUntil(promise)               // 后台任务（如写缓存，不阻塞响应）
 ```
 
@@ -238,6 +240,7 @@ ctx.waitUntil(promise)               // 后台任务（如写缓存，不阻塞�
 ⚠️ 本地 `wrangler dev` **没有数据网关**：`ctx.pt.query` / `ctx.pt.asset.*` / `ctx.pt.ai.*` 在本地
 一律 501 `PT_GATEWAY_NOT_BOUND`，即使 manifest 已经声明了 scope —— 那是本地缺 binding，不是 scope 没写。
 这几条要发布到平台上验（平台内 dev 模式的 `/api` 仍然代理到本地 wrangler，同样没有网关）。
+例外：`ctx.pt.jobs.*`（内存桩）与 `ctx.pt.notify.email` / `ctx.pt.render.chart`（写 `.ptx/`，不真实发信）由 `ptx dev` 提供本地桩。
 
 ### 资源由平台注入
 
@@ -343,8 +346,9 @@ Worker 自己不能起定时（见[硬边界 3](#3-后端没有的能力写了�
    ```
 3. **幂等**：投递是**至少一次**，同一个 `ctx.auth.runId` 可能到达两次。**先占位、后副作用**：
    先把 `runId` 写进 D1 / KV（已存在就直接返回），再发消息、写外部系统。
-4. **预览**：声明 `preview: true` 表示该任务类型可预览；预览入口 1b 起提供。`ctx.auth.preview === true` 时是预览运行 —— 照常生成内容并返回，
-   但**不要写会影响正式运行的状态、不碰外部系统**（不发邮件 / 消息、不写第三方）。
+4. **预览**：声明 `preview: true` 表示该任务类型可预览（管理页详情抽屉与应用内 `PtApp.jobs.openPreview` 都会出现「生成预览」）。
+   预览时 `ctx.auth.preview === true`，写法见下面的[预览模式写法](#预览模式写法)。
+   已知限制：**从商店安装的应用**在租户侧调 `PtApp.jobs.openPreview` 一律 `PT_PREVIEW_UNAVAILABLE`（1a 起的限制），请在管理页任务详情里预览。
    声明里 `preview: true` 却没读 `ctx.auth.preview`，doctor 会给 warn。
 5. **让用户订阅**：在某个**用户请求**的路由里调 `ctx.pt.jobs.create({ type, cron, timezone, params })`
    （任务运行中不能创建任务，会得到 `JOB_CREATE_FROM_JOB`）。另有 `list / get / update / pause / resume / delete`。
@@ -387,6 +391,68 @@ CREATE TABLE IF NOT EXISTS job_runs (run_id TEXT PRIMARY KEY, sid TEXT NOT NULL)
 被判为 `none`，平台不采集。希望失败后由重投重做，就像上面那样在失败时先删除占位再抛错；
 宁可偶尔重复也不能漏的场景，改为先做副作用、再记 `runId`（至少一次，副作用自身要能容忍重复）。
 
+### 推送：邮件与图表（notify:send）
+
+`manifest.json` 的 `scopes` 加 `"notify:send"`（写类，管理员必须显式同意）。然后在任务路由里：
+
+```ts
+const { url, width, height } = await ctx.pt.render.chart({
+    xAxis: { type: 'category', data: days }, yAxis: { type: 'value' },
+    series: [{ type: 'line', data: visits, label: { show: true, formatter: '{c}' } }]   // formatter 只能是字符串模板
+}, { width: 600, height: 300 });
+
+const r = await ctx.pt.notify.email({
+    to: ['role:admin'],                             // 只能是 user:<accountId> / role:owner|admin|member，不能写邮箱
+    subject: '每周报告',
+    html: `<h2 style="margin:0 0 12px">本周访问</h2><img src="${url}" width="${width}" height="${height}" alt="访问趋势">`,
+    locale: 'zh-CN'                                 // 外框与页脚语言，缺省 ja-JP
+});
+// r.recipients[i].status：sent / intercepted（预览）/ unsubscribed / suppressed / failed；r.unresolved 是没解析出的 ref
+```
+
+- **收件人只能是工作区成员**：离职 / 没邮箱的不报错，进 `unresolved`；结果里**永远没有邮箱地址**。每人一封（各带自己的退订链接），退订了的人不会收到。
+- 平台会**清洗 html** 并套统一外框（页眉、「本邮件由应用 X 发送」、退订链接、法定表示）：`<script>`、`<style>` 块、表单、非 https 图片一律去掉 ——
+  **样式写内联 `style`**。本地桩会把它删掉的东西打印出来。
+- `option` 必须是纯 JSON：函数（`formatter: p => …`）在 app-backend 里就 400 `RENDER_OPTION_INVALID`；`image` 键 / `image://` 被平台拒。图片 90 天后失效。
+- 限额：每次调用 ≤ 50 人；**一次运行** ≤ 20 次 `notify.email`、累计 ≤ 50 人、≤ 20 张图（`NOTIFY_RUN_LIMIT_EXCEEDED`）；
+  工作区每天 2000 封、1000 张图（`NOTIFY_QUOTA_EXCEEDED`）。
+- 本地（`npm run dev`）：邮件写进 `.ptx/outbox/<runId|interactive>/<seq>.json` 与 `.html`（**不真实发信**，终端打印预览地址），
+  图表用同一套 echarts + resvg 渲染进 `.ptx/media/`，返回 `http://localhost:8788/__ptx/media/<hex>.png`。
+  `role:*` 本地一律解析成你自己，`user:<id>` 解析成 `<id>@local.ptx` —— 只看「长什么样」，不代表线上发给谁。
+  外框是简化版，逐字的最终邮件看产品里的预览面板。
+
+### 预览模式写法
+
+用户在预览面板里点「生成预览」时，平台以 `ctx.auth.preview === true` 真的跑一次任务路由。目标：**预览里看到的就是正式运行会发出的东西，但没有副作用**。
+
+- **照常调用 `ctx.pt.notify.email`**：平台拦截不发（返回 `preview: true`、`sent: 0`、状态 `intercepted`），并把这封邮件显示在面板里。
+  在预览里跳过它，面板就是空的。
+- `ctx.pt.render.chart` 预览里**真实渲染**（计配额），面板里能看到图。
+- `ctx.pt.jobs.update / pause / resume / delete` 与资产写（`ctx.pt.asset.ensureFolder / create / update / uploadSource`）在预览里
+  一律 403 `PREVIEW_READONLY` —— 用 `if (!ctx.auth.preview)` 包起来。取数、资产读、AI 照常。
+- 你自己的外部副作用（第三方 webhook、写外部系统、D1 幂等占位）在预览里跳过。
+- `ctx.log(msg, fields)` 会显示在面板里，连同取数 / 邮件 / 图表的调用次数：最多 200 条、合计 12 KiB，单条消息截到 2000 字符，
+  `fields` 不能 JSON 序列化或超过 4 KiB 就只留消息。返回流式响应时，只有返回前记的日志进得去。
+
+```ts
+'POST /jobs/weekly-report': async (ctx) => {
+    ctx.requireTrigger('job');
+    ctx.log('开始生成', { channel: ctx.body.channel });
+    const data = await ctx.pt.query('traffic_insight', { /* … */ });
+    const chart = await ctx.pt.render.chart(buildOption(data), { width: 600, height: 300 });
+    if (!ctx.auth.preview) {
+        // 幂等占位只在正式运行里写（预览不写会影响正式运行的状态）
+        const claimed = await ctx.db.prepare('INSERT OR IGNORE INTO job_runs (run_id, sid) VALUES (?, ?)')
+            .bind(ctx.auth.runId, ctx.auth.sid).run();
+        if (claimed.meta.changes === 0) return {};
+    }
+    // 预览里照常调用：平台拦截并显示在面板里
+    await ctx.pt.notify.email({ to: ['role:admin'], subject: '每周报告', html: renderHtml(data, chart) });
+    ctx.log('完成');
+    return { archive: { title: '每周报告', markdown: renderMarkdown(data) } };
+}
+```
+
 ### 本地调试定时任务
 
 `npm run dev` 跑着时，另开一个终端：
@@ -413,8 +479,10 @@ POST 到 `http://127.0.0.1:$PTX_API_PORT/api<route>`（`PTX_API_PORT` 缺省 878
 本地的 `ctx.pt.jobs.*` 走 `ptx dev` 拉起的内存桩（见[本地开发](#本地开发)）：重启即清空，不校验 cron / 时区 / 配额，
 **也不会按时触发** —— 要跑任务路由只能用 `npx ptx job run`。
 
-`npm run doctor` 会检查：`jobs:run` 是否声明、任务路由是否在 `backend/src` 的 `routes` 里、
-路由里有没有 `requireTrigger(`、`preview: true` 时有没有读 `ctx.auth.preview`。
+`--preview` 时命令还会打印应用回的预览日志（`ctx.log` 与取数 / 邮件 / 图表次数，与预览面板里的同一份），
+以及这次运行写下的邮件的本地预览页 `http://localhost:8788/__ptx/outbox/<runId>`（需要 `npm run dev` 正在跑）。
+
+`npm run doctor` 会检查：`jobs:run` 是否声明、任务路由是否在 `backend/src` 的 `routes` 里、路由里有没有 `requireTrigger(`、`preview: true` 时有没有读 `ctx.auth.preview`、用了 `ctx.pt.notify` / `render.chart` 时有没有声明 `notify:send`。
 
 ---
 
@@ -529,6 +597,8 @@ npm run dev        # 同时起 vite（前端）与 wrangler dev（后端），�
 （`scripts/local-gateway/`），`backend/wrangler.jsonc` 的 `PT_GATEWAY` 按服务名绑到它：
 
 - 本地 `ctx.pt.jobs.*` 走它，**内存存储，重启即清空**，不会按时触发（运行任务路由用 `npx ptx job run`）；
+- 本地 `ctx.pt.notify.email` / `ctx.pt.render.chart` 由它转给 `ptx dev` 进程里的推送 / 图表桩（`127.0.0.1:8788`），
+  写 `.ptx/`、不真实发信，见[推送：邮件与图表](#推送邮件与图表notifysend)；
 - 本地 `ctx.pt.query()` / `ctx.pt.asset.*` / `ctx.pt.ai.*` 仍返回 501 `PT_GATEWAY_NOT_BOUND`。提示语比以前笼统
   （「本地没有数据网关……请在平台部署后联调」），并会多一条 `pt-gateway-query-failed` / `pt-gateway-asset-failed`
   日志 —— 都属预期，不是故障；
@@ -623,7 +693,7 @@ npm run package    # 组装 zip + 结构自检
 
 ### 权限声明（manifest.scopes）
 
-合法值以 `scripts/rules.json` 的 `validScopes` 为准（那份从平台生成，`npm run sync-rules` 同步）：`analytics:read`、`profile:read`、`user:read`、`ui:notify`、`openapi:read`、`asset:write`、`ai:invoke`、`asset:read`、`jobs:run`。**这里不要再写死一个数字**——「只有四个」这句在 `openapi:read` 加进来时就已经错了，直到 `asset:write` 又加一个才被发现。
+合法值以 `scripts/rules.json` 的 `validScopes` 为准（那份从平台生成，`npm run sync-rules` 同步）：`analytics:read`、`profile:read`、`user:read`、`ui:notify`、`openapi:read`、`asset:write`、`ai:invoke`、`asset:read`、`jobs:run`、`notify:send`。**这里不要再写死一个数字**——「只有四个」这句在 `openapi:read` 加进来时就已经错了，直到 `asset:write` 又加一个才被发现。
 写未定义或拼错的值会导致**上传校验失败**。遵循最小权限原则。
 
 | scope | 管什么 | 授权 |
@@ -634,6 +704,7 @@ npm run package    # 组装 zip + 结构自检
 | `ui:notify` | 宿主 UI 能力（`PtApp.ui` 的 toast / confirm） | — |
 | `asset:write` | `ctx.pt.asset.ensureFolder / create / update / uploadSource` | **写类，没有 first-party 豁免**：管理员必须显式同意，否则 403 `SCOPE_DENIED` |
 | `ai:invoke` | `ctx.pt.ai.chat / stream` | **写类**（花钱），同上；额度用完返回 `AI_BUDGET_EXCEEDED` |
+| `notify:send` | `ctx.pt.notify.email` / `ctx.pt.render.chart` | **写类**，管理员必须显式同意；以 Ptengine 的名义给工作区成员发信，授权文案已含「向工作区通知渠道发消息」（渠道推送上线时复用） |
 
 数据类 scope（取数 / 资产 / AI / Open API）决定平台给不给后端挂数据网关或 Open API 地址：
 一条都没声明 → 没有 binding，501（`PT_GATEWAY_NOT_BOUND` / `PT_OPENAPI_NOT_DECLARED`）；

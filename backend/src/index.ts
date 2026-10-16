@@ -12,8 +12,10 @@
  *                     写 ensureFolder / create / update / uploadSource（需 asset:write）
  *   ctx.pt.ai.*       调大模型 chat / stream（需 ai:invoke）
  *   ctx.pt.openApiUrl Ptengine Open API 根地址（需 openapi:read）
- * query / asset / ai 经平台数据网关、以调用者身份执行；本地 wrangler dev 没有网关，一律 501
- * PT_GATEWAY_NOT_BOUND。完整清单见 AGENTS.md「后端能用的东西（ctx）」。
+ *   ctx.pt.notify.email   以 Ptengine 名义给工作区成员发邮件（需 notify:send）
+ *   ctx.pt.render.chart   平台渲染 ECharts 为 PNG，返回公开地址（需 notify:send）
+ * query / asset / ai / notify / render 经平台数据网关、以调用者身份执行；本地 wrangler dev 下 query / asset / ai
+ * 一律 501 PT_GATEWAY_NOT_BOUND；jobs / notify / render 由 ptx dev 的本地桩提供。完整清单见 AGENTS.md「后端能用的东西（ctx）」。
  *
  * 错误：`throw ctx.error(status, code, detail)` 的 detail **只进日志**，前端拿到的
  * message 就是 code；要给前端一句说明用 `badRequest(code, message)` 等 helper。

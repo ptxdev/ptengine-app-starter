@@ -161,7 +161,7 @@ Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc`
 本地网关桩 `ptx-local-gateway` 是内存存储，`ptx dev` 重启即清空。它也不校验 cron / 时区 / 配额，以平台为准。
 
 **本地 `ctx.pt.query()` / `ctx.pt.asset.*` / `ctx.pt.ai.*` 返回 501 `PT_GATEWAY_NOT_BOUND`，日志里还多一条 `pt-gateway-*-failed`？**
-预期如此。本地网关桩只实现 `ctx.pt.jobs.*`，其余路径一律 501；提示语是笼统的
+预期如此。本地网关桩只实现 `ctx.pt.jobs.*`（`ctx.pt.notify.email` / `ctx.pt.render.chart` 转给本地推送 / 图表桩），其余路径一律 501；提示语是笼统的
 「本地没有数据网关……请在平台部署后联调」（不再点名缺哪个 scope），运行时同时记一条
 `pt-gateway-query-failed` / `pt-gateway-asset-failed` 日志。取数、资产读写与 AI 调用请在平台部署后联调。
 
@@ -169,6 +169,18 @@ Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc`
 `backend/wrangler.jsonc` 的 `PT_GATEWAY` 绑的是同会话里的 `ptx-local-gateway`，只有 `ptx dev`
 （`wrangler dev -c wrangler.jsonc -c ../scripts/local-gateway/wrangler.jsonc`）会把它一起拉起来。
 用 `npm run dev`，不要绕过它。
+
+### 推送 / 图表本地桩
+
+- **`ctx.pt.notify.email` 本地 503 `PTX_STUB_UNAVAILABLE`**：本地桩（`127.0.0.1:8788`）没起来。用 `npm run dev` 启动（不要单独跑 `wrangler dev`）；
+  横幅里若是「推送 / 图表本地桩没起来（…EADDRINUSE）：8788 被占」，是 8788 被别的进程（常见是另一个 `ptx dev`）占了，停掉它再重启。
+  消息里写「wrangler.jsonc 缺 vars.PTX_STUB_ORIGIN」的，是 `scripts/local-gateway/wrangler.jsonc` 被改坏了，补回 `"PTX_STUB_ORIGIN": "http://127.0.0.1:8788"` 或升级 starter。
+- **`ctx.pt.render.chart` 本地 501 `PTX_RENDER_DEPS_MISSING`**：可选依赖 `echarts` / `@resvg/resvg-js` 没装上（少见平台没有 resvg 预编译包）。
+  重跑 `npm install`，或 `npm i --save-optional echarts@^5.6.0 @resvg/resvg-js@^2.6.2`。线上渲染在平台侧，不受影响。
+- **本地 403 `SCOPE_DENIED`（requiredScope: notify:send）**：manifest 的 `scopes` 没有 `notify:send`，加上后重启 `npm run dev`（本地令牌照抄 manifest）。
+- **直接访问本地桩得到 421 `PTX_STUB_BAD_HOST`**：本地桩只认 `127.0.0.1:8788` / `localhost:8788` 这两个 Host（防 DNS rebinding 读到 outbox），换用这两个地址打开。
+- **本地看到的邮件和预览面板里不一样**：本地外框是简化版、清洗只删平台一定会删的东西；以产品里的预览面板为准。
+- `.ptx/` 可以随时删除（已在 `.gitignore`）。
 
 ## 其他
 

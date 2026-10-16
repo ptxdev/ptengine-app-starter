@@ -31,6 +31,23 @@
 | v1.0.1 | `^0.3.0` | — | — | 1 | 支持在平台内加载本地 dev server 联调 |
 | v1.0.0 | `^0.2.0` | — | — | 1 | 首个版本 |
 
+## Unreleased
+
+> **待办（发版时）**：依赖区间升到含 `notify:send` / `PtApp.jobs.openPreview` 的 app-sdk 与含 `ctx.pt.notify` / `ctx.pt.render` /
+> 预览日志的 app-backend，`PACKAGE_FLOORS` 同步，版本号确定，兼容矩阵补一行。在那之前本段能力在现有依赖区间上类型里没有、运行时拿不到。
+
+### 新增
+
+- **推送与图表的本地桩**：`ptx dev` 在进程里起 `127.0.0.1:8788`，本地网关桩把 `ctx.pt.notify.email` / `ctx.pt.render.chart` 转过去。
+  邮件写 `.ptx/outbox/<runId|interactive>/<seq>.json` 与 `.html`（**不真实发信**，终端打印本地预览地址与「平台会去掉的东西」），
+  图表用与平台同一套 echarts + resvg 渲染进 `.ptx/media/`。校验、本 run 限额与错误码与线上同名，上限读 `scripts/rules.json`。
+  `echarts@^5.6.0` / `@resvg/resvg-js@^2.6.2` 是 optionalDependencies，装不上时只有本地渲染报 501 `PTX_RENDER_DEPS_MISSING`。
+- **`npx ptx job run <type> --preview`**：另打印应用回的预览日志（`x-pt-job-log`：`ctx.log` 与取数 / 邮件 / 图表次数）与本地邮件预览页。
+- **`ptx doctor`**：后端用了 `ctx.pt.notify` / `ctx.pt.render.chart` 却没声明 `notify:send` → bad。
+- 规则快照同步：`validScopes` 加 `notify:send`，新增 `notify` / `render` / `jobLog` 段。
+- 文档：`AGENTS.md` 新增「推送：邮件与图表」「预览模式写法」；定时任务第 4 条改为「预览里照常调用 notify.email（平台拦截）」；
+  `docs/troubleshooting.md` 新增「推送 / 图表本地桩」。`.gitignore` 加 `.ptx/`。
+
 ## [3.7.1] - 2026-10-13
 
 ### 修复
