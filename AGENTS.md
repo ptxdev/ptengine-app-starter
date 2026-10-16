@@ -210,7 +210,7 @@ ctx.pt.asset.list(input?) / .sharedWithMe(input?) / .get({ type, id })   // 读 
 ctx.pt.asset.ensureFolder({ name }) / .create({ folderId, kind, name, content })
             / .update({ assetId, name?, content? }) / .uploadSource({ assetId, filename, contentType, body })
                                      // 写资产（需 asset:write；写类 scope 没有 first-party 豁免，要管理员显式同意）
-ctx.pt.ai.chat(input) / .stream(input)   // 调大模型（需 ai:invoke；model 必须带 provider 前缀；stream 返回的 Response 直接 return）
+ctx.pt.ai.chat(input) / .stream(input)   // 调大模型（需 ai:invoke；model 写逻辑名、不带厂商（如 claude-sonnet-5，可选值见 rules.json 的 aiModels）；stream 返回的 Response 直接 return）
 ctx.pt.describe()                    // 服务端取数描述尚未开放（501），前端用 PtApp.data.describe()
 ctx.pt.openApiUrl  // 当前环境的 Ptengine Open API 根地址（需 manifest scopes 含 openapi:read）
 

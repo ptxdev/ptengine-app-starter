@@ -398,7 +398,7 @@ function checkBackend(root, manifest) {
 }
 
 /**
- * 声明了 `ai:invoke` 的应用：把**可用模型清单**打出来，并检查后端里写的模型名在不在清单里。
+ * 声明了 `ai:invoke` 的应用：把**可用模型清单**打出来，并检查后端里写的模型名。
  *
  * 为什么要在这里打：网关的 `AI_MODEL_NOT_ALLOWED` 报错里也会列出可用模型，但那只在
  * **出错之后**才看得到。写代码的人（以及替他写代码的 AI agent）需要在**写之前**就知道。
@@ -406,9 +406,43 @@ function checkBackend(root, manifest) {
  * 清单来自 `scripts/rules.json`，由 contract 包生成并同步进来 —— 平台的 cross-repo
  * 检查盯着两边一致，所以它不会悄悄漂。
  *
- * 模型名用的是宽匹配（扫源码里的 `'<provider>/<model>'` 字面量），所以**只 warn 不 bad**：
- * 漏报比误报好，真正的闸在网关。
+ * 2026-10-16 起模型名是**逻辑名**（`claude-sonnet-5`，不带厂商），平台网关按环境映射到
+ * 真正的通道。所以这里认三种写法：
+ *
+ *   · 逻辑名，且三个环境都可用（`aiModels`）→ 通过
+ *   · 逻辑名，但只在部分环境开通（只在 `aiModelsByEnv` 里）→ warn，说清是哪些环境
+ *   · 带厂商前缀的旧写法（`anthropic/claude-sonnet-5`）→ 网关仍认，warn 建议改成逻辑名
+ *
+ * 宽匹配（扫 `model: '…'` 与带 `/` 的字面量），所以**只 warn 不 bad**：漏报比误报好，
+ * 真正的闸在网关。
  */
+export function classifyAiModels(source, rules) {
+    const models = rules.aiModels ?? [];
+    const byEnv = rules.aiModelsByEnv ?? {};
+    const known = new Set([...models, ...Object.values(byEnv).flat()]);
+
+    const used = new Set();
+    // `model: '…'` 后面的字面量：逻辑名不带 `/`，只能靠「它是 model 的值」认出来
+    for (const m of source.matchAll(/\bmodel\s*:\s*['"]([^'"\s]+)['"]/g)) used.add(m[1]);
+    // 带前缀的字面量：旧写法常被抽成常量，不一定紧跟在 `model:` 后面
+    for (const m of source.matchAll(/['"]([a-z0-9-]+\/[A-Za-z0-9._-]+)['"]/g)) used.add(m[1]);
+
+    const findings = [];
+    for (const name of used) {
+        if (models.includes(name)) continue;
+        if (known.has(name)) {
+            const envs = Object.entries(byEnv).filter(([, l]) => l.includes(name)).map(([e]) => e);
+            findings.push({ kind: 'partial', name, envs });
+            continue;
+        }
+        const slash = name.indexOf('/');
+        const bare = slash >= 0 ? name.slice(slash + 1) : null;
+        if (bare !== null && known.has(bare)) findings.push({ kind: 'legacy', name, logical: bare });
+        else findings.push({ kind: 'unknown', name });
+    }
+    return findings;
+}
+
 function checkAiModels(root, manifest) {
     if (!(manifest.scopes ?? []).includes('ai:invoke')) return;
 
@@ -416,17 +450,30 @@ function checkAiModels(root, manifest) {
     if (models.length === 0) {
         return warn('规则快照里没有 aiModels', '`npm run sync-rules` 同步一次（需要 PT_CONTRACT_DIR）。');
     }
-    ok(`可用 AI 模型：${models.join('、')}`);
+    ok(`可用 AI 模型（逻辑名，不带厂商）：${models.join('、')}`);
 
     const idx = read(root, 'backend/src/index.ts');
     if (!idx) return;
-    // 只看「带 provider 前缀的字面量」，这是 model 参数唯一合法的形态。
-    const used = new Set();
-    for (const m of idx.matchAll(/['"]([a-z0-9-]+\/[A-Za-z0-9._-]+)['"]/g)) used.add(m[1]);
-    const unknown = [...used].filter(x => !models.includes(x));
+    const findings = classifyAiModels(idx, RULES);
+
+    const legacy = findings.filter(f => f.kind === 'legacy');
+    if (legacy.length > 0) {
+        warn(
+            `后端里用了带厂商前缀的旧写法：${legacy.map(f => f.name).join('、')}`,
+            `网关仍然认，但通道由平台按环境决定，前缀已经没有意义。建议改成：` +
+            `${legacy.map(f => `${f.name} → ${f.logical}`).join('、')}。`
+        );
+    }
+    for (const f of findings.filter(x => x.kind === 'partial')) {
+        warn(
+            `模型 ${f.name} 只在部分环境开通：${f.envs.join(' / ')}`,
+            '其它环境会被网关以 400 AI_MODEL_UNAVAILABLE 拒掉。要上线的应用请选 aiModels 里的。'
+        );
+    }
+    const unknown = findings.filter(f => f.kind === 'unknown');
     if (unknown.length > 0) {
         warn(
-            `后端里出现了不在清单里的模型名：${unknown.join('、')}`,
+            `后端里出现了不在清单里的模型名：${unknown.map(f => f.name).join('、')}`,
             `可用的是：${models.join('、')}。不在清单里的会被网关以 400 AI_MODEL_NOT_ALLOWED 拒掉。` +
             '（本检查是宽匹配，如果这些字符串根本不是模型名，忽略即可。）'
         );
