@@ -146,7 +146,10 @@ export async function maybeStartLocalStub(manifest, root, { hasBackend }, start 
         await start({ root, appName: localAppName(manifest) });
         return `推送 / 图表本地桩 http://localhost:${LOCAL_STUB_PORT}（邮件写 .ptx/outbox/，图片写 .ptx/media/，不真实发信）`;
     } catch (e) {
-        return `[!] 推送 / 图表本地桩没起来（127.0.0.1:${LOCAL_STUB_PORT}：${e?.code ?? e?.message ?? e}）—— ctx.pt.notify / render 本地会 503，其它不受影响`;
+        const why = e?.code ?? e?.message ?? e;
+        return e?.code === 'EADDRINUSE'
+            ? `[!] 推送 / 图表本地桩没起来（${why}）：${LOCAL_STUB_PORT} 被占（可能是另一个 ptx dev）：notify / render 可能写到别处或 503，其它不受影响`
+            : `[!] 推送 / 图表本地桩没起来（127.0.0.1:${LOCAL_STUB_PORT}：${why}）—— ctx.pt.notify / render 本地会 503，其它不受影响`;
     }
 }
 

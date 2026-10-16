@@ -20,6 +20,12 @@ export default {
         const url = new URL(request.url);
         if (request.method === 'POST' && STUB_FORWARD.has(url.pathname)) {
             const origin = env?.PTX_STUB_ORIGIN;
+            if (!origin) {
+                return json(503, { error: {
+                    code: 'PTX_STUB_UNAVAILABLE',
+                    message: 'scripts/local-gateway/wrangler.jsonc 缺 vars.PTX_STUB_ORIGIN（应为 http://127.0.0.1:8788），本地推送 / 图表桩不可用。请升级 starter 或补回这一项。'
+                } });
+            }
             try {
                 return await fetch(`${origin}${url.pathname}`, {
                     method: 'POST',

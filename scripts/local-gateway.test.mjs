@@ -133,3 +133,19 @@ test('local-gateway/wrangler.jsonc 的 PTX_STUB_ORIGIN 与 server.mjs 的 LOCAL_
     const cfg = parseJsonc(readFileSync(new URL('./local-gateway/wrangler.jsonc', import.meta.url), 'utf8'));
     assert.equal(cfg.vars.PTX_STUB_ORIGIN, LOCAL_STUB_ORIGIN);
 });
+
+test('PTX_STUB_ORIGIN 为空 → 直接 503 PTX_STUB_UNAVAILABLE，提示 wrangler.jsonc 缺 vars.PTX_STUB_ORIGIN，不发请求', async () => {
+    const orig = globalThis.fetch;
+    let called = 0;
+    globalThis.fetch = async () => { called++; return new Response('{}'); };
+    try {
+        for (const env of [{}, { PTX_STUB_ORIGIN: '' }, undefined]) {
+            const res = await worker.fetch(new Request('https://gateway/render/chart', { method: 'POST', body: '{}' }), env);
+            assert.equal(res.status, 503);
+            const body = await res.json();
+            assert.equal(body.error.code, 'PTX_STUB_UNAVAILABLE');
+            assert.match(body.error.message, /wrangler\.jsonc 缺 vars\.PTX_STUB_ORIGIN/);
+        }
+    } finally { globalThis.fetch = orig; }
+    assert.equal(called, 0);
+});

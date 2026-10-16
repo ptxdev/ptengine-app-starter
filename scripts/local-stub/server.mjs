@@ -17,6 +17,7 @@
  *      无引号写法、on* 属性）在预览页都执行不了；sandbox 不含 allow-scripts / allow-same-origin。
  *   2. 写盘 / 读盘路径只用通过校验的 runId（[A-Za-z0-9_-]{1,64}）、自己生成的 32 hex 文件名与数字序号，
  *      拼接后再确认仍在 .ptx 目录内（insidePtx），防穿越。
+ *   3. Host 只认 127.0.0.1:<port> / localhost:<port>，其余 421（防 DNS rebinding 读 outbox）。
  */
 import { createServer } from 'node:http';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -40,8 +41,9 @@ const OUTBOX_ITEM_RE = /^\/__ptx\/outbox\/([A-Za-z0-9_-]{1,64})\/(\d{1,9})\.html
 /**
  * 预览页的 CSP：邮件 HTML 是应用写的、不可信，预览页上一律不许跑脚本。
  * 图片放行 http(s)（本地图表是 http://localhost:8788/__ptx/media/…），样式只放行内联（邮件只能用内联 style）。
+ * sandbox 只放 popups（邮件里 target=_blank 的链接能在新标签页正常打开），绝不放 allow-scripts / allow-same-origin。
  */
-const PREVIEW_CSP = "sandbox; default-src 'none'; script-src 'none'; img-src http: https: data:; style-src 'unsafe-inline'; " +
+const PREVIEW_CSP = "sandbox allow-popups allow-popups-to-escape-sandbox; default-src 'none'; script-src 'none'; img-src http: https: data:; style-src 'unsafe-inline'; " +
     "form-action 'none'; base-uri 'none'; frame-ancestors 'none'";
 const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -55,14 +57,17 @@ const fail = (res, status, code, message, extra = {}) => send(res, status, { err
 
 function readBody(req) {
     return new Promise((resolveBody, reject) => {
+        // 超限后不断连（断连时客户端只看到 ECONNRESET / fetch failed，拿不到 413）：停止收集、把剩余读完，end 时再回 413。
         const chunks = [];
         let total = 0;
         req.on('data', c => {
             total += c.length;
-            if (total > MAX_BODY_BYTES) { reject(Object.assign(new Error('too large'), { status: 413 })); req.destroy(); return; }
-            chunks.push(c);
+            if (total <= MAX_BODY_BYTES) chunks.push(c);
+            else chunks.length = 0;
         });
-        req.on('end', () => resolveBody(Buffer.concat(chunks).toString('utf8')));
+        req.on('end', () => total > MAX_BODY_BYTES
+            ? reject(Object.assign(new Error('too large'), { status: 413 }))
+            : resolveBody(Buffer.concat(chunks).toString('utf8')));
         req.on('error', reject);
     });
 }
@@ -93,8 +98,14 @@ export function createLocalStub({ root, appName = 'local-dev', loadRenderer, log
     const ptxDir = join(root, '.ptx');
     const server = createServer(async (req, res) => {
         try {
+            const port = server.address().port;
+            // 只认本机 Host：浏览器经 DNS rebinding 打进来的请求 Host 是攻击者域名，一律 421。
+            const host = String(req.headers.host ?? '').toLowerCase();
+            if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) {
+                return fail(res, 421, 'PTX_STUB_BAD_HOST', `本地桩只接受 Host 为 127.0.0.1:${port} 或 localhost:${port} 的请求`);
+            }
             const url = new URL(req.url, 'http://local');
-            const publicBase = `http://localhost:${server.address().port}`;
+            const publicBase = `http://localhost:${port}`;
 
             if (req.method === 'POST' && (url.pathname === '/notify/email' || url.pathname === '/render/chart')) {
                 const isMail = url.pathname === '/notify/email';
