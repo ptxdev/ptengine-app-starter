@@ -236,3 +236,33 @@ test('并发闸的 429 带 x-pt-gate: concurrency（与线上网关同口径：a
         assert.equal(bad.headers.get('x-pt-gate'), null);
     });
 });
+
+test('闸头读 rules.json 的 gateway.gateHeader（真实快照 = x-pt-gate: concurrency；换值即跟着换，证明不是字面量）', async () => {
+    assert.deepEqual(STUB_RULES.gateway?.gateHeader, { name: 'x-pt-gate', concurrencyValue: 'concurrency' });
+    let release;
+    const gate = new Promise(r => { release = r; });
+    const slowRenderer = async () => { await gate; return fakeRenderer(); };
+    const rules = { ...STUB_RULES, render: { ...STUB_RULES.render, maxConcurrentPerApp: 1 },
+        gateway: { gateHeader: { name: 'x-test-gate', concurrencyValue: 'probe' } } };
+    await withGatedStub(rules, slowRenderer, async ({ base }) => {
+        const first = post(base, '/render/chart', PREVIEW, { option: { series: [] } });
+        await new Promise(r => setTimeout(r, 50));
+        const over = await post(base, '/render/chart', PREVIEW, { option: { series: [] } });
+        release();
+        assert.equal(over.status, 429);
+        assert.equal(over.headers.get('x-test-gate'), 'probe');
+        assert.equal(over.headers.get('x-pt-gate'), null);
+        assert.equal((await first).status, 200);
+    });
+});
+
+test('快照有并发上限却缺 gateway.gateHeader → 启动即报「规则快照过旧」，不写字面量兜底', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ptx-stub-gate-'));
+    const { gateway: _drop, ...stale } = STUB_RULES;
+    assert.throws(() => createLocalStub({ root, rules: stale, log: () => {} }), /gateway\.gateHeader[\s\S]*规则快照过旧/);
+    const halfStale = { ...STUB_RULES, gateway: { gateHeader: { name: 'x-pt-gate' } } };
+    assert.throws(() => createLocalStub({ root, rules: halfStale, log: () => {} }), /规则快照过旧/);
+    // 快照旧到连并发上限都没有：本来就不模拟闸，也就用不到闸头，不报错（与既有「缺键不模拟」口径一致）
+    const ancient = { ...stale, notify: { ...STUB_RULES.notify, maxConcurrentPerApp: undefined }, render: { ...STUB_RULES.render, maxConcurrentPerApp: undefined } };
+    assert.doesNotThrow(() => createLocalStub({ root, rules: ancient, log: () => {} }));
+});
