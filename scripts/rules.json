@@ -201,5 +201,11 @@
         "maxEntries": 200,
         "entryMessageMax": 2000,
         "entryFieldsMaxBytes": 4096
+    },
+    "gateway": {
+        "gateHeader": {
+            "name": "x-pt-gate",
+            "concurrencyValue": "concurrency"
+        }
     }
 }
