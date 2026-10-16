@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkMigrationsAdditive, checkTailwindContent, checkPackageFloors, PACKAGE_FLOORS, checkJobs, findRouteHandler } from './ptx-doctor.mjs';
+import { checkMigrationsAdditive, checkTailwindContent, checkPackageFloors, PACKAGE_FLOORS, checkJobs, findRouteHandler, checkNotifyScope } from './ptx-doctor.mjs';
 
 function fixture(files) {
     const root = mkdtempSync(join(tmpdir(), 'ptx-doctor-'));
@@ -278,4 +278,38 @@ test('preview: true 但路由所在文件没读 ctx.auth.preview → warn；读�
 test('findRouteHandler：路由里的正则元字符被转义（. 不当通配）', () => {
     const sources = [{ rel: 'a.ts', text: "{ 'POST /jobsXweekly': 1 }" }];
     assert.equal(findRouteHandler(sources, 'POST /jobs.weekly'), null);
+});
+
+// ─── 推送 / 图表（notify:send）──────────────────────────────────────────
+
+test('后端没用 notify / render：不产出任何结果', () => {
+    assert.deepEqual(checkNotifyScope(jobsProject({ 'backend/src/index.ts': INDEX_OK }), mf([JOB])), []);
+});
+
+test('用了 ctx.pt.notify.email 却没声明 notify:send → bad，并点名文件', () => {
+    const src = "export default createApp({ routes: { 'POST /x': async ctx => ctx.pt.notify.email({ to: ['role:admin'], subject: 's', html: 'h' }) } });";
+    const out = checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]));
+    assert.equal(out.length, 1);
+    assert.equal(out[0].level, 'bad');
+    assert.match(out[0].msg, /notify:send/);
+    assert.match(out[0].msg, /backend\/src\/index\.ts/);
+});
+
+test('只用 ctx.pt.render.chart 也要 notify:send；子文件里用到同样能找到', () => {
+    const out = checkNotifyScope(jobsProject({
+        'backend/src/index.ts': 'export default createApp({ routes: {} });',
+        'backend/src/charts.ts': 'export const c = ctx => ctx.pt.render.chart({ series: [] });'
+    }), mf([JOB]));
+    assert.equal(out[0].level, 'bad');
+    assert.match(out[0].msg, /charts\.ts/);
+});
+
+test('声明了 notify:send → ok', () => {
+    const src = 'const r = ctx => ctx.pt.notify.email(x);';
+    assert.deepEqual(checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB], ['jobs:run', 'notify:send'])).map(r => r.level), ['ok']);
+});
+
+test('只出现在注释或字符串里不算', () => {
+    const src = "// TODO ctx.pt.notify.email(...)\nconst s = 'ctx.pt.render.chart';\n/* ctx.pt.notify.email */";
+    assert.deepEqual(checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB])), []);
 });

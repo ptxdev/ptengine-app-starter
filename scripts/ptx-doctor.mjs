@@ -576,6 +576,33 @@ export function checkJobs(root, manifest) {
     return out;
 }
 
+/** 把字符串 / 模板字面量的内容换成空格（引号保留），配合 stripJsComments 只看「真代码」。 */
+function blankStrings(src) {
+    return src.replace(/(['"`])(?:\\.|(?!\1)[^\\\n])*\1/g, m => m[0] + ' '.repeat(m.length - 2) + m[0]);
+}
+
+/**
+ * 用了 `ctx.pt.notify.*` / `ctx.pt.render.chart` 就必须声明 `notify:send`（定时任务 1b，brief §13.3）。
+ * 不声明：平台不把这个 scope 放进令牌 → 线上恒 403 SCOPE_DENIED；而本地令牌照抄 manifest，同样 403，
+ * 但报错落在运行时某一次发信上，不如在 doctor 里一次说清楚。注释与字符串里出现的不算。
+ */
+export function checkNotifyScope(root, manifest) {
+    const hits = listSourceFiles(join(root, 'backend', 'src'))
+        .map(p => ({ rel: relative(root, p), text: blankStrings(stripJsComments(readFileSync(p, 'utf8'))) }))
+        .filter(s => /ctx\.pt\.notify\.|ctx\.pt\.render\.chart\b/.test(s.text))
+        .map(s => s.rel);
+    if (hits.length === 0) return [];
+    if (!(manifest.scopes ?? []).includes('notify:send')) {
+        return [{
+            level: 'bad',
+            msg: `后端用了 ctx.pt.notify / ctx.pt.render.chart（${hits.join('、')}），但 manifest.scopes 里没有 notify:send`,
+            why: '把 "notify:send" 加进 manifest.json 的 scopes 并重新发布，再由工作区管理员同意授权（写类 scope，没有自建应用豁免）。' +
+                 '不声明的话发信与渲染一律 403 SCOPE_DENIED。'
+        }];
+    }
+    return [{ level: 'ok', msg: `ctx.pt.notify / render.chart 已声明 notify:send（${hits.join('、')}）` }];
+}
+
 /**
  * 迁移必须**可加**（只增不减）。
  *
@@ -878,6 +905,7 @@ export async function run(args, root) {
     results.push(checkVars(root, manifest));
     checkScopeConsistency(root, manifest);
     results.push(...checkJobs(root, manifest));
+    results.push(...checkNotifyScope(root, manifest));
     checkMigrationsAdditive(root, manifest, results);
     checkGitignore(root);
     checkTokenLeak(root);
