@@ -43,6 +43,10 @@
 > 2. **workers 已重新生成 edge 的 SDK 资产并部署**（`workers/package.json` 的 app-sdk 升到含 `PtApp.jobs` 的 minor、跑 `build:sdk-asset`、
 >    改 `EXPECTED_APP_SDK_MINOR`，见 workers/README「Edge 自持的运行时 SDK」）：应用运行时的 `window.PtApp` 来自 edge `/__pt/app-sdk.js`，
 >    旧资产上 `PtApp.jobs` 为 `undefined`，`PtApp.jobs.openPreview(...)` 直接 TypeError，拿不到 `PT_*` 错误码。
+> 3. **上线顺序**：**workers gateway 须先于或同批于新版 app-backend**——新版 app-backend 只对「429 + `TOO_MANY_CONCURRENT_QUERIES` +
+>    `x-pt-gate: concurrency`」退避重试，旧 gateway 的闸 429 不带这个头，新包跑在旧 gateway 上打满并发闸时直接失败、不重试；
+>    **ptengine-x backend 须与带 `identity.appId` 的 platform 同批或之后**——新 backend 缺这个字段时任务 run 启动一律 502。
+>    详见 custom-app-platform `docs/PHASE0-INFRA.md`「上线顺序（跨仓）」。
 
 ### 新增
 
@@ -54,6 +58,8 @@
 - **`ptx doctor`**：后端用了 `ctx.pt.notify` / `ctx.pt.render.chart` 却没声明 `notify:send` → bad。
 - 规则快照同步：`validScopes` 加 `notify:send`，新增 `notify` / `render` / `jobLog` 段。
 - 规则快照同步：`notify` / `render` 段新增 `maxConcurrentPerApp`（各 2），`render` 段新增 `timeoutMs`（5000）；本地桩的每应用并发闸默认生效。
+- 规则快照同步：新增 `gateway.gateHeader`（`{ name: "x-pt-gate", concurrencyValue: "concurrency" }`）；本地桩并发闸 429 的闸头改读它，
+  快照有并发上限却缺这个键时启动报「规则快照过旧」（不写字面量兜底）。
 - 本地图表桩：单次渲染耗时超过 `render.timeoutMs` 时终端警告（线上可能 504 `RENDER_TIMEOUT`），不拒绝；旧快照缺该键时不判。
 - 本地图表桩与平台同口径：`render` 段新增的资源上限（节点 / 数组 / 字符串）、非 JSON / 循环 / 原型键拒绝、字符规则
   （字符串禁 `"` `<` `>` 控制字符与 `&#`，颜色 / 字体字段禁 `;`）全部读规则快照；渲染出的 SVG 先过与平台同一份允许名单闸
