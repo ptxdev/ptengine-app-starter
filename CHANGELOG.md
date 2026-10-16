@@ -35,6 +35,14 @@
 
 > **待办（发版时）**：依赖区间升到含 `notify:send` / `PtApp.jobs.openPreview` 的 app-sdk 与含 `ctx.pt.notify` / `ctx.pt.render` /
 > 预览日志的 app-backend，`PACKAGE_FLOORS` 同步，版本号确定，兼容矩阵补一行。在那之前本段能力在现有依赖区间上类型里没有、运行时拿不到。
+>
+> **发版前置（平台侧 chore，未完成不得发本版 starter）**——只看「npm 包已发」不够，下面两件没做时，照 `AGENTS.md` 写出的应用线上会被拒或崩：
+> 1. **ptengine-x backend 已把 `@ptengine/app-sdk` 升到含 `notify:send` 的版本并部署**：上传包由
+>    `backend/src/components/custom-app/helpers/bundle-validator.ts` 用 app-sdk 的 manifest schema 校验，旧 schema 没有
+>    `notify:send`，声明了它的包上传即被拒（本地 doctor 读 `rules.json` 会放行，本地发现不了）。
+> 2. **workers 已重新生成 edge 的 SDK 资产并部署**（`workers/package.json` 的 app-sdk 升到含 `PtApp.jobs` 的 minor、跑 `build:sdk-asset`、
+>    改 `EXPECTED_APP_SDK_MINOR`，见 workers/README「Edge 自持的运行时 SDK」）：应用运行时的 `window.PtApp` 来自 edge `/__pt/app-sdk.js`，
+>    旧资产上 `PtApp.jobs` 为 `undefined`，`PtApp.jobs.openPreview(...)` 直接 TypeError，拿不到 `PT_*` 错误码。
 
 ### 新增
 
