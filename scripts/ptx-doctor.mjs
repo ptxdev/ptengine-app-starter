@@ -576,20 +576,86 @@ export function checkJobs(root, manifest) {
     return out;
 }
 
-/** 把字符串 / 模板字面量的内容换成空格（引号保留），配合 stripJsComments 只看「真代码」。 */
-function blankStrings(src) {
-    return src.replace(/(['"`])(?:\\.|(?!\1)[^\\\n])*\1/g, m => m[0] + ' '.repeat(m.length - 2) + m[0]);
+/**
+ * 剥注释 + 清空字符串内容，只留「真代码」：注释换成空格（换行保留）；单 / 双引号字符串与模板正文的
+ * 内容换成空格（引号、反引号保留，跨行模板正文里的换行保留）；模板插值 `${…}` 按代码保留，
+ * 逐层跟踪花括号深度（插值里的对象字面量、内层模板都对得上）。
+ * 逐字符扫描而不是正则：正则按行配对反引号，跨行模板会让闭合反引号与下一个模板的开头错配，吞掉中间的真代码。
+ * 已知不处理：正则字面量（其中的引号 / 反引号 / `//` 会被当成字符串或注释的起点）—— 静态检查够用。
+ */
+function maskJsCode(src) {
+    let out = '';
+    let i = 0;
+    const n = src.length;
+    const depth = [];   // 每层模板插值内未闭合的 `{` 个数
+    const blank = ch => (ch === '\n' ? '\n' : ' ');
+    // 扫模板正文：遇闭合反引号回到代码；遇 `${` 进入插值（按代码扫）
+    const templateBody = () => {
+        while (i < n) {
+            const ch = src[i];
+            if (ch === '\\' && i + 1 < n) { out += ' ' + blank(src[i + 1]); i += 2; continue; }
+            if (ch === '`') { out += '`'; i++; return; }
+            if (ch === '$' && src[i + 1] === '{') { out += '${'; i += 2; depth.push(0); return; }
+            out += blank(ch); i++;
+        }
+    };
+    while (i < n) {
+        const c = src[i];
+        const d = src[i + 1];
+        if (c === '/' && d === '/') {
+            while (i < n && src[i] !== '\n') { out += ' '; i++; }
+        } else if (c === '/' && d === '*') {
+            const e = src.indexOf('*/', i + 2);
+            const stop = e === -1 ? n : e + 2;
+            for (; i < stop; i++) out += blank(src[i]);
+        } else if (c === '\'' || c === '"') {
+            out += c; i++;
+            while (i < n && src[i] !== c) {
+                if (src[i] === '\\' && i + 1 < n) { out += ' ' + blank(src[i + 1]); i += 2; continue; }
+                if (src[i] === '\n') break; // 未闭合的单行字符串：到行尾为止
+                out += ' '; i++;
+            }
+            if (i < n && src[i] === c) { out += c; i++; }
+        } else if (c === '`') {
+            out += c; i++;
+            templateBody();
+        } else if (c === '{' && depth.length > 0) {
+            depth[depth.length - 1]++; out += c; i++;
+        } else if (c === '}' && depth.length > 0) {
+            out += c; i++;
+            if (depth[depth.length - 1] === 0) { depth.pop(); templateBody(); }
+            else depth[depth.length - 1]--;
+        } else {
+            out += c; i++;
+        }
+    }
+    return out;
 }
 
 /**
- * 用了 `ctx.pt.notify.*` / `ctx.pt.render.chart` 就必须声明 `notify:send`（定时任务 1b，brief §13.3）。
+ * 「用到了 notify / render」的识别范围（偏保守：宁可要求声明，不漏报）：
+ *   · `pt.notify` / `pt.render`，允许可选链 `?.` 与换行空白，前缀不限（`ctx.pt`、`c.pt`、解构出的 `pt` 都算）；
+ *   · 解构：`{ notify } = ….pt`、`{ render: r } = ….pt`、`{ pt: { notify } } = …`；
+ *   · 形参 `({ pt })` 之后的 `pt.notify` 由第一条覆盖。
+ * 不识别：`pt['notify']` 之类计算属性、把 `ctx.pt` 赋给别名后再取（`const p = ctx.pt; p.notify`）。
+ */
+const NOTIFY_USE_RES = [
+    /\bpt\s*\??\.\s*(?:notify|render)\b/,
+    /\{[^{}]*\b(?:notify|render)\b[^{}]*\}\s*=\s*[\w$.?\s]*\bpt\b/,
+    /\bpt\s*:\s*\{[^{}]*\b(?:notify|render)\b/
+];
+
+/**
+ * 用了 `ctx.pt.notify.*` / `ctx.pt.render.*` 就必须声明 `notify:send`（定时任务 1b，brief §13.3）。
  * 不声明：平台不把这个 scope 放进令牌 → 线上恒 403 SCOPE_DENIED；而本地令牌照抄 manifest，同样 403，
- * 但报错落在运行时某一次发信上，不如在 doctor 里一次说清楚。注释与字符串里出现的不算。
+ * 但报错落在运行时某一次发信上，不如在 doctor 里一次说清楚。注释与字符串里出现的不算（模板插值里的算），
+ * `*.test.*` / `*.spec.*` 不扫；识别范围见 NOTIFY_USE_RES。
  */
 export function checkNotifyScope(root, manifest) {
     const hits = listSourceFiles(join(root, 'backend', 'src'))
-        .map(p => ({ rel: relative(root, p), text: blankStrings(stripJsComments(readFileSync(p, 'utf8'))) }))
-        .filter(s => /ctx\.pt\.notify\.|ctx\.pt\.render\.chart\b/.test(s.text))
+        .filter(p => !/\.(?:test|spec)\.[^.\/\\]+$/.test(p))   // 测试里的 mock 不算
+        .map(p => ({ rel: relative(root, p), text: maskJsCode(readFileSync(p, 'utf8')) }))
+        .filter(s => NOTIFY_USE_RES.some(re => re.test(s.text)))
         .map(s => s.rel);
     if (hits.length === 0) return [];
     if (!(manifest.scopes ?? []).includes('notify:send')) {

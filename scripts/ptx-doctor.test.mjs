@@ -313,3 +313,51 @@ test('只出现在注释或字符串里不算', () => {
     const src = "// TODO ctx.pt.notify.email(...)\nconst s = 'ctx.pt.render.chart';\n/* ctx.pt.notify.email */";
     assert.deepEqual(checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB])), []);
 });
+
+test('模板插值里的真调用 → bad', () => {
+    const src = 'export const h = async (ctx, o) => `<img src="${(await ctx.pt.render.chart(o)).url}">`;';
+    assert.equal(checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]))[0]?.level, 'bad');
+});
+
+test('插值里嵌套对象字面量与内层模板：花括号深度正确，之后的真调用照样识别', () => {
+    const src = 'const a = `x${ f({ k: `y${1}` }) }z`;\nawait ctx.pt.notify.email(x);';
+    assert.equal(checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]))[0]?.level, 'bad');
+});
+
+test('解构写法 → bad', () => {
+    for (const src of [
+        'const { notify } = ctx.pt;\nawait notify.email(x);',
+        'const { render: r } = ctx.pt;\nawait r.chart(o);',
+        'const { pt: { notify } } = ctx;\nawait notify.email(x);',
+        "export default createApp({ routes: { 'POST /x': async ({ pt }) => pt.notify.email(x) } });"
+    ]) {
+        const out = checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]));
+        assert.equal(out[0]?.level, 'bad', src);
+    }
+});
+
+test('可选链 / 换行空白 → bad', () => {
+    for (const src of ['await ctx.pt?.notify?.email(x);', 'await ctx?.pt\n    .render\n    .chart(o);']) {
+        const out = checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]));
+        assert.equal(out[0]?.level, 'bad', src);
+    }
+});
+
+test('跨行模板正文里出现 ctx.pt.notify.email 且无真调用 → 不报', () => {
+    const src = 'const doc = `\n用法：ctx.pt.notify.email({ ... })\n`;\nconst t = `x`;';
+    assert.deepEqual(checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB])), []);
+});
+
+test('跨行模板之后的真调用不被吞（反引号不错配）', () => {
+    const src = 'const a = `\nline\n`; await ctx.pt.notify.email(x); const b = `y`;';
+    assert.equal(checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]))[0]?.level, 'bad');
+});
+
+test('测试文件里的 mock 不算', () => {
+    const root = jobsProject({
+        'backend/src/index.ts': 'export default createApp({ routes: {} });',
+        'backend/src/index.test.ts': 'const ctx = { pt: { notify: { email: vi.fn() } } }; await ctx.pt.notify.email(x);',
+        'backend/src/charts.spec.mjs': 'await ctx.pt.render.chart(o);'
+    });
+    assert.deepEqual(checkNotifyScope(root, mf([JOB])), []);
+});
