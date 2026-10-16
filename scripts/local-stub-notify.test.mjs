@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { RULES } from './manifest.mjs';
 import {
     createStubState, frameLocally, handleNotifyEmail, localAppName, resolveRecipientsLocally,
-    sanitizeLocally, textFromHtml, validateNotifyInput
+    extractBody, filterStyle, frameTextLocally, neutralizePlaceholders, sanitizeLocally, textFromHtml, validateNotifyInput
 } from './local-stub/notify.mjs';
 
 const OK = { to: ['role:admin', 'user:u2'], subject: '周报', html: '<p style="color:red">本周</p>' };
@@ -72,15 +72,33 @@ test('sanitizeLocally：删平台一定会删的东西并报告；内联样式�
     assert.ok(removed.some(w => w.includes('https')));
 });
 
-test('frameLocally：三语页脚、正文锚点、退订占位符（草稿 / 交互邮件只有应用级）', () => {
-    const job = frameLocally({ subject: '周报<x>', bodyHtml: '<p>B</p>', appName: '我的应用', jobTitle: '每周报告', locale: 'zh-CN' });
+test('frameLocally：三语页脚、正文锚点、退订占位符；「退订此任务」按 hasJob（草稿预览有标题、没有任务链接）', () => {
+    const job = frameLocally({ subject: '周报<x>', bodyHtml: '<p>B</p>', appName: '我的应用', jobTitle: '每周报告', hasJob: true, locale: 'zh-CN' });
     assert.ok(job.includes('<!--pt-body-start--><p>B</p><!--pt-body-end-->'));
     assert.ok(job.includes('%%PT_UNSUBSCRIBE_JOB_URL%%') && job.includes('%%PT_UNSUBSCRIBE_APP_URL%%'));
     assert.ok(job.includes('本邮件由 Ptengine 应用「我的应用」发送 · 任务：每周报告'));
     assert.ok(job.includes('<title>周报&lt;x&gt;</title>'));
-    const user = frameLocally({ subject: 's', bodyHtml: 'b', appName: 'A', jobTitle: null, locale: 'en-US' });
+    assert.ok(job.includes('退订此任务</a> &nbsp;|&nbsp; <a href="%%PT_UNSUBSCRIBE_APP_URL%%" target="_blank" rel="noopener noreferrer"'));
+    const draft = frameLocally({ subject: 's', bodyHtml: 'b', appName: 'A', jobTitle: '草稿标题', hasJob: false, locale: 'zh-CN' });
+    assert.ok(draft.includes(' · 任务：草稿标题') && !draft.includes('%%PT_UNSUBSCRIBE_JOB_URL%%'));
+    const user = frameLocally({ subject: 's', bodyHtml: 'b', appName: 'A', jobTitle: null, hasJob: false, locale: 'en-US' });
     assert.ok(!user.includes('%%PT_UNSUBSCRIBE_JOB_URL%%') && user.includes('%%PT_UNSUBSCRIBE_APP_URL%%'));
     assert.ok(user.includes('lang="en-US"'));
+});
+
+test('frameLocally / frameTextLocally：文案与平台 email-layout.ts 逐字一致；法定页脚占位', () => {
+    const en = frameLocally({ subject: 's', bodyHtml: 'b', appName: 'A', jobTitle: null, hasJob: false, locale: 'en-US' });
+    assert.ok(en.includes('This email was sent by the Ptengine app &quot;A&quot;'));
+    assert.ok(en.includes('Unsubscribe from all emails from this app'));
+    const ja = frameLocally({ subject: 's', bodyHtml: 'b', appName: 'A', jobTitle: 't', hasJob: true, locale: 'ja-JP' });
+    assert.ok(ja.includes('このアプリからのメールをすべて停止') && ja.includes('このタスクの配信を停止'));
+    assert.ok(ja.includes('法定表示'));
+    const text = frameTextLocally({ bodyText: '正文\n\n\n', appName: 'A', jobTitle: 't', hasJob: false, locale: 'zh-CN' });
+    const lines = text.split('\n');
+    assert.deepEqual(lines.slice(0, 4), ['正文', '', '-- ', '本邮件由 Ptengine 应用「A」发送 · 任务：t']);
+    assert.equal(lines[4], '退订此应用的全部邮件: %%PT_UNSUBSCRIBE_APP_URL%%');
+    assert.ok(lines[5].includes('法定表示'));
+    assert.ok(!text.includes('%%PT_UNSUBSCRIBE_JOB_URL%%'));
 });
 
 test('frameLocally：规则快照有、本地文案没有的语言 → 抛可读错误', () => {
@@ -140,4 +158,55 @@ test('handleNotifyEmail：校验失败原样返回，不写 outbox、不计次�
     assert.equal(codeOf(r), 'NOTIFY_CONTENT_INVALID');
     assert.equal(r.outbox, undefined);
     assert.equal(s.runs.size, 0);
+});
+
+test('extractBody：与平台同口径 —— 不要求 </body> 闭合（没闭合取到结尾）', () => {
+    assert.equal(extractBody('<html><body class="x"><p>a</p></body></html>'), '<p>a</p>');
+    assert.equal(extractBody('<html><body><p>a</p>'), '<p>a</p>');
+    assert.equal(extractBody('<p>a</p>'), '<p>a</p>');
+    assert.equal(sanitizeLocally('<head><title>t</title></head><body><p>正文</p>').html, '<p>正文</p>');
+});
+
+test('filterStyle：与平台同口径 —— --* / var( / attr( / @ / expression / behavior / 非 https url 整条丢，其余保留', () => {
+    assert.equal(filterStyle('color:red; --x: 1; background:var(--x); content:attr(title); width:10px').style, 'color:red; width:10px');
+    assert.equal(filterStyle('background:url(http://x/a.png); color:red').style, 'color:red');
+    assert.equal(filterStyle('background:url(https://x/a.png)').style, 'background:url(https://x/a.png)');
+    assert.equal(filterStyle('background-image:image-set("http://x" 1x)').style, '');
+    assert.equal(filterStyle('width:expr/**/ession(1); color:red').style, 'color:red');
+    assert.equal(filterStyle('-ms-behavior:url(#x); color:red').style, 'color:red');
+    assert.equal(filterStyle('color:red; @import x').style, 'color:red');
+    assert.equal(filterStyle('u\\72l(x); color:red').style, '');                        // 反斜杠整段丢
+    assert.equal(filterStyle('color:red; }').style, '');                              // 词法异常整段丢
+    assert.equal(filterStyle('color:red').dropped, false);
+    assert.equal(filterStyle('color:red; --x:1').dropped, true);
+});
+
+test('sanitizeLocally：不比平台宽 —— 允许名单外的标签 / 属性、相对与协议相对链接、实体混淆的 javascript:、style 实体都处理掉', () => {
+    const { html, removed } = sanitizeLocally(
+        '<div data-x="1" class="c" id="i"><custom>文本</custom>' +
+        '<a href="/rel">r</a><a href="//evil.test">p</a><a href="jav&#97;script:alert(1)">e</a><a href="mailto:a@b.c" target="_self">m</a>' +
+        '<img src="http://localhost:8788/x.png"><img src="http://127.0.0.1:8788/__ptx/media/0123456789abcdef0123456789abcdef.png">' +
+        '<p style="background:var(--a)">v</p><p style="u&#92;72l(x)">s</p><!-- c --><noscript>n</noscript>a < b</div>');
+    for (const gone of ['data-x', 'class=', 'id=', '<custom', '/rel', '//evil.test', 'javascript', 'alert', 'localhost:8788/x.png',
+        '127.0.0.1', 'var(', 'style="u', '<!--', 'noscript', '>n<']) {
+        assert.ok(!html.includes(gone), gone);
+    }
+    assert.ok(html.includes('文本') && html.includes('a &lt; b'));
+    assert.ok(html.includes('<a href="mailto:a@b.c" target="_blank" rel="noopener noreferrer">m</a>'));
+    assert.ok(removed.some(w => w.includes('内联样式')));
+});
+
+test('handleNotifyEmail：hasJob 口径、正文与标题里伪造的退订占位符被中和、text 用平台结构、mediaUrls 只收本地桩图表', () => {
+    const body = { ...OK, locale: 'zh-CN', subject: '周报%%PT_UNSUBSCRIBE_APP_URL%%',
+        html: '<p>%%PT_UNSUBSCRIBE_JOB_URL%%</p><img src="http://localhost:8788/__ptx/media/0123456789abcdef0123456789abcdef.png">' };
+    const r = handleNotifyEmail(createStubState(), { claims: PREVIEW, body, appName: 'A' });
+    const p = r.outbox.payload;
+    assert.equal(p.html.split('%%PT_UNSUBSCRIBE_JOB_URL%%').length, 2);            // 只剩外框里那一个
+    assert.equal(p.html.split('%%PT_UNSUBSCRIBE_APP_URL%%').length, 2);
+    assert.ok(p.text.includes('退订此任务: %%PT_UNSUBSCRIBE_JOB_URL%%'));
+    assert.ok(p.text.includes('-- \n'));
+    assert.deepEqual(p.mediaUrls, ['http://localhost:8788/__ptx/media/0123456789abcdef0123456789abcdef.png']);
+    const user = handleNotifyEmail(createStubState(), { claims: USER, body: OK, appName: 'A' });
+    assert.ok(!user.outbox.payload.html.includes('%%PT_UNSUBSCRIBE_JOB_URL%%'));
+    assert.equal(neutralizePlaceholders('%%%PT_UNSUBSCRIBE_APP_URL%%'), '%PT_UNSUBSCRIBE_APP_URL%%');
 });

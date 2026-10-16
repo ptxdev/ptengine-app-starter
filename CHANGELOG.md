@@ -45,6 +45,12 @@
 - **`npx ptx job run <type> --preview`**：另打印应用回的预览日志（`x-pt-job-log`：`ctx.log` 与取数 / 邮件 / 图表次数）与本地邮件预览页。
 - **`ptx doctor`**：后端用了 `ctx.pt.notify` / `ctx.pt.render.chart` 却没声明 `notify:send` → bad。
 - 规则快照同步：`validScopes` 加 `notify:send`，新增 `notify` / `render` / `jobLog` 段。
+- 本地图表桩与平台同口径：`render` 段新增的资源上限（节点 / 数组 / 字符串）、非 JSON / 循环 / 原型键拒绝、字符规则
+  （字符串禁 `"` `<` `>` 控制字符与 `&#`，颜色 / 字体字段禁 `;`）全部读规则快照；渲染出的 SVG 先过与平台同一份允许名单闸
+  （`svgAllowedElements`，外部 `href` / `url(` / 带前缀元素一律拒）再交给 resvg。
+- 本地邮件桩与平台外框对齐：页脚三语文案逐字一致、「退订此任务」只在有任务 id 时出现、法定页脚占位、`<body>` 不闭合也能取正文、
+  纯文本版结构同平台；清洗改为按平台同一份允许名单重建（只会比平台严），内联样式按平台规则逐条过滤（`--*` / `var()` / `attr()` 丢弃、url 须 https），
+  应用内容里伪造的退订占位符被中和。
 - 文档：`AGENTS.md` 新增「推送：邮件与图表」「预览模式写法」；定时任务第 4 条改为「预览里照常调用 notify.email（平台拦截）」；
   `docs/troubleshooting.md` 新增「推送 / 图表本地桩」。`.gitignore` 加 `.ptx/`。
 
