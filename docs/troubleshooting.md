@@ -172,8 +172,9 @@ Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc`
 
 ### 推送 / 图表本地桩
 
-- **`ctx.pt.notify.email` 本地 503 `PTX_STUB_UNAVAILABLE`**：本地桩（`127.0.0.1:8788`）没起来。用 `npm run dev` 启动（不要单独跑 `wrangler dev`）；
+- **`ctx.pt.notify.email` / `ctx.pt.render.chart` 本地 503 `PTX_STUB_UNAVAILABLE`**：本地桩（`127.0.0.1:8788`）没起来。用 `npm run dev` 启动（不要单独跑 `wrangler dev`）；
   横幅里若是「推送 / 图表本地桩没起来（…EADDRINUSE）：8788 被占」，是 8788 被别的进程（常见是另一个 `ptx dev`）占了，停掉它再重启。
+  8788 被另一个 `ptx dev` 占用时请求可能成功，但邮件和图片会写到那个项目的 `.ptx/`。
   消息里写「wrangler.jsonc 缺 vars.PTX_STUB_ORIGIN」的，是 `scripts/local-gateway/wrangler.jsonc` 被改坏了，补回 `"PTX_STUB_ORIGIN": "http://127.0.0.1:8788"` 或升级 starter。
 - **`ctx.pt.render.chart` 本地 501 `PTX_RENDER_DEPS_MISSING`**：可选依赖 `echarts` / `@resvg/resvg-js` 没装上（少见平台没有 resvg 预编译包）。
   重跑 `npm install`，或 `npm i --save-optional echarts@^5.6.0 @resvg/resvg-js@^2.6.2`。线上渲染在平台侧，不受影响。

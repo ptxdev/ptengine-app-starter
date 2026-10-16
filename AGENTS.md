@@ -329,7 +329,7 @@ Worker 自己不能起定时（见[硬边界 3](#3-后端没有的能力写了�
 
 1. **`manifest.json`**：`scopes` 加 `"jobs:run"`；`backend.jobs` 加一项
    `{ "type": "weekly-report", "route": "POST /jobs/weekly-report", "title": "每周报告", "preview": true }`
-   （声明 `preview: true` 表示该任务类型可预览；预览入口 1b 起提供，预览运行时任务路由里 `ctx.auth.preview === true`）。
+   （声明 `preview: true` 表示该任务类型可预览，预览运行时任务路由里 `ctx.auth.preview === true`）。
    声明了 `backend.jobs` 却没有 `jobs:run`，`npm run doctor` 报 bad。
 2. **`shared/api.ts` + `backend/src/index.ts`**：在 `ApiRoutes` 与 `routes` 里各加**同名键** `'POST /jobs/weekly-report'`
    （不带 `/api`；`routes` 的键必须与 `ApiRoutes` 一一对应，只加一边 tsc 会报错），handler 第一行
@@ -367,7 +367,9 @@ CREATE TABLE IF NOT EXISTS job_runs (run_id TEXT PRIMARY KEY, sid TEXT NOT NULL)
     ctx.requireTrigger('job');
     const markdown = await buildReport(ctx);
     if (ctx.auth.preview) {
-        // 预览：只生成内容并返回；不占位（不写会影响正式运行的状态），不碰外部系统
+        // 预览：只生成内容并返回；不占位（不写会影响正式运行的状态），不碰外部系统。
+        // 这里跳过的是第三方渠道副作用（sendToChannel）；平台推送 ctx.pt.notify.email 在预览里照常调用
+        // （平台拦截、进预览面板），见下面的「预览模式写法」。
         return { archive: { title: '每周报告（预览）', markdown } };
     }
     const runId = ctx.auth.runId!;
@@ -431,23 +433,30 @@ const r = await ctx.pt.notify.email({
 - `ctx.pt.jobs.update / pause / resume / delete` 与资产写（`ctx.pt.asset.ensureFolder / create / update / uploadSource`）在预览里
   一律 403 `PREVIEW_READONLY` —— 用 `if (!ctx.auth.preview)` 包起来。取数、资产读、AI 照常。
 - 你自己的外部副作用（第三方 webhook、写外部系统、D1 幂等占位）在预览里跳过。
-- `ctx.log(msg, fields)` 会显示在面板里，连同取数 / 邮件 / 图表的调用次数：最多 200 条、合计 12 KiB，单条消息截到 2000 字符，
+- `ctx.log(msg, fields)` 会显示在面板里，连同取数 / 邮件 / 图表的调用次数：最多 200 条、编码后（base64url）合计 ≤ 12 KiB（实际日志内容约 9 KiB），单条消息截到 2000 字符，
   `fields` 不能 JSON 序列化或超过 4 KiB 就只留消息。返回流式响应时，只有返回前记的日志进得去。
 
 ```ts
 'POST /jobs/weekly-report': async (ctx) => {
     ctx.requireTrigger('job');
     ctx.log('开始生成', { channel: ctx.body.channel });
+    const runId = ctx.auth.runId!;
+    if (!ctx.auth.preview) {
+        // 幂等占位只在正式运行里写（预览不写会影响正式运行的状态）；放在渲染之前，重复投递不再多耗图表配额
+        const claimed = await ctx.db.prepare('INSERT OR IGNORE INTO job_runs (run_id, sid) VALUES (?, ?)')
+            .bind(runId, ctx.auth.sid).run();
+        if (claimed.meta.changes === 0) return {};                  // 重复投递：什么都不做
+    }
     const data = await ctx.pt.query('traffic_insight', { /* … */ });
     const chart = await ctx.pt.render.chart(buildOption(data), { width: 600, height: 300 });
-    if (!ctx.auth.preview) {
-        // 幂等占位只在正式运行里写（预览不写会影响正式运行的状态）
-        const claimed = await ctx.db.prepare('INSERT OR IGNORE INTO job_runs (run_id, sid) VALUES (?, ?)')
-            .bind(ctx.auth.runId, ctx.auth.sid).run();
-        if (claimed.meta.changes === 0) return {};
+    try {
+        // 预览里照常调用：平台拦截并显示在面板里
+        await ctx.pt.notify.email({ to: ['role:admin'], subject: '每周报告', html: renderHtml(data, chart) });
+    } catch (e) {
+        // 想让重投重做：失败时先删占位再抛错（预览没占位，不用删）
+        if (!ctx.auth.preview) await ctx.db.prepare('DELETE FROM job_runs WHERE run_id = ?').bind(runId).run();
+        throw e;
     }
-    // 预览里照常调用：平台拦截并显示在面板里
-    await ctx.pt.notify.email({ to: ['role:admin'], subject: '每周报告', html: renderHtml(data, chart) });
     ctx.log('完成');
     return { archive: { title: '每周报告', markdown: renderMarkdown(data) } };
 }
