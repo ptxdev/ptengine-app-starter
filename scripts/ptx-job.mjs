@@ -11,13 +11,17 @@
  * 所以本地 worker 的 app-backend 用 backend/.dev.vars 里的 JWKS 能验过。
  * scopes 取 devTokenScopes(manifest)（照抄 manifest.scopes）：线上任务 token 的 scopes = manifest ∩ 同意，
  * 本地按「全部同意」处理，与 ptx dev 的交互 token 同一口径（没声明的 scope 本地同样拿不到）。
+ *
+ * --preview 时另打印应用响应头（名字取 rules.json 的 jobLog.headerName）的解码内容（ctx.log 与取数 / 邮件 / 图表次数）
+ * —— 按平台 parseRunLogHeader 同口径校验，不合规时说明线上会被丢弃的原因 —— 以及本地桩写下的邮件预览页地址。
  */
 import { createPrivateKey, randomUUID, sign as nodeSign } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { devTokenScopes } from './dev-keys.mjs';
 import { classifyJobResponse } from './job-result.mjs';
-import { readManifest } from './manifest.mjs';
+import { LOCAL_STUB_PORT } from './local-stub/server.mjs';
+import { readManifest, RULES } from './manifest.mjs';
 
 /** = 平台 JOB_TOKEN_TTL_SEC（JOB_RUN_BUDGET_SEC + 60）。 */
 export const LOCAL_JOB_TOKEN_TTL_SEC = 360;
@@ -94,6 +98,67 @@ export function formatVerdict(v) {
     }
 }
 
+function jobLogRules(rules) {
+    const keys = ['headerName', 'headerMaxBytes', 'maxEntries', 'entryMessageMax', 'entryFieldsMaxBytes'];
+    if (!rules || keys.some(k => rules[k] === undefined)) {
+        throw new Error('scripts/rules.json 里没有完整的 jobLog 段（规则快照过旧）。维护者请跑 npm run sync-rules。');
+    }
+    return rules;
+}
+
+const B64URL = /^[A-Za-z0-9_-]+$/;
+const isCount = v => typeof v === 'number' && Number.isInteger(v) && v >= 0;
+const isPlainObject = v => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/**
+ * 解 app-backend 的预览日志头（base64url(UTF-8 JSON)，brief §7.7 / 修订 1 第 5 条）。
+ * 判定**逐条照**平台 contract 的 parseRunLogHeader（本仓是公开仓、装不了 contract 包；判定顺序、解码方式都照抄），
+ * 所有上限读 rules.jobLog —— 本地解得开、线上却被平台当 job-log-invalid 丢掉的情况，在这里就能看到原因。
+ * 返回 { log, reason: null }（log 为解出的原对象）或 { log: null, reason }（reason 指出第一个不合规点）。
+ */
+export function decodeJobLogHeader(value, rules = RULES.jobLog) {
+    const j = jobLogRules(rules);
+    const no = reason => ({ log: null, reason });
+    if (typeof value !== 'string' || value.length === 0) return no('不是 base64url 字符串（空）');
+    // 平台按 raw.length 比；合法头只含 base64url 字符（ASCII），长度即字节数。
+    if (value.length > j.headerMaxBytes) return no(`超过 ${j.headerMaxBytes} 字节`);
+    if (!B64URL.test(value)) return no('不是 base64url 字符串');
+    let o;
+    try {
+        // 与平台同法：补齐 padding 后 atob（长度 %4 === 1 会抛），再严格 UTF-8 解码。
+        const b64 = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (value.length % 4)) % 4);
+        const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+        o = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    } catch {
+        return no('解不开（不是 base64url 编码的 UTF-8 JSON）');
+    }
+    if (!isPlainObject(o) || o.v !== 1) return no('v 不是 1（或整体不是对象）');
+    if (typeof o.truncated !== 'boolean') return no('truncated 不是布尔值');
+    if (!Array.isArray(o.entries)) return no('entries 不是数组');
+    if (o.entries.length > j.maxEntries) return no(`entries 超过 ${j.maxEntries} 条`);
+    const s = o.stats;
+    if (!isPlainObject(s) || !isCount(s.query) || !isCount(s.notifyEmail) || !isCount(s.renderChart)) {
+        return no('stats 不是三个非负整数（query / notifyEmail / renderChart）');
+    }
+    for (const [i, e] of o.entries.entries()) {
+        if (!isPlainObject(e) || typeof e.t !== 'number' || !Number.isFinite(e.t) || e.t < 0) return no(`第 ${i + 1} 条的 t 不是非负数`);
+        if (typeof e.m !== 'string' || e.m.length > j.entryMessageMax) return no(`第 ${i + 1} 条的 m 不是 ≤ ${j.entryMessageMax} 的字符串`);
+        if (e.f !== undefined && (!isPlainObject(e.f) || Buffer.byteLength(JSON.stringify(e.f)) > j.entryFieldsMaxBytes)) {
+            return no(`第 ${i + 1} 条的 f 不是 ≤ ${j.entryFieldsMaxBytes} 字节的对象`);
+        }
+    }
+    return { log: o, reason: null };
+}
+
+export function formatJobLog(log) {
+    const s = log.stats ?? {};
+    const lines = [`  预览日志（${jobLogRules(RULES.jobLog).headerName}）：取数 ${s.query ?? 0} 次 · 邮件 ${s.notifyEmail ?? 0} 次 · 图表 ${s.renderChart ?? 0} 次` +
+        `${log.truncated ? ' · 已截断（线上同样只保留前面能放进上限的部分）' : ''}`];
+    if (log.entries.length === 0) lines.push('    （没有 ctx.log）');
+    for (const e of log.entries) lines.push(`    +${e.t}ms  ${e.m}${e.f ? ` ${JSON.stringify(e.f)}` : ''}`);
+    return lines.join('\n');
+}
+
 function pretty(text) {
     try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return text; }
 }
@@ -133,5 +198,21 @@ export async function run(args, root) {
     console.log(`  状态码：${res.status}`);
     console.log(`  响应体：\n${pretty(text)}`);
     console.log(`  结果：${formatVerdict(classifyJobResponse({ status: res.status, contentType: res.headers.get('content-type'), text }))}\n`);
+    const headerName = jobLogRules(RULES.jobLog).headerName;
+    const rawLog = res.headers.get(headerName);
+    if (preview) {
+        if (rawLog) {
+            const { log, reason } = decodeJobLogHeader(rawLog);
+            console.log(log ? formatJobLog(log) : `  [!] 预览日志 ${headerName} 不合平台口径（${reason}）—— 线上会被平台丢弃，预览面板里看不到日志`);
+        } else {
+            console.log(`  预览日志：响应里没有 ${headerName}（@ptengine/app-backend 版本不含预览日志，或这条路由没经 createApp 返回）`);
+        }
+        console.log(existsSync(join(root, '.ptx', 'outbox', runId))
+            ? `  本地邮件预览：http://localhost:${LOCAL_STUB_PORT}/__ptx/outbox/${runId}`
+            : '  这次运行没有调用 ctx.pt.notify.email。');
+        console.log('');
+    } else if (rawLog) {
+        console.log(`  [!] 非预览运行的响应带了 ${headerName}：@ptengine/app-backend 不该这样，请升级或报告。\n`);
+    }
     if (res.status < 200 || res.status >= 300) process.exitCode = 1;
 }

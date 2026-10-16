@@ -9,7 +9,8 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateDevKeys } from './dev-keys.mjs';
-import { buildJobClaims, findJobRoute, formatVerdict, parseJobArgs, run, signDevToken, LOCAL_JOB_TOKEN_TTL_SEC } from './ptx-job.mjs';
+import { buildJobClaims, decodeJobLogHeader, findJobRoute, formatJobLog, formatVerdict, parseJobArgs, run, signDevToken, LOCAL_JOB_TOKEN_TTL_SEC } from './ptx-job.mjs';
+import { RULES } from './manifest.mjs';
 
 const MANIFEST = {
     schemaVersion: 2, version: '1.0.0', entry: 'index.html', scopes: ['analytics:read', 'jobs:run'],
@@ -222,4 +223,134 @@ test('run：未知 type / 无 backend.jobs 时在发请求前报错', async () =
     await assert.rejects(run(['run', 'nope'], project()), /"nope"/);
     const { jobs, ...backend } = MANIFEST.backend;
     await assert.rejects(run(['run', 'weekly-report'], project({ manifest: { ...MANIFEST, backend } })), /backend\.jobs/);
+});
+
+const b64 = o => Buffer.from(JSON.stringify(o)).toString('base64url');
+const LOG = { v: 1, entries: [{ t: 3, m: '开始', f: { step: 1 } }, { t: 120, m: '结束' }], truncated: false, stats: { query: 2, notifyEmail: 1, renderChart: 1 } };
+const J = RULES.jobLog;
+/** @ptengine/app-backend（src/job-log.ts）真实产出的头，与平台 contract 测试的 APP_BACKEND_SAMPLE 逐字相同：
+ *  含日文 / 中文、一条被截到 1 999 + '…' 的 m、一条因 f 过大被丢掉 f 的条目。 */
+const APP_BACKEND_SAMPLE = 'eyJ2IjoxLCJlbnRyaWVzIjpbeyJ0Ijo3LCJtIjoi5byA5aeL5Y-W5pWwIiwiZiI6eyJyb3dzIjoyLCJzaXRlIjoiYWJjIn19LHsidCI6MTQsIm0iOiLjg6zjg53jg7zjg4jpgIHkv6EgZG9uZSJ9LHsidCI6MjEsIm0iOiJ5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl54oCmIn0seyJ0IjoyOCwibSI6ImJpZyBmIGRyb3BwZWQifV0sInRydW5jYXRlZCI6ZmFsc2UsInN0YXRzIjp7InF1ZXJ5IjoyLCJub3RpZnlFbWFpbCI6MSwicmVuZGVyQ2hhcnQiOjB9fQ';
+
+test('decodeJobLogHeader：合法 → { log, reason: null }', () => {
+    assert.deepEqual(decodeJobLogHeader(b64(LOG)), { log: LOG, reason: null });
+});
+
+test('decodeJobLogHeader：接受 app-backend 真实产出的头（与平台 parseRunLogHeader 同一样例）', () => {
+    const { log, reason } = decodeJobLogHeader(APP_BACKEND_SAMPLE);
+    assert.equal(reason, null);
+    assert.deepEqual(log, {
+        v: 1,
+        entries: [
+            { t: 7, m: '开始取数', f: { rows: 2, site: 'abc' } },
+            { t: 14, m: 'レポート送信 done' },
+            { t: 21, m: `${'y'.repeat(1999)}…` },
+            { t: 28, m: 'big f dropped' }
+        ],
+        truncated: false,
+        stats: { query: 2, notifyEmail: 1, renderChart: 0 }
+    });
+    assert.match(formatJobLog(log), /取数 2 次 · 邮件 1 次 · 图表 0 次/);
+});
+
+// 合法日志的 base64url（JSON 长度凑成 3 的倍数 → 编码长度 %4 === 0）再多一个字符。
+const lenMod4Is1 = (() => {
+    let pad = '';
+    while (Buffer.byteLength(JSON.stringify({ ...LOG, pad })) % 3 !== 0) pad += 'p';
+    return `${b64({ ...LOG, pad })}A`;
+})();
+
+test('decodeJobLogHeader：与平台 parseRunLogHeader 同口径地拒绝，并给出原因（上限全部读 rules.jobLog）', () => {
+    const bad = [
+        ['%%%', /base64url/],
+        ['', /base64url/],
+        ['A'.repeat(J.headerMaxBytes + 1), /字节/],
+        [lenMod4Is1, /解不开/],                                 // 长度 %4 === 1：Buffer 会宽松地解出合法日志，平台的 atob 会抛
+        [Buffer.from([0xff, 0xfe]).toString('base64url'), /解不开/],
+        [b64([1]), /v/],
+        [b64({ ...LOG, v: 2 }), /v/],
+        [b64({ ...LOG, truncated: 'no' }), /truncated/],
+        [b64({ ...LOG, entries: {} }), /entries/],
+        [b64({ ...LOG, stats: { query: -1, notifyEmail: 0, renderChart: 0 } }), /stats/],
+        [b64({ ...LOG, stats: { query: 1.5, notifyEmail: 0, renderChart: 0 } }), /stats/],
+        [b64({ ...LOG, entries: Array.from({ length: J.maxEntries + 1 }, () => ({ t: 0, m: 'x' })) }), /条/],
+        [b64({ ...LOG, entries: [{ t: -1, m: 'x' }] }), /t/],
+        [b64({ ...LOG, entries: [{ t: '1', m: 'x' }] }), /t/],
+        [b64({ ...LOG, entries: [{ t: 0 }] }), /m/],
+        [b64({ ...LOG, entries: [{ t: 0, m: 'x'.repeat(J.entryMessageMax + 1) }] }), /m/],
+        [b64({ ...LOG, entries: [{ t: 0, m: 'x', f: { pad: 'y'.repeat(J.entryFieldsMaxBytes) } }] }), /f/],
+        [b64({ ...LOG, entries: [{ t: 0, m: 'x', f: [1] }] }), /f/],
+        [b64({ ...LOG, entries: [{ t: 0, m: 'x', f: null }] }), /f/]
+    ];
+    for (const [raw, why] of bad) {
+        const r = decodeJobLogHeader(raw);
+        assert.equal(r.log, null, String(raw).slice(0, 30));
+        assert.match(r.reason, why, String(raw).slice(0, 30));
+    }
+    // 恰好在上限内的条目通过
+    assert.equal(decodeJobLogHeader(b64({ ...LOG, entries: [{ t: 0, m: 'x'.repeat(J.entryMessageMax) }] })).reason, null);
+    assert.equal(decodeJobLogHeader(b64({ ...LOG, entries: Array.from({ length: J.maxEntries }, () => ({ t: 0, m: 'x' })) })).reason, null);
+});
+
+test('decodeJobLogHeader：上限读传入的 rules（换一组规则行为跟着变）；rules 缺键 → 抛「npm run sync-rules」', () => {
+    assert.match(decodeJobLogHeader(b64(LOG), { ...J, maxEntries: 1 }).reason, /条/);
+    assert.throws(() => decodeJobLogHeader(b64(LOG), { headerName: J.headerName }), /npm run sync-rules/);
+    assert.throws(() => decodeJobLogHeader(b64(LOG), null), /npm run sync-rules/);
+});
+
+test('formatJobLog：首行三项计数，逐行 +<t>ms 消息 字段；截断与空日志有提示', () => {
+    const s = formatJobLog(LOG);
+    assert.match(s, /取数 2 次 · 邮件 1 次 · 图表 1 次/);
+    assert.match(s, /\+3ms\s+开始 \{"step":1\}/);
+    assert.match(s, /\+120ms\s+结束$/m);
+    assert.match(formatJobLog({ ...LOG, truncated: true }), /已截断/);
+    assert.match(formatJobLog({ ...LOG, entries: [] }), /没有 ctx\.log/);
+});
+
+test('run --preview：打印解码后的预览日志与本地邮件预览地址（.ptx/outbox/<runId> 存在时）', async () => {
+    const root = project();
+    const out = await captureLogs(() => withServer((req, res) => {
+        const claims = JSON.parse(Buffer.from(req.headers.authorization.split('.')[1], 'base64url'));
+        mkdirSync(join(root, '.ptx', 'outbox', claims.run), { recursive: true });       // 模拟本地桩写下的邮件
+        req.resume();
+        req.on('end', () => {
+            res.writeHead(200, { 'content-type': 'application/json', [J.headerName]: b64(LOG) });
+            res.end('{}');
+        });
+    }, () => run(['run', 'weekly-report', '--preview'], root)));
+    assert.match(out, /预览日志（x-pt-job-log）：取数 2 次/);
+    assert.match(out, /\+3ms\s+开始/);
+    assert.match(out, /本地邮件预览：http:\/\/localhost:8788\/__ptx\/outbox\/[0-9a-f-]{36}/);
+});
+
+test('run --preview：头不合平台口径 → 打印原因与「线上会被平台丢弃」', async () => {
+    const root = project();
+    const out = await captureLogs(() => withServer((req, res) => {
+        req.resume();
+        req.on('end', () => {
+            res.writeHead(200, { 'content-type': 'application/json', [J.headerName]: b64({ ...LOG, entries: [{ t: 0, m: 'x'.repeat(J.entryMessageMax + 1) }] }) });
+            res.end('{}');
+        });
+    }, () => run(['run', 'weekly-report', '--preview'], root)));
+    assert.match(out, /线上会被平台丢弃/);
+    assert.match(out, /第 1 条的 m/);
+});
+
+test('run --preview 但响应没有头 → 提示 app-backend 版本；没调 notify.email → 明说', async () => {
+    const root = project();
+    const out = await captureLogs(() => withServer((req, res) => {
+        req.resume();
+        req.on('end', () => { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{}'); });
+    }, () => run(['run', 'weekly-report', '--preview'], root)));
+    assert.match(out, /响应里没有 x-pt-job-log/);
+    assert.match(out, /没有调用 ctx\.pt\.notify\.email/);
+});
+
+test('非预览运行的响应带了头 → 警告（app-backend 不该这样）', async () => {
+    const root = project();
+    const out = await captureLogs(() => withServer((req, res) => {
+        req.resume();
+        req.on('end', () => { res.writeHead(200, { 'content-type': 'application/json', [J.headerName]: b64(LOG) }); res.end('{}'); });
+    }, () => run(['run', 'weekly-report'], root)));
+    assert.match(out, /非预览运行的响应带了 x-pt-job-log/);
 });
