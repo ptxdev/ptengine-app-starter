@@ -126,7 +126,8 @@
             "owner",
             "admin",
             "member"
-        ]
+        ],
+        "maxConcurrentPerApp": 2
     },
     "render": {
         "optionMaxBytes": 524288,
@@ -190,7 +191,9 @@
             "feDropShadow",
             "title",
             "desc"
-        ]
+        ],
+        "maxConcurrentPerApp": 2,
+        "timeoutMs": 5000
     },
     "jobLog": {
         "headerName": "x-pt-job-log",

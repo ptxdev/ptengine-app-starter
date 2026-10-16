@@ -195,3 +195,25 @@ test('并发闸：rules.json 缺 maxConcurrentPerApp → 不模拟闸（不写�
         for (const r of await Promise.all([a, b, c])) assert.equal(r.status, 200);
     });
 });
+
+test('并发闸：真实 rules.json 快照（platform 2da3983 导出）已带 notify / render 的 maxConcurrentPerApp 与 render.timeoutMs，默认即生效、不打缺键提示', async () => {
+    for (const k of ['notify', 'render']) {
+        assert.ok(Number.isInteger(STUB_RULES[k].maxConcurrentPerApp) && STUB_RULES[k].maxConcurrentPerApp > 0, `${k}.maxConcurrentPerApp`);
+    }
+    assert.ok(Number.isInteger(STUB_RULES.render.timeoutMs) && STUB_RULES.render.timeoutMs > 0, 'render.timeoutMs');
+    let release;
+    const gate = new Promise(r => { release = r; });
+    const slowRenderer = async () => { await gate; return fakeRenderer(); };
+    const max = STUB_RULES.render.maxConcurrentPerApp;
+    await withGatedStub(STUB_RULES, slowRenderer, async ({ base, logs }) => {
+        assert.equal(logs.filter(l => l.includes('maxConcurrentPerApp')).length, 0);
+        const held = Array.from({ length: max }, () => post(base, '/render/chart', PREVIEW, { option: { series: [] } }));
+        await new Promise(r => setTimeout(r, 50));
+        const over = await Promise.race([post(base, '/render/chart', PREVIEW, { option: { series: [] } }), new Promise(r => setTimeout(() => r(null), 2000))]);
+        release();
+        assert.ok(over, `第 ${max + 1} 个渲染应被闸立即拒绝`);
+        assert.equal(over.status, 429);
+        assert.equal((await over.json()).error.code, 'TOO_MANY_CONCURRENT_QUERIES');
+        for (const r of await Promise.all(held)) assert.equal(r.status, 200);
+    });
+});
