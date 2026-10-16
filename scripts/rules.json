@@ -16,7 +16,8 @@
             "static",
             "cdn",
             "mail",
-            "ptengine"
+            "ptengine",
+            "media"
         ],
         "reservedPrefix": "pt-"
     },
@@ -61,7 +62,8 @@
         "asset:write",
         "ai:invoke",
         "asset:read",
-        "jobs:run"
+        "jobs:run",
+        "notify:send"
     ],
     "aiModels": [
         "anthropic/claude-opus-5-5",
@@ -104,5 +106,57 @@
         ],
         "titleMax": 200,
         "fileNameMax": 120
+    },
+    "notify": {
+        "maxRefsPerCall": 50,
+        "maxRecipientsPerRun": 50,
+        "maxCallsPerRun": 20,
+        "subjectMax": 200,
+        "htmlMaxBytes": 262144,
+        "textMaxBytes": 65536,
+        "locales": [
+            "zh-CN",
+            "en-US",
+            "ja-JP"
+        ],
+        "defaultLocale": "ja-JP",
+        "refPattern": "^(user:[A-Za-z0-9_-]{1,64}|role:(owner|admin|member))$",
+        "replyToPattern": "^user:[A-Za-z0-9_-]{1,64}$",
+        "roles": [
+            "owner",
+            "admin",
+            "member"
+        ]
+    },
+    "render": {
+        "optionMaxBytes": 524288,
+        "minDimension": 100,
+        "maxDimension": 2000,
+        "defaultWidth": 800,
+        "defaultHeight": 400,
+        "themes": [
+            "light",
+            "dark"
+        ],
+        "maxPerRun": 20,
+        "maxDepth": 32,
+        "forbiddenKeys": [
+            "image"
+        ],
+        "forbiddenStringPrefixes": [
+            "image://"
+        ],
+        "droppedTopLevelKeys": [
+            "toolbox",
+            "brush",
+            "timeline"
+        ]
+    },
+    "jobLog": {
+        "headerName": "x-pt-job-log",
+        "headerMaxBytes": 12288,
+        "maxEntries": 200,
+        "entryMessageMax": 2000,
+        "entryFieldsMaxBytes": 4096
     }
 }
