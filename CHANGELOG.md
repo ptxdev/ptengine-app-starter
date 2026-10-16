@@ -54,6 +54,7 @@
 - **`ptx doctor`**：后端用了 `ctx.pt.notify` / `ctx.pt.render.chart` 却没声明 `notify:send` → bad。
 - 规则快照同步：`validScopes` 加 `notify:send`，新增 `notify` / `render` / `jobLog` 段。
 - 规则快照同步：`notify` / `render` 段新增 `maxConcurrentPerApp`（各 2），`render` 段新增 `timeoutMs`（5000）；本地桩的每应用并发闸默认生效。
+- 本地图表桩：单次渲染耗时超过 `render.timeoutMs` 时终端警告（线上可能 504 `RENDER_TIMEOUT`），不拒绝；旧快照缺该键时不判。
 - 本地图表桩与平台同口径：`render` 段新增的资源上限（节点 / 数组 / 字符串）、非 JSON / 循环 / 原型键拒绝、字符规则
   （字符串禁 `"` `<` `>` 控制字符与 `&#`，颜色 / 字体字段禁 `;`）全部读规则快照；渲染出的 SVG 先过与平台同一份允许名单闸
   （`svgAllowedElements`，外部 `href` / `url(` / 带前缀元素一律拒）再交给 resvg。

@@ -113,6 +113,22 @@ test('handleRenderChart：本 run 超过 maxPerRun → 409 NOTIFY_RUN_LIMIT_EXCE
     assert.equal((await handleRenderChart(s, { claims: {}, body: { option: OPTION }, rules, loadRenderer: fakeRenderer() })).status, 200);
 });
 
+test('handleRenderChart：本地渲染耗时超过 rules.render.timeoutMs → 照常 200，但带 warning（线上可能 RENDER_TIMEOUT）；未超 / 快照缺键不警告', async () => {
+    const clock = steps => { let i = 0; return () => steps[Math.min(i++, steps.length - 1)]; };
+    const t = RULES.render.timeoutMs;
+    assert.ok(Number.isInteger(t) && t > 0, 'rules.render.timeoutMs 来自快照');
+    const slow = await handleRenderChart(createStubState(), { claims: {}, body: { option: OPTION }, loadRenderer: fakeRenderer(), now: clock([0, t + 1]) });
+    assert.equal(slow.status, 200);
+    assert.match(slow.warning, new RegExp(`${t}`));
+    assert.match(slow.warning, /RENDER_TIMEOUT/);
+    const fast = await handleRenderChart(createStubState(), { claims: {}, body: { option: OPTION }, loadRenderer: fakeRenderer(), now: clock([0, t]) });
+    assert.equal(fast.warning, undefined);
+    const { timeoutMs, ...noTimeout } = RULES.render;
+    const old = await handleRenderChart(createStubState(), { claims: {}, body: { option: OPTION }, rules: noTimeout, loadRenderer: fakeRenderer(), now: clock([0, 1e9]) });
+    assert.equal(old.status, 200);
+    assert.equal(old.warning, undefined);
+});
+
 test('handleRenderChart：可选依赖没装上 → 501 PTX_RENDER_DEPS_MISSING，提示怎么装', async () => {
     const missing = async () => { const e = new Error('本地渲染需要 echarts 与 @resvg/resvg-js：npm i --save-optional echarts@^5.6.0 @resvg/resvg-js@^2.6.2'); e.code = 'PTX_RENDER_DEPS_MISSING'; throw e; };
     const r = await handleRenderChart(createStubState(), { claims: {}, body: { option: OPTION }, loadRenderer: missing });

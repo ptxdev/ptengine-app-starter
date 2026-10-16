@@ -175,7 +175,12 @@ export function renderPng({ echarts, Resvg }, { option, width, height, theme }, 
     }
 }
 
-export async function handleRenderChart(state, { claims, body, rules = RULES.render, loadRenderer = loadEchartsRenderer }) {
+/**
+ * 线上一次渲染超过 `rules.render.timeoutMs` 会 504 `RENDER_TIMEOUT`。本地 resvg 是同步调用、没法中途掐断，
+ * 也不想因为本机快慢不同而拒掉能出图的请求，所以**只警告不拒绝**：超了在结果上挂 `warning`，由桩服务打到终端。
+ * 快照里没有 `timeoutMs`（旧快照）时不判，不写字面量兜底。
+ */
+export async function handleRenderChart(state, { claims, body, rules = RULES.render, loadRenderer = loadEchartsRenderer, now = Date.now }) {
     const checked = checkChartInput(body, rules);
     if (!checked.ok) return checked;
     const r = renderRules(rules);
@@ -192,7 +197,15 @@ export async function handleRenderChart(state, { claims, body, rules = RULES.ren
         return err(501, 'PTX_RENDER_DEPS_MISSING', String(e?.message ?? e));
     }
     try {
-        return { status: 200, png: renderPng(renderer, checked, r), width: checked.width, height: checked.height };
+        const started = now();
+        const png = renderPng(renderer, checked, r);
+        const ms = now() - started;
+        const out = { status: 200, png, width: checked.width, height: checked.height };
+        if (Number.isInteger(r.timeoutMs) && ms > r.timeoutMs) {
+            out.warning = `本地渲染用了 ${ms} ms，超过平台单次渲染上限 ${r.timeoutMs} ms：线上这张图可能 504 RENDER_TIMEOUT` +
+                '（本地机器快慢与平台不同，仅供参考）。可减少数据点 / 系列或缩小宽高。';
+        }
+        return out;
     } catch (e) {
         return err(500, 'PTX_RENDER_FAILED', `本地渲染失败：${e?.message ?? e}`);
     }

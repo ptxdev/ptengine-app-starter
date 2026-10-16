@@ -187,6 +187,7 @@ export function createLocalStub({ root, appName = 'local-dev', loadRenderer, log
 
                 const r = await handleRenderChart(state, { claims, body, ...(loadRenderer ? { loadRenderer } : {}) });
                 if (r.png) {
+                    if (r.warning) log(`[ptx] [!] ${r.warning}`);
                     const hex = randomBytes(16).toString('hex');
                     if (!HEX32_RE.test(hex)) throw new Error('媒体文件名生成异常');
                     mkdirSync(insidePtx(ptxDir, 'media'), { recursive: true });
