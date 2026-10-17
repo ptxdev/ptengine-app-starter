@@ -374,3 +374,19 @@ test('*.d.ts 里的类型声明不算（最终评审 Minor 13）', () => {
     });
     assert.deepEqual(checkNotifyScope(root, mf([JOB])), []);
 });
+
+test('1c：用了 ctx.pt.notify.channel / listChannels 却没声明 notify:send → bad，话术点名 notify.channel；声明了 → ok', () => {
+    for (const src of [
+        "await ctx.pt.notify.channel('alerts', { title: 't' });",
+        'const list = await ctx.pt.notify.listChannels();',
+        'const { notify } = ctx.pt;\nawait notify.channel(name, msg);',
+        "export default createApp({ routes: { 'GET /channels': async ({ pt }) => pt.notify.listChannels() } });"
+    ]) {
+        const out = checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]));
+        assert.equal(out.length, 1, src);
+        assert.equal(out[0].level, 'bad', src);
+        assert.match(out[0].msg, /notify\.channel/, src);
+        assert.match(out[0].why, /渠道/, src);
+        assert.deepEqual(checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB], ['jobs:run', 'notify:send'])).map(r => r.level), ['ok'], src);
+    }
+});

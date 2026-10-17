@@ -646,7 +646,7 @@ const NOTIFY_USE_RES = [
 ];
 
 /**
- * 用了 `ctx.pt.notify.*` / `ctx.pt.render.*` 就必须声明 `notify:send`（定时任务 1b，brief §13.3）。
+ * 用了 `ctx.pt.notify.*`（email / channel / listChannels）/ `ctx.pt.render.*` 就必须声明 `notify:send`（定时任务 1b §13.3、1c §8.4）。
  * 不声明：平台不把这个 scope 放进令牌 → 线上恒 403 SCOPE_DENIED；而本地令牌照抄 manifest，同样 403，
  * 但报错落在运行时某一次发信上，不如在 doctor 里一次说清楚。注释与字符串里出现的不算（模板插值里的算），
  * `*.test.*` / `*.spec.*` 与 `*.d.ts` 不扫；识别范围见 NOTIFY_USE_RES。
@@ -662,12 +662,12 @@ export function checkNotifyScope(root, manifest) {
     if (!(manifest.scopes ?? []).includes('notify:send')) {
         return [{
             level: 'bad',
-            msg: `后端用了 ctx.pt.notify / ctx.pt.render.chart（${hits.join('、')}），但 manifest.scopes 里没有 notify:send`,
+            msg: `后端用了 ctx.pt.notify.email / notify.channel / notify.listChannels / render.chart（${hits.join('、')}），但 manifest.scopes 里没有 notify:send`,
             why: '把 "notify:send" 加进 manifest.json 的 scopes 并重新发布，再由工作区管理员同意授权（写类 scope，没有自建应用豁免）。' +
-                 '不声明的话发信与渲染一律 403 SCOPE_DENIED。'
+                 '不声明的话发信、渠道消息、列渠道与渲染一律 403 SCOPE_DENIED。'
         }];
     }
-    return [{ level: 'ok', msg: `ctx.pt.notify / render.chart 已声明 notify:send（${hits.join('、')}）` }];
+    return [{ level: 'ok', msg: `ctx.pt.notify.* / render.chart 已声明 notify:send（${hits.join('、')}）` }];
 }
 
 /**
