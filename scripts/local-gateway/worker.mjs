@@ -2,7 +2,7 @@
  * ptx dev 的本地「数据网关」桩。backend/wrangler.jsonc 把 PT_GATEWAY 绑到这个 worker（ptx-local-gateway），
  * 与业务 worker 在同一个 `wrangler dev` 会话里跑（多 -c 配置）。
  *
- * 只实现 /jobs（ctx.pt.jobs.*，内存存储，重启即清空）与 /notify/email、/render/chart（原样转给 ptx dev 进程里的
+ * 只实现 /jobs（ctx.pt.jobs.*，内存存储，重启即清空）与 /notify/email、/notify/channel、/notify/channels、/render/chart（原样转给 ptx dev 进程里的
  * Node 桩服务 scripts/local-stub/server.mjs —— workerd 里写不了文件、跑不了 resvg）；其余路径回 501 PT_GATEWAY_NOT_BOUND ——
  * 与「没有网关 binding」时 ctx.pt.query / ctx.pt.asset 在本地得到的码一致。
  */
@@ -12,8 +12,8 @@ const STUB_JOBS_PATH = '/jobs';
 const store = createJobsStore();
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8' } });
 
-/** 转给 ptx dev 进程里的 Node 桩服务（scripts/local-stub/server.mjs）的两条路径。 */
-const STUB_FORWARD = new Set(['/notify/email', '/render/chart']);
+/** 转给 ptx dev 进程里的 Node 桩服务（scripts/local-stub/server.mjs）的路径（与线上网关同名，定时任务 1b / 1c）。 */
+const STUB_FORWARD = new Set(['/notify/email', '/notify/channel', '/notify/channels', '/render/chart']);
 
 export default {
     async fetch(request, env) {
@@ -60,7 +60,7 @@ export default {
         }
         return json(501, { error: {
             code: 'PT_GATEWAY_NOT_BOUND',
-            message: '本地没有数据网关（ptx dev 只为 ctx.pt.jobs.* / notify.email / render.chart 提供本地桩）。取数、资产读写与 AI 调用请在平台部署后联调。'
+            message: '本地没有数据网关（ptx dev 只为 ctx.pt.jobs.* / notify.email / notify.channel / notify.listChannels / render.chart 提供本地桩）。取数、资产读写与 AI 调用请在平台部署后联调。'
         } });
     }
 };
