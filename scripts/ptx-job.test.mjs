@@ -320,7 +320,7 @@ test('run --preview：打印解码后的预览日志与本地邮件预览地址�
     }, () => run(['run', 'weekly-report', '--preview'], root)));
     assert.match(out, /预览日志（x-pt-job-log）：取数 2 次/);
     assert.match(out, /\+3ms\s+开始/);
-    assert.match(out, /本地邮件预览：http:\/\/localhost:8788\/__ptx\/outbox\/[0-9a-f-]{36}/);
+    assert.match(out, /本地推送预览（邮件 \/ 渠道消息）：http:\/\/localhost:8788\/__ptx\/outbox\/[0-9a-f-]{36}/);
 });
 
 test('run --preview：头不合平台口径 → 打印原因与「线上会被平台丢弃」', async () => {
@@ -344,6 +344,7 @@ test('run --preview 但响应没有头 → 提示 app-backend 版本；没调 no
     }, () => run(['run', 'weekly-report', '--preview'], root)));
     assert.match(out, /响应里没有 x-pt-job-log/);
     assert.match(out, /没有调用 ctx\.pt\.notify\.email/);
+    assert.match(out, /notify\.channel/);
 });
 
 test('非预览运行的响应带了头 → 警告（app-backend 不该这样）', async () => {
@@ -353,4 +354,20 @@ test('非预览运行的响应带了头 → 警告（app-backend 不该这样）
         req.on('end', () => { res.writeHead(200, { 'content-type': 'application/json', [J.headerName]: b64(LOG) }); res.end('{}'); });
     }, () => run(['run', 'weekly-report'], root)));
     assert.match(out, /非预览运行的响应带了 x-pt-job-log/);
+});
+
+test('decodeJobLogHeader：1c 的可选 stats.notifyChannel —— 缺省照收，非负整数照收，出现但不合规整头作废（与平台同口径）', () => {
+    assert.equal(decodeJobLogHeader(b64(LOG)).reason, null);
+    assert.equal(decodeJobLogHeader(b64({ ...LOG, stats: { ...LOG.stats, notifyChannel: 3 } })).reason, null);
+    assert.equal(decodeJobLogHeader(b64({ ...LOG, stats: { ...LOG.stats, notifyChannel: 0 } })).reason, null);
+    for (const bad of [-1, 1.5, '2', null, true]) {
+        const r = decodeJobLogHeader(b64({ ...LOG, stats: { ...LOG.stats, notifyChannel: bad } }));
+        assert.equal(r.log, null, String(bad));
+        assert.match(r.reason, /notifyChannel/, String(bad));
+    }
+});
+
+test('formatJobLog：首行末尾追加「渠道 n 次」（缺省按 0），不打乱前三项的顺序', () => {
+    assert.match(formatJobLog({ ...LOG, stats: { ...LOG.stats, notifyChannel: 4 } }), /取数 2 次 · 邮件 1 次 · 图表 1 次 · 渠道 4 次/);
+    assert.match(formatJobLog(LOG), /图表 1 次 · 渠道 0 次/);
 });
