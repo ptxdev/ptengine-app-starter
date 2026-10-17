@@ -20,7 +20,10 @@ import { join } from 'node:path';
 import { RULES } from '../manifest.mjs';
 import { LOCAL_MEDIA_SRC, jobRunOf, runCounters } from './notify.mjs';
 
-/** 本模块读到的 notifyChannel 规则键；缺任何一个都视为快照过旧。 */
+/**
+ * 本地渠道桩用到的 notifyChannel 规则键；缺任何一个都视为快照过旧。
+ * maxConcurrentPerApp / maxBodyBytes 本模块不读，是 server.mjs（Task C3：并发闸、413 体积上限）经 channelRules 校验后用的，不是死键。
+ */
 const REQUIRED_CHANNEL_KEYS = ['types', 'namePattern', 'titleMax', 'textMax', 'linkLabelMax', 'linkPathMax', 'linkPathPattern',
     'maxPerRun', 'mediaPathPattern', 'maxConcurrentPerApp', 'maxBodyBytes'];
 
@@ -41,7 +44,17 @@ export const LINK_PATH_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const codePoints = s => [...s].length;
 const err = (status, code, message) => ({ status, body: { error: { code, message } } });
-const invalid = message => ({ error: err(400, 'NOTIFY_CHANNEL_MESSAGE_INVALID', message) });
+/** 400 NOTIFY_CHANNEL_MESSAGE_INVALID；field 与平台 details.field 同名（channel / message / message.title / … / message.link.path）。 */
+const invalid = (field, message) => {
+    const e = err(400, 'NOTIFY_CHANNEL_MESSAGE_INVALID', message);
+    if (field) e.body.error.details = { field };
+    return { error: e };
+};
+/**
+ * https 图片地址按**原串**拆出路径（不经 new URL 规范化，与平台「原串 startsWith(基址 + '/') 再切片」同口径）：
+ * 主机段不含 / ? # @ \ :（即不收账号、显式端口），路径里不含 ? #（末尾空 ? / # 也拒）。
+ */
+const HTTPS_RAW = /^https:\/\/[^/?#@\\:]+(\/[^?#]*)$/;
 /** 任何控制字符（U+0000–U+001F、U+007F）。 */
 const CONTROL = /[\u0000-\u001f\u007f]/;
 /** text 里除 \t（U+0009）\n（U+000A）之外的控制字符（CR 已先规范化成 LF）。 */
@@ -57,37 +70,34 @@ const DEFAULT_LOCAL_TYPE = 'webhook';
  */
 export function validateChannelMessage(body, rules = RULES.notifyChannel) {
     const r = channelRules(rules);
-    if (!isObj(body)) return invalid('请求体必须是 JSON 对象 { channel, message }');
-    if (typeof body.channel !== 'string') return invalid('channel 必须是字符串（渠道名）');
+    // 平台对非对象请求体回的是另一个通用 400（opInvalid），没有 field；本地沿用本码、不带 details
+    if (!isObj(body)) return invalid(null, '请求体必须是 JSON 对象 { channel, message }');
+    if (typeof body.channel !== 'string') return invalid('channel', 'channel 必须是字符串（渠道名）');
     const m = body.message;
-    if (!isObj(m)) return invalid('message 必须是对象 { title, text?, imageUrl?, link? }');
+    if (!isObj(m)) return invalid('message', 'message 必须是对象 { title, text?, imageUrl?, link? }');
 
     const title = typeof m.title === 'string' ? m.title.trim() : null;
     if (title === null || title === '' || codePoints(title) > r.titleMax || CONTROL.test(title)) {
-        return invalid(`message.title 必须是 trim 后 1..${r.titleMax} 个字符，不含换行与控制字符`);
+        return invalid('message.title', `message.title 必须是 trim 后 1..${r.titleMax} 个字符，不含换行与控制字符`);
     }
 
     let text = '';
     if (m.text != null) {   // null 视同缺省（与平台同）
-        if (typeof m.text !== 'string') return invalid('message.text 必须是字符串（不传即为空）');
+        if (typeof m.text !== 'string') return invalid('message.text', 'message.text 必须是字符串（不传即为空）');
         text = m.text.replace(/\r\n?/g, '\n');
         if (codePoints(text) > r.textMax || TEXT_CONTROL.test(text)) {
-            return invalid(`message.text 最多 ${r.textMax} 个字符，除换行与制表符外不能含控制字符`);
+            return invalid('message.text', `message.text 最多 ${r.textMax} 个字符，除换行与制表符外不能含控制字符`);
         }
     }
 
     const warnings = [];
     let imageUrl = null;
     if (m.imageUrl != null) {
-        if (typeof m.imageUrl !== 'string') return invalid('message.imageUrl 必须是字符串');
+        if (typeof m.imageUrl !== 'string') return invalid('message.imageUrl', 'message.imageUrl 必须是字符串');
         if (!LOCAL_MEDIA_SRC.test(m.imageUrl)) {
-            let path = null;
-            try {
-                const u = new URL(m.imageUrl);
-                if (u.protocol === 'https:' && !u.search && !u.hash && !u.username && !u.password) path = u.pathname;
-            } catch { /* 不是 URL */ }
+            const path = HTTPS_RAW.exec(m.imageUrl)?.[1] ?? null;
             if (path === null || !new RegExp(r.mediaPathPattern).test(path)) {
-                return invalid('message.imageUrl 只收 ctx.pt.render.chart() 返回的图片地址（本地是 http://localhost:8788/__ptx/media/…，线上是平台 media 地址），不收外链');
+                return invalid('message.imageUrl', 'message.imageUrl 只收 ctx.pt.render.chart() 返回的图片地址（本地是 http://localhost:8788/__ptx/media/…，线上是平台 media 地址），不收外链');
             }
             warnings.push('message.imageUrl 不是本地图表桩的地址：本地只核对了路径形状，线上还会核对主机，并要求是本工作区本应用渲染的图');
         }
@@ -96,19 +106,19 @@ export function validateChannelMessage(body, rules = RULES.notifyChannel) {
 
     let link = null;
     if (m.link != null) {
-        if (!isObj(m.link)) return invalid('message.link 必须是 { label, path } 对象');
+        if (!isObj(m.link)) return invalid('message.link', 'message.link 必须是 { label, path } 对象');
         const label = typeof m.link.label === 'string' ? m.link.label.trim() : null;
         if (label === null || label === '' || codePoints(label) > r.linkLabelMax || CONTROL.test(label)) {
-            return invalid(`message.link.label 必须是 trim 后 1..${r.linkLabelMax} 个字符，不含控制字符`);
+            return invalid('message.link.label', `message.link.label 必须是 trim 后 1..${r.linkLabelMax} 个字符，不含控制字符`);
         }
-        if (typeof m.link.path !== 'string') return invalid('message.link.path 必须是字符串（应用内路径）');
+        if (typeof m.link.path !== 'string') return invalid('message.link.path', 'message.link.path 必须是字符串（应用内路径）');
         const raw = m.link.path;
         const path = raw.startsWith('#/') ? raw.slice(2) : raw.startsWith('/') ? raw.slice(1) : raw;
         if (path.length > r.linkPathMax || !new RegExp(r.linkPathPattern).test(path)) {
-            return invalid(`message.link.path 只能是应用内路径：去掉开头一个 #/ 或 / 后 ≤ ${r.linkPathMax} 个字符，只含 URL 路径字符（不含 # 与空白）`);
+            return invalid('message.link.path', `message.link.path 只能是应用内路径：去掉开头一个 #/ 或 / 后 ≤ ${r.linkPathMax} 个字符，只含 URL 路径字符（不含 # 与空白）`);
         }
         if (LINK_PATH_SCHEME.test(path) || path.startsWith('/') || raw.startsWith('//')) {
-            return invalid('message.link.path 只接受应用内路径：首段不能带 scheme（https: / javascript: / reports:42 …），也不能以 // 开头');
+            return invalid('message.link.path', 'message.link.path 只接受应用内路径：首段不能带 scheme（https: / javascript: / reports:42 …），也不能以 // 开头');
         }
         link = { label, path };
     }

@@ -46,6 +46,10 @@ test('validateChannelMessage：不合规 → 400 NOTIFY_CHANNEL_MESSAGE_INVALID�
         m({ text: 1 }), m({ text: 'x'.repeat(C.textMax + 1) }), m({ text: 'a\u0000b' }), m({ text: 'a\u001bb' }),
         m({ imageUrl: 'https://evil.example/x.png' }), m({ imageUrl: 'data:image/png;base64,AA' }), m({ imageUrl: 1 }),
         m({ imageUrl: `http://localhost:8788/__ptx/media/${HEX}.jpg` }), m({ imageUrl: `http://evil.example/media/w/a/${HEX}.png` }),
+        // 平台对原串切片后测路径，不做 URL 规范化：空 ? / #、.. / . 段、显式端口、带账号都拒
+        m({ imageUrl: `https://m.x/media/w/a/${HEX}.png?` }), m({ imageUrl: `https://m.x/media/w/a/${HEX}.png#` }),
+        m({ imageUrl: `https://m.x/z/../media/w/a/${HEX}.png` }), m({ imageUrl: `https://m.x/media/w/a/./${HEX}.png` }),
+        m({ imageUrl: `https://m.x:443/media/w/a/${HEX}.png` }), m({ imageUrl: `https://u@m.x/media/w/a/${HEX}.png` }),
         m({ link: 'x' }), m({ link: [1] }), m({ link: { label: '', path: 'a' } }), m({ link: { label: 'a\nb', path: 'a' } }),
         m({ link: { label: 'l'.repeat(C.linkLabelMax + 1), path: 'a' } }), m({ link: { label: 'x' } }), m({ link: { label: 'x', path: 1 } }),
         p('a b'), p('a#b'), p('p'.repeat(C.linkPathMax + 1)),
@@ -54,6 +58,17 @@ test('validateChannelMessage：不合规 → 400 NOTIFY_CHANNEL_MESSAGE_INVALID�
         p('//evil.example.com/x'), p('//x'), p('#//evil.example.com'), p('#//x'), p('///x'), p('reports:42')
     ];
     for (const body of bad) assert.equal(codeOf(validateChannelMessage(body).error), 'NOTIFY_CHANNEL_MESSAGE_INVALID', JSON.stringify(body)?.slice(0, 70));
+});
+
+test('400 NOTIFY_CHANNEL_MESSAGE_INVALID 带 details.field，字段名与平台 parseChannelMessage 一致', () => {
+    const m = patch => ({ channel: 'a', message: { title: 't', ...patch } });
+    const cases = [
+        [{ channel: 1, message: MSG }, 'channel'], [{ channel: 'a', message: 'x' }, 'message'], [m({ title: '' }), 'message.title'],
+        [m({ text: 1 }), 'message.text'], [m({ imageUrl: 'https://evil.example/x.png' }), 'message.imageUrl'], [m({ link: 'x' }), 'message.link'],
+        [m({ link: { label: '', path: 'a' } }), 'message.link.label'], [m({ link: { label: 'x', path: '//a' } }), 'message.link.path']
+    ];
+    for (const [body, field] of cases) assert.deepEqual(validateChannelMessage(body).error.body.error.details, { field }, field);
+    assert.equal(validateChannelMessage(null).error.body.error.details, undefined);
 });
 
 test('LINK_PATH_SCHEME 锁值 = 平台 channel-message.ts 的 SCHEME（contract 尚未导出）', () => {
