@@ -36,8 +36,18 @@ export function createStubState() {
 
 export function runCounters(state, runId) {
     let c = state.runs.get(runId);
-    if (!c) { c = { emailCalls: 0, emailRecipients: 0, charts: 0 }; state.runs.set(runId, c); }
+    if (!c) { c = { emailCalls: 0, emailRecipients: 0, charts: 0, channelCalls: 0 }; state.runs.set(runId, c); }
     return c;
+}
+
+/** 合法的 runId（ptx job run 的 runId 是 UUID）；也是 outbox 目录名的约束。 */
+export const RUN_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** 从令牌 claims 推出：是否 job 令牌、按哪个 run 计数（不合法 → null，不计数）、是否预览。邮件 / 渠道桩共用。 */
+export function jobRunOf(claims) {
+    const isJob = claims?.trg === 'job';
+    const runId = isJob && typeof claims.run === 'string' && RUN_ID_RE.test(claims.run) ? claims.run : null;
+    return { isJob, runId, preview: isJob && claims.mode === 'preview' };
 }
 
 export function validateNotifyInput(body, rules = RULES.notify) {
@@ -104,8 +114,8 @@ const DROP_WITH_CONTENT = new Set([
 ]);
 const SAFE_HREF = /^(https:\/\/|mailto:)/i;
 const SAFE_SRC = /^https:\/\//i;
-/** 本地桩自己的图表地址（线上对应 https 的 media 地址）：只放这一种 http。 */
-const LOCAL_MEDIA_SRC = /^http:\/\/localhost:\d{1,5}\/__ptx\/media\/[0-9a-f]{32}\.png$/;
+/** 本地桩自己的图表地址（线上对应 https 的 media 地址）：只放这一种 http。渠道桩的 imageUrl 也用它。 */
+export const LOCAL_MEDIA_SRC = /^http:\/\/localhost:\d{1,5}\/__ptx\/media\/[0-9a-f]{32}\.png$/;
 
 /** 与平台 extractBody 同口径：第一个 <body…> 之后到第一个 </body>（没闭合就到结尾）。 */
 export function extractBody(html) {
@@ -466,9 +476,7 @@ export function handleNotifyEmail(state, { claims, body, appName, rules = RULES.
     const bad = validateNotifyInput(body, rules);
     if (bad) return bad;
     const n = notifyRules(rules);
-    const isJob = claims?.trg === 'job';
-    const runId = isJob && typeof claims.run === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(claims.run) ? claims.run : null;
-    const preview = isJob && claims.mode === 'preview';
+    const { isJob, runId, preview } = jobRunOf(claims);
     const recipients = resolveRecipientsLocally(body.to, claims);
 
     if (runId) {
