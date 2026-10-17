@@ -207,5 +207,31 @@
             "name": "x-pt-gate",
             "concurrencyValue": "concurrency"
         }
+    },
+    "notifyChannel": {
+        "types": [
+            "slack",
+            "teams",
+            "chatwork",
+            "webhook"
+        ],
+        "namePattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+        "titleMax": 150,
+        "textMax": 3000,
+        "linkLabelMax": 50,
+        "linkPathMax": 512,
+        "linkPathPattern": "^[A-Za-z0-9\\-._~!$&'()*+,;=:@\\/?%]*$",
+        "maxPerRun": 10,
+        "maxPerWorkspacePerMinute": 30,
+        "mediaPathPattern": "^\\/media\\/[A-Za-z0-9_-]{1,64}\\/[a-z0-9-]{1,63}\\/[0-9a-f]{32}\\.png$",
+        "testTitlePrefix": "[TEST] ",
+        "webhookHeaders": {
+            "id": "x-pt-webhook-id",
+            "timestamp": "x-pt-webhook-timestamp",
+            "signature": "x-pt-webhook-signature"
+        },
+        "signatureVersion": "v1",
+        "maxConcurrentPerApp": 2,
+        "maxBodyBytes": 16384
     }
 }
