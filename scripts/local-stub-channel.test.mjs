@@ -191,3 +191,15 @@ test('rules 缺 linkPathSchemePattern / linkPathDotSegmentPattern → 抛「规�
         assert.throws(() => validateChannelMessage(body, stale), /规则快照过旧/, key);
     }
 });
+
+test('linkPathSchemePattern / linkPathDotSegmentPattern 形状不是 { source: string, flags: string } → 抛「规则快照过旧」（不还原成意外正则）', () => {
+    const body = { channel: 'a', message: { title: 't', link: { label: 'x', path: 'reports/1' } } };
+    for (const key of ['linkPathSchemePattern', 'linkPathDotSegmentPattern']) {
+        for (const bad of [{}, { source: 'x' }, { flags: 'i' }, { source: 1, flags: 'i' }, { source: 'x', flags: null }, '^x', 42]) {
+            const stale = { ...C, [key]: bad };
+            assert.throws(() => channelRules(stale), new RegExp(`${key}[\\s\\S]*规则快照过旧`), `${key}=${JSON.stringify(bad)}`);
+            assert.throws(() => validateChannelMessage(body, stale), /规则快照过旧/, `${key}=${JSON.stringify(bad)}`);
+        }
+    }
+    assert.doesNotThrow(() => channelRules(C));
+});

@@ -161,7 +161,7 @@ Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc`
 本地网关桩 `ptx-local-gateway` 是内存存储，`ptx dev` 重启即清空。它也不校验 cron / 时区 / 配额，以平台为准。
 
 **本地 `ctx.pt.query()` / `ctx.pt.asset.*` / `ctx.pt.ai.*` 返回 501 `PT_GATEWAY_NOT_BOUND`，日志里还多一条 `pt-gateway-*-failed`？**
-预期如此。本地网关桩只实现 `ctx.pt.jobs.*`（`ctx.pt.notify.email` / `ctx.pt.render.chart` 转给本地推送 / 图表桩），其余路径一律 501；提示语是笼统的
+预期如此。本地网关桩只实现 `ctx.pt.jobs.*`（`ctx.pt.notify.email` / `notify.channel` / `notify.listChannels` / `ctx.pt.render.chart` 转给本地推送 / 图表桩），其余路径一律 501；提示语是笼统的
 「本地没有数据网关……请在平台部署后联调」（不再点名缺哪个 scope），运行时同时记一条
 `pt-gateway-query-failed` / `pt-gateway-asset-failed` 日志。取数、资产读写与 AI 调用请在平台部署后联调。
 
@@ -174,7 +174,8 @@ Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc`
 
 - **`ctx.pt.notify.email` / `notify.channel` / `notify.listChannels` / `ctx.pt.render.chart` 本地 503 `PTX_STUB_UNAVAILABLE`**：本地桩（`127.0.0.1:8788`）没起来。用 `npm run dev` 启动（不要单独跑 `wrangler dev`）；
   横幅里若是「推送 / 图表本地桩没起来（…EADDRINUSE）：8788 被占」，是 8788 被别的进程（常见是另一个 `ptx dev`）占了，停掉它再重启。
-  8788 被另一个 `ptx dev` 占用时请求可能成功，但邮件和图片会写到那个项目的 `.ptx/`。
+  8788 被另一个 `ptx dev` 占用时请求可能成功，但邮件和图片会写到那个项目的 `.ptx/`；渠道消息也写到那个项目，且渠道目录读的是那个项目的
+  `.ptx/channels.json`（会出现莫名的 404 或列表与本项目不符）。
   消息里写「wrangler.jsonc 缺 vars.PTX_STUB_ORIGIN」的，是 `scripts/local-gateway/wrangler.jsonc` 被改坏了，补回 `"PTX_STUB_ORIGIN": "http://127.0.0.1:8788"` 或升级 starter。
 - **`ctx.pt.render.chart` 本地 501 `PTX_RENDER_DEPS_MISSING`**：可选依赖 `echarts` / `@resvg/resvg-js` 没装上（少见平台没有 resvg 预编译包）。
   重跑 `npm install`，或 `npm i --save-optional echarts@^5.6.0 @resvg/resvg-js@^2.6.2`。线上渲染在平台侧，不受影响。
@@ -187,7 +188,7 @@ Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc`
 - **本地 `listChannels()` 回 `[]`**：没有 `.ptx/channels.json`。线上的渠道由工作区管理员在「管理 → 通知渠道」里配置。
 - **本地 400 `NOTIFY_CHANNEL_MESSAGE_INVALID`**：看 `e.detail.field` 是哪个字段（线上同样带）。
   - `message.imageUrl`：本地只收 `ctx.pt.render.chart()` 本地桩返回的 `http://localhost:8788/__ptx/media/…`（或路径形状同平台 media 地址的 https）；外链图片线上同样会被拒。
-  - `message.link.path`：只接受应用内路径 —— 首段不能带 scheme（`https:`、`javascript:`、`reports:42` 这种首段带冒号的也算），
+  - `message.link.path`：只接受应用内路径 —— 不能带 scheme（以字母开头、由字母 / 数字 / `+` `.` `-` 组成并紧跟冒号的前缀，如 `https:`、`javascript:`，所以 `reports:42` 也算），
     不能以 `//` 开头、去掉一个前导 `#/` / `/` 后也不能再以 `/` 开头，`?` 之前不能有 `.` / `..` 路径段（含 `%2e` 编码）。线上同口径拒。
 - **本地 `notify.channel` 能过、线上 404**：线上的名字由管理员配置，且可能没对本应用开放（「可用应用」）；请管理员核对。
 - **报「notifyChannel 段缺 …（规则快照过旧）」**：使用者升级 starter；维护者跑 `npm run sync-rules`。

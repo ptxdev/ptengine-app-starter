@@ -27,8 +27,14 @@ import { LOCAL_MEDIA_SRC, jobRunOf, runCounters } from './notify.mjs';
 const REQUIRED_CHANNEL_KEYS = ['types', 'namePattern', 'titleMax', 'textMax', 'linkLabelMax', 'linkPathMax', 'linkPathPattern',
     'maxPerRun', 'mediaPathPattern', 'maxConcurrentPerApp', 'maxBodyBytes', 'linkPathSchemePattern', 'linkPathDotSegmentPattern'];
 
+/** rules.json 里以 { source, flags } 存的正则键：形状不对（不是两个字符串）同样视为快照过旧，不还原成意外的正则。 */
+const REGEX_CHANNEL_KEYS = ['linkPathSchemePattern', 'linkPathDotSegmentPattern'];
+const isRegexShape = v => typeof v?.source === 'string' && typeof v?.flags === 'string';
+
 export function channelRules(rules) {
-    const missing = rules ? REQUIRED_CHANNEL_KEYS.filter(k => rules[k] == null) : ['notifyChannel'];
+    const missing = rules
+        ? REQUIRED_CHANNEL_KEYS.filter(k => rules[k] == null || (REGEX_CHANNEL_KEYS.includes(k) && !isRegexShape(rules[k])))
+        : ['notifyChannel'];
     if (missing.length) {
         throw new Error(`scripts/rules.json 的 notifyChannel 段缺 ${missing.join(' / ')}（规则快照过旧）。维护者请跑 npm run sync-rules。`);
     }

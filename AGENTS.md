@@ -390,8 +390,8 @@ CREATE TABLE IF NOT EXISTS job_runs (run_id TEXT PRIMARY KEY, sid TEXT NOT NULL)
     const markdown = await buildReport(ctx);
     if (ctx.auth.preview) {
         // 预览：只生成内容并返回；不占位（不写会影响正式运行的状态），不碰外部系统。
-        // 这里跳过的是第三方渠道副作用（sendToChannel）；平台推送 ctx.pt.notify.email 在预览里照常调用
-        // （平台拦截、进预览面板），见下面的「预览模式写法」。
+        // 这里跳过的是你自己的外部副作用（如自己调第三方 webhook，不是 ctx.pt.notify.channel）；
+        // 平台推送 ctx.pt.notify.email / notify.channel 在预览里照常调用（平台拦截、进预览面板），见下面的「预览模式写法」。
         return { archive: { title: '每周报告（预览）', markdown } };
     }
     const runId = ctx.auth.runId!;
@@ -400,7 +400,7 @@ CREATE TABLE IF NOT EXISTS job_runs (run_id TEXT PRIMARY KEY, sid TEXT NOT NULL)
         .bind(runId, ctx.auth.sid).run();
     if (claimed.meta.changes === 0) return {};                      // 重复投递：什么都不做（判为 none，不采集）
     try {
-        await sendToChannel(ctx, markdown);                          // 外部副作用
+        await postToOwnWebhook(ctx, markdown);                       // 你自己的外部副作用
     } catch (e) {
         // 想让重投重做：失败时先删占位再抛错。不删 = 这次的副作用与存档都丢了
         await ctx.db.prepare('DELETE FROM job_runs WHERE run_id = ?').bind(runId).run();
@@ -476,7 +476,7 @@ const r = await ctx.pt.notify.email({
     const chart = await ctx.pt.render.chart(buildOption(drop), { width: 600, height: 300 });
     await ctx.pt.notify.channel(channel, {                                    // 不存在 / 未对本应用开放 → 404 NOTIFY_CHANNEL_NOT_FOUND
         title: '首页 CVR 异常',                                               // 1–150 字，不能换行
-        text: `比上周同期下降 ${Math.round(drop * 100)}%`,                    // 可省略或 null；≤ 3000 字纯文本，可换行
+        text: `比上周同期下降 ${Math.round(drop * 100)}%`,                    // 可省略；≤ 3000 字纯文本，可换行
         imageUrl: chart.url,                                                  // 只收本应用 render.chart 返回的图
         link: { label: '查看报告', path: '#/reports/cvr' }                    // 应用内路径；平台展开成「在 Ptengine 里打开本应用」的链接
     });
@@ -487,7 +487,7 @@ const r = await ctx.pt.notify.email({
 - **纯文本进、各家格式出**：平台按渠道类型转成 Slack Block Kit / Teams Adaptive Card / Chatwork `[info]` / Webhook JSON，并转义 `<!channel>`、`[toall]`、markdown 链接之类；每条带页脚 `Ptengine · <应用名>`。
 - `type` 目前是 `'slack' | 'teams' | 'chatwork' | 'webhook'`，**将来可能增加** —— 按 `type` 分支时留 `default`。
 - `link.label` 1–50 字；`link.path` 去掉开头一个 `#/` 或 `/` 后 ≤ 512 字符、只能是 URL 路径字符（不含 `#` 与空白），平台把它拼在「打开本应用」的地址后面，应用从 `PtApp.context.initialPath` 读到它。
-  **不支持绝对 URL**，以下都会被拒 400 `NOTIFY_CHANNEL_MESSAGE_INVALID`：带 scheme（`https:`、`javascript:`，以及 `reports:42` 这种首段带冒号的）；
+  **不支持绝对 URL**，以下都会被拒 400 `NOTIFY_CHANNEL_MESSAGE_INVALID`：带 scheme（以字母开头、由字母 / 数字 / `+` `.` `-` 组成并紧跟冒号的前缀，如 `https:`、`javascript:`，所以 `reports:42` 也算）；
   以 `//` 开头，或去掉一个前导 `#/` / `/` 后仍以 `/` 开头（`#//x`、`///x`）；`?` 之前的路径里含 `.` 或 `..` 段（含任意大小写的 `%2e` 编码，如 `#/a/../b`、`%2E%2E/x`；`a.b/c..d` 这种文件名里的点、`?` 之后的点不受影响）。
 - 消息不合规时平台回 400 `NOTIFY_CHANNEL_MESSAGE_INVALID`，`e.detail.field` 点名字段（`message.title`、`message.link.path` ……）；本地桩同样带。
 - `listChannels()` 别缓存（管理员随时增删改名）；发送前也不必先列 —— 直接 `channel(name, …)`。名字不存在与「没对本应用开放」同为 404，刻意不区分。
