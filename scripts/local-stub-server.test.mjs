@@ -337,6 +337,22 @@ test(`渠道消息体超过 rules.notifyChannel.maxBodyBytes → 413 GATEWAY_BAD
     assert.ok(!existsSync(join(root, '.ptx')));
 }));
 
+test('渠道消息体积边界：恰好 = rules.notifyChannel.maxBodyBytes 不回 413，多 1 字节回 413', () => withStub(async ({ base }) => {
+    const max = STUB_RULES.notifyChannel.maxBodyBytes;
+    // 多余的顶层键只占体积（本地桩逐字段取用、不看它），让体积恰好卡在上限上而消息本身合法
+    const sized = n => {
+        const shell = { channel: 'alerts', message: { title: 't' }, pad: '' };
+        const body = { ...shell, pad: 'x'.repeat(n - Buffer.byteLength(JSON.stringify(shell))) };
+        assert.equal(Buffer.byteLength(JSON.stringify(body)), n);
+        return body;
+    };
+    const atMax = await post(base, '/notify/channel', PREVIEW, sized(max));
+    assert.equal(atMax.status, 200);
+    const over = await post(base, '/notify/channel', PREVIEW, sized(max + 1));
+    assert.equal(over.status, 413);
+    assert.equal((await over.json()).error.code, 'GATEWAY_BAD_REQUEST');
+}));
+
 test('job 令牌的 run 不合法 → 渠道消息落 .ptx/outbox/interactive/，.ptx 外不落文件；渠道名不进任何路径', () => withStub(async ({ root, base }) => {
     const BAD = tok({ sub: 'u', scopes: ['notify:send'], trg: 'job', job: 'local', run: '../../escape', mode: 'preview' });
     mkdirSync(join(root, '.ptx'), { recursive: true });
@@ -355,7 +371,10 @@ test('本地推送预览页同时列出邮件与渠道消息；渠道消息以�
     assert.match(res.headers.get('content-security-policy') ?? '', /script-src 'none'/);
     const html = await res.text();
     assert.ok(html.includes('/__ptx/outbox/run-1/1.html') && html.includes('周报'));
-    assert.ok(html.includes('alerts') && html.includes('webhook') && html.includes('预览拦截'));
+    // 同页的预览邮件条目也带「预览拦截」，必须单独取出渠道那条 <li> 断言它的状态
+    const channelItems = html.match(/<li>渠道 [\s\S]*?<\/li>/g) ?? [];
+    assert.equal(channelItems.length, 1);
+    assert.match(channelItems[0], /^<li>渠道 <b>alerts<\/b>（webhook）「[^」]*」 — 预览拦截<pre/);
     assert.ok(!html.includes('<script>alert(1)</script>'));
     assert.ok(html.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
     assert.match(html, /2 条/);

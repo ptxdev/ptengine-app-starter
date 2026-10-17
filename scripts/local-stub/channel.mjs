@@ -4,9 +4,9 @@
  * 判定顺序与线上平台一致（brief §4.5）：消息形状（第 3 步）→ 查渠道（第 5 步）→ 本 run 调用次数（第 6 步）→ 预览拦截（第 8 步）。
  * 被第 3 / 5 步拒掉的调用不计次（与平台同）。
  * 上限、正则与类型表全部读 scripts/rules.json 的 notifyChannel 段（缺键报「规则快照过旧」，不写字面量兜底）；错误码与线上同名。
- * 唯一例外是 link.path 的 scheme 判定（LINK_PATH_SCHEME，见下），contract 尚未导出。
+ * 唯一例外是 link.path 的 scheme / 点段正则（LINK_PATH_SCHEME / LINK_PATH_DOT_SEGMENT，见下）：contract 已导出但未进 rules.json，暂留本地副本。
  * 可以比平台**严**，不能比平台**宽**（本地能过、线上被拒不可接受）。
- * link.path 的 scheme / `//` 判定同平台 P15：去掉一个前导 `#/` 或 `/` 后带 scheme、仍以 `/` 开头，或原值以 `//` 开头 → 400。
+ * link.path 与平台 parseChannelMessage 逐条同序：去一个前导 `#/` 或 `/` → 长度 → 字符集 → 带 scheme 或仍以 `/` 开头（P15）→ 含 . / .. 段（R11）→ 400。
  *
  * 本地**永远不真实投递**（含非预览）：本地没有渠道凭据，也不该从开发机往客户频道发消息（裁定 C34）。
  * 工作区每分钟 30 条的限额本地不模拟（brief §8.4 未列）。
@@ -36,10 +36,17 @@ export function channelRules(rules) {
 }
 
 /**
- * 平台 notify-channel 校验的副本，contract 尚未导出（= platform channel-message.ts 的 SCHEME，P15）：
- * 去前导之后仍像绝对 URL（带 scheme）的 link.path。contract 导出后改读 rules.json 并删掉本常量。
+ * contract `NOTIFY_CHANNEL_LINK_PATH_SCHEME_PATTERN`（packages/contract/src/limits.ts）的本地副本，source / flags 逐字照抄（R4/P15）：
+ * 去前导之后带 scheme（`https:`、`javascript:` 等）的 link.path 即绝对地址。
+ * 该常量尚未进 buildRules().notifyChannel（rules.json 读不到）；待导出后改读 rules.json 并删掉本副本。
  */
 export const LINK_PATH_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+/**
+ * contract `NOTIFY_CHANNEL_LINK_PATH_DOT_SEGMENT_PATTERN`（packages/contract/src/limits.ts）的本地副本，source / flags 逐字照抄（R11）：
+ * 去前导之后 `?` 之前的路径部分含 `.` / `..` 段（含任意大小写 `%2e`）即拒——线上深链经 URL 归一化会逃出 apps/<appUuid>/。
+ * `a.b/c..d`、`?q=..` 不受影响。该常量尚未进 buildRules().notifyChannel（rules.json 读不到）；待导出后改读 rules.json 并删掉本副本。
+ */
+export const LINK_PATH_DOT_SEGMENT = /^(?:[^?]*\/)?(?:\.|%2e){1,2}(?:[/?]|$)/i;
 
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const codePoints = s => [...s].length;
@@ -112,13 +119,22 @@ export function validateChannelMessage(body, rules = RULES.notifyChannel) {
             return invalid('message.link.label', `message.link.label 必须是 trim 后 1..${r.linkLabelMax} 个字符，不含控制字符`);
         }
         if (typeof m.link.path !== 'string') return invalid('message.link.path', 'message.link.path 必须是字符串（应用内路径）');
+        // 与平台 channel-message.ts 逐条同序：去前导 → 长度 → 字符集 → scheme / 仍以 / 开头 → 点段
         const raw = m.link.path;
         const path = raw.startsWith('#/') ? raw.slice(2) : raw.startsWith('/') ? raw.slice(1) : raw;
-        if (path.length > r.linkPathMax || !new RegExp(r.linkPathPattern).test(path)) {
-            return invalid('message.link.path', `message.link.path 只能是应用内路径：去掉开头一个 #/ 或 / 后 ≤ ${r.linkPathMax} 个字符，只含 URL 路径字符（不含 # 与空白）`);
+        if (path.length > r.linkPathMax) {
+            return invalid('message.link.path', `message.link.path 去掉开头一个 #/ 或 / 后不能超过 ${r.linkPathMax} 个字符`);
         }
-        if (LINK_PATH_SCHEME.test(path) || path.startsWith('/') || raw.startsWith('//')) {
+        if (!new RegExp(r.linkPathPattern).test(path)) {
+            return invalid('message.link.path', 'message.link.path 只能是应用内路径，只含 URL 路径字符（不含 # 空白 控制字符等）');
+        }
+        // P15：带 scheme，或去一个前导后仍以 / 开头（即原值 // 开头）= 绝对地址
+        if (LINK_PATH_SCHEME.test(path) || path.startsWith('/')) {
             return invalid('message.link.path', 'message.link.path 只接受应用内路径：首段不能带 scheme（https: / javascript: / reports:42 …），也不能以 // 开头');
+        }
+        // R11：点段（含 %2e）在线上会经 URL 归一化逃出 apps/<appUuid>/
+        if (LINK_PATH_DOT_SEGMENT.test(path)) {
+            return invalid('message.link.path', 'message.link.path 不能含 . 或 .. 路径段（含 %2e 编码；文件名与 ? 之后的点不受影响）');
         }
         link = { label, path };
     }

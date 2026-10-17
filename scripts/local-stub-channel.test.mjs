@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RULES } from './manifest.mjs';
-import { LINK_PATH_SCHEME, channelRules, handleListChannels, handleNotifyChannel, loadLocalChannels, validateChannelMessage } from './local-stub/channel.mjs';
+import { LINK_PATH_DOT_SEGMENT, LINK_PATH_SCHEME, channelRules, handleListChannels, handleNotifyChannel, loadLocalChannels, validateChannelMessage } from './local-stub/channel.mjs';
 import { createStubState, runCounters } from './local-stub/notify.mjs';
 
 const C = RULES.notifyChannel;
@@ -71,9 +71,31 @@ test('400 NOTIFY_CHANNEL_MESSAGE_INVALID 带 details.field，字段名与平台 
     assert.equal(validateChannelMessage(null).error.body.error.details, undefined);
 });
 
-test('LINK_PATH_SCHEME 锁值 = 平台 channel-message.ts 的 SCHEME（contract 尚未导出）', () => {
+test('LINK_PATH_SCHEME / LINK_PATH_DOT_SEGMENT 锁值 = contract NOTIFY_CHANNEL_LINK_PATH_SCHEME_PATTERN / NOTIFY_CHANNEL_LINK_PATH_DOT_SEGMENT_PATTERN（未进 rules.json 的本地副本，R11）', () => {
     assert.equal(LINK_PATH_SCHEME.source, '^[a-z][a-z0-9+.-]*:');
     assert.equal(LINK_PATH_SCHEME.flags, 'i');
+    assert.equal(LINK_PATH_DOT_SEGMENT.source, '^(?:[^?]*\\/)?(?:\\.|%2e){1,2}(?:[/?]|$)');
+    assert.equal(LINK_PATH_DOT_SEGMENT.flags, 'i');
+});
+
+test('link.path 点段（R11）：? 之前的 . / .. 段（含任意大小写 %2e，含 #/ 或 / 前导之后）→ 400 message.link.path', () => {
+    const p = path => validateChannelMessage({ channel: 'a', message: { title: 't', link: { label: 'x', path } } });
+    // 平台 channel-message.spec.ts 与 contract notify-channel-constants.test.ts 的命中用例
+    const hits = ['..', '.', '../x', './x', 'a/../b', 'a/./b', 'x/.', 'x/..', '%2e%2e/x', '%2E%2e/x', '.%2e/x', '%2e./x', 'a/%2E/b', 'a/..?q=1',
+        '../../other/settings', '%2e%2e/%2E%2E/%2e%2e/%2e%2e/login?next=x', '#/../x', '/../x', '#/./x', '/%2e/x'];
+    for (const s of hits) {
+        const r = p(s);
+        assert.equal(codeOf(r.error), 'NOTIFY_CHANNEL_MESSAGE_INVALID', s);
+        assert.deepEqual(r.error.body.error.details, { field: 'message.link.path' }, s);
+    }
+});
+
+test('link.path 点段只在路径部分拒：文件名里的点、query 里的 .. 不误伤（与平台同口径放行）', () => {
+    const p = path => validateChannelMessage({ channel: 'a', message: { title: 't', link: { label: 'x', path } } }).message?.link?.path;
+    for (const s of ['a.b/c..d', '...', '.../x', '.a', '.well', 'a..', 'reports/a.b', '?q=..', 'a?x=/../', 'a/b?x=..', 'reports/x?tab=./', 'r/x?next=../../y', '%2e%2e%2e', '..%2f']) {
+        assert.equal(p(s), s, s);
+    }
+    assert.equal(p('#/a.b/c..d'), 'a.b/c..d');
 });
 
 test('validateChannelMessage：https 且路径是平台 media 形状 → 放行但给一条提示（线上还要核主机与工作区 / 应用段）', () => {
