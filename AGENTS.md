@@ -216,6 +216,8 @@ ctx.pt.openApiUrl  // 当前环境的 Ptengine Open API 根地址（需 manifest
 ctx.pt.jobs.*            // 定时任务：create / list / get / update / pause / resume / delete（需 jobs:run）
 ctx.pt.notify.email({ to, subject, html, text?, replyTo?, locale? })   // 以 Ptengine 名义给工作区成员发邮件（需 notify:send）
 ctx.pt.render.chart(option, { width?, height?, theme? })              // 平台渲染 ECharts 为 PNG，返回 { url, width, height }（需 notify:send）
+ctx.pt.notify.channel(name, { title, text?, imageUrl?, link? })   // 按名字向工作区通知渠道发消息（Slack / Teams / Chatwork / Webhook；需 notify:send）
+ctx.pt.notify.listChannels()                                      // 对本应用开放的渠道 [{ name, type }]（需 notify:send）
 
 ctx.requireScope('analytics:read')   // 缺则抛 403 SCOPE_REQUIRED
 ctx.requireTrigger('job') // 任务路由第一行；用户请求打进来 403 JOB_ONLY
@@ -240,7 +242,7 @@ ctx.waitUntil(promise)               // 后台任务（如写缓存，不阻塞�
 ⚠️ 本地 `wrangler dev` **没有数据网关**：`ctx.pt.query` / `ctx.pt.asset.*` / `ctx.pt.ai.*` 在本地
 一律 501 `PT_GATEWAY_NOT_BOUND`，即使 manifest 已经声明了 scope —— 那是本地缺 binding，不是 scope 没写。
 这几条要发布到平台上验（平台内 dev 模式的 `/api` 仍然代理到本地 wrangler，同样没有网关）。
-例外：`ctx.pt.jobs.*`（内存桩）与 `ctx.pt.notify.email` / `ctx.pt.render.chart`（写 `.ptx/`，不真实发信）由 `ptx dev` 提供本地桩。
+例外：`ctx.pt.jobs.*`（内存桩）与 `ctx.pt.notify.email` / `notify.channel` / `notify.listChannels` / `ctx.pt.render.chart`（写 `.ptx/`，不真实发信、不真实投递）由 `ptx dev` 提供本地桩。
 
 ### 资源由平台注入
 
@@ -453,17 +455,72 @@ const r = await ctx.pt.notify.email({
   `role:*` 本地一律解析成你自己，`user:<id>` 解析成 `<id>@local.ptx` —— 只看「长什么样」，不代表线上发给谁。
   外框是简化版，逐字的最终邮件看产品里的预览面板。
 
+### 推送：通知渠道（notify:send）
+
+工作区管理员在「管理 → 通知渠道」里配好**有名字的**渠道（Slack Incoming Webhook / Teams 工作流 Webhook / Chatwork API 令牌 + 房间 / 通用 Webhook），
+应用只按**名字**发，看不到凭据。同一个 `notify:send`，不用加 scope、不用升级 app-sdk。
+
+示例：告警类任务（用户在订阅时选渠道，名字存进任务 `params`）：
+
+```ts
+// 用户请求：给订阅表单列出可选渠道
+'GET /channels': async (ctx) => ({ channels: await ctx.pt.notify.listChannels() }),   // [{ name, type }]，含测试渠道，按名字升序
+
+// 任务路由
+'POST /jobs/cvr-alert': async (ctx) => {
+    ctx.requireTrigger('job');
+    const { channel, threshold = 0.2 } = ctx.body as { channel: string; threshold?: number };
+    const drop = await computeCvrDrop(ctx);                                   // 你自己的取数
+    ctx.log('CVR 变化', { drop });
+    if (drop < threshold) return {};
+    const chart = await ctx.pt.render.chart(buildOption(drop), { width: 600, height: 300 });
+    await ctx.pt.notify.channel(channel, {                                    // 不存在 / 未对本应用开放 → 404 NOTIFY_CHANNEL_NOT_FOUND
+        title: '首页 CVR 异常',                                               // 1–150 字，不能换行
+        text: `比上周同期下降 ${Math.round(drop * 100)}%`,                    // 可省略或 null；≤ 3000 字纯文本，可换行
+        imageUrl: chart.url,                                                  // 只收本应用 render.chart 返回的图
+        link: { label: '查看报告', path: '#/reports/cvr' }                    // 应用内路径；平台展开成「在 Ptengine 里打开本应用」的链接
+    });
+    return {};
+}
+```
+
+- **纯文本进、各家格式出**：平台按渠道类型转成 Slack Block Kit / Teams Adaptive Card / Chatwork `[info]` / Webhook JSON，并转义 `<!channel>`、`[toall]`、markdown 链接之类；每条带页脚 `Ptengine · <应用名>`。
+- `type` 目前是 `'slack' | 'teams' | 'chatwork' | 'webhook'`，**将来可能增加** —— 按 `type` 分支时留 `default`。
+- `link.label` 1–50 字；`link.path` 去掉开头一个 `#/` 或 `/` 后 ≤ 512 字符、只能是 URL 路径字符（不含 `#` 与空白），平台把它拼在「打开本应用」的地址后面，应用从 `PtApp.context.initialPath` 读到它。
+  **不支持绝对 URL**，以下都会被拒 400 `NOTIFY_CHANNEL_MESSAGE_INVALID`：带 scheme（`https:`、`javascript:`，以及 `reports:42` 这种首段带冒号的）；
+  以 `//` 开头，或去掉一个前导 `#/` / `/` 后仍以 `/` 开头（`#//x`、`///x`）；`?` 之前的路径里含 `.` 或 `..` 段（含任意大小写的 `%2e` 编码，如 `#/a/../b`、`%2E%2E/x`；`a.b/c..d` 这种文件名里的点、`?` 之后的点不受影响）。
+- 消息不合规时平台回 400 `NOTIFY_CHANNEL_MESSAGE_INVALID`，`e.detail.field` 点名字段（`message.title`、`message.link.path` ……）；本地桩同样带。
+- `listChannels()` 别缓存（管理员随时增删改名）；发送前也不必先列 —— 直接 `channel(name, …)`。名字不存在与「没对本应用开放」同为 404，刻意不区分。
+- 限额：**一次运行 ≤ 10 次** `notify.channel`（`NOTIFY_RUN_LIMIT_EXCEEDED`）：预览里的调用照计，被分钟限额拒掉或投递失败的也照计；
+  被平台判定**不合规**或**渠道不存在**（以及 run 已结束）而拒掉的调用不计次。**工作区每 UTC 分钟 ≤ 30 条**实际投递（429 `NOTIFY_CHANNEL_RATE_LIMITED`，**不会自动重试**）。
+  用户请求里的调用只计分钟限额。`listChannels` 不计任何限额。
+- `e.detail.retryAfterSec`：**有值时**给 —— 非网关闸的 429 或 503 带了 `retry-after` 响应头时才有，正整数秒，**只**取自这个头
+  （`NOTIFY_CHANNEL_RATE_LIMITED` 时是到下一个 UTC 分钟的秒数）。只是提示，没有任何东西会据它自动重试。
+- 并发：与 `notify.email` **共用**「每应用 2 个在途」那道闸（邮件与渠道合计）；网关闸的 429 由 app-backend 有界重试。按顺序 `await`，不要 `Promise.all`。
+- **不自动重试、没有死信**（每次调用至多投递一次）：502 `NOTIFY_CHANNEL_SEND_FAILED` 是渠道没收下；投递错误码能识别时在 `e.detail.deliveryError`
+  并写进 message（「渠道投递失败：<码>」）：`CHANNEL_HTTP_<状态码>`、`CHANNEL_TIMEOUT`、`CHANNEL_NETWORK`、`CHANNEL_DNS_FAILED`、`CHANNEL_ADDRESS_BLOCKED`、`CHANNEL_REDIRECT_BLOCKED`；
+  识别不出时没有这个键。渠道凭据解不开或发送前时间预算已用完时，应用拿到的是 503 `NOTIFY_UNAVAILABLE`（运行记录里是 `CHANNEL_KEY_UNAVAILABLE` / `CHANNEL_DEADLINE`），不是 502。
+  **`CHANNEL_TIMEOUT` / 504 可能已送达** —— 自己重试就要接受重复。
+- 预览：**照常调用**，平台拦截不投递（`preview: true`、`status: 'intercepted'`），面板里按渠道类型画近似卡片；面板里「发一条测试」只能发到管理员标了「测试」的渠道。
+- 本地（`npm run dev`）：**永远不真实投递**（含非预览）。消息按 `scripts/rules.json` 的 `notifyChannel` 段同口径校验（名字、标题 / 正文 / 链接 / 图片、每 run 10 次、与邮件共用的本地并发闸、16 KiB 体积上限），
+  写进 `.ptx/outbox/<runId|interactive>/<seq>.channel.json`（与邮件共用序号），终端打印一行；被拒的调用不写文件。工作区分钟限额本地不模拟。
+  渠道目录用项目内 `.ptx/channels.json`（`[{ "name": "alerts", "type": "slack" }]`，改了即时生效）：**有这个文件**时名字不在里面 → 404，`listChannels()` 回它；
+  **没有**时任何合法名字都接受（类型记 `webhook`），`listChannels()` 回 `[]`。图片本地收本地图表桩返回的 `http://localhost:8788/__ptx/media/…`；
+  路径形状同平台 media 地址的 https 也放行（本地核不了主机与工作区 / 应用段，终端会提示），其余一律 400。
+- 通用 Webhook 的接收方怎么验签：见 `@ptengine/app-backend` README「Verifying generic-webhook signatures」（附测试向量；头名也在 `scripts/rules.json` 的 `notifyChannel.webhookHeaders`）。
+
 ### 预览模式写法
 
 用户在预览面板里点「生成预览」时，平台以 `ctx.auth.preview === true` 真的跑一次任务路由。目标：**预览里看到的就是正式运行会发出的东西，但没有副作用**。
 
 - **照常调用 `ctx.pt.notify.email`**：平台拦截不发（返回 `preview: true`、`sent: 0`、状态 `intercepted`），并把这封邮件显示在面板里。
   在预览里跳过它，面板就是空的。
+- **照常调用 `ctx.pt.notify.channel`**：同样被拦截不投递（`status: 'intercepted'`），面板里画近似卡片；计每 run 10 次，不计工作区分钟限额。`listChannels()` 照常可用。
 - `ctx.pt.render.chart` 预览里**真实渲染**（计配额），面板里能看到图。
 - `ctx.pt.jobs.update / pause / resume / delete` 与资产写（`ctx.pt.asset.ensureFolder / create / update / uploadSource`）在预览里
   一律 403 `PREVIEW_READONLY` —— 用 `if (!ctx.auth.preview)` 包起来。取数、资产读、AI 照常。
 - 你自己的外部副作用（第三方 webhook、写外部系统、D1 幂等占位）在预览里跳过。
-- `ctx.log(msg, fields)` 会显示在面板里，连同取数 / 邮件 / 图表的调用次数：最多 200 条、编码后（base64url）合计 ≤ 12 KiB（实际日志内容约 9 KiB），单条消息截到 2000 字符，
+- `ctx.log(msg, fields)` 会显示在面板里，连同取数 / 邮件 / 图表 / 渠道消息的调用次数：最多 200 条、编码后（base64url）合计 ≤ 12 KiB（实际日志内容约 9 KiB），单条消息截到 2000 字符，
   `fields` 不能 JSON 序列化或超过 4 KiB 就只留消息。返回流式响应时，只有返回前记的日志进得去。
 
 ```ts
@@ -521,10 +578,10 @@ POST 到 `http://127.0.0.1:$PTX_API_PORT/api<route>`（`PTX_API_PORT` 缺省 878
 本地的 `ctx.pt.jobs.*` 走 `ptx dev` 拉起的内存桩（见[本地开发](#本地开发)）：重启即清空，不校验 cron / 时区 / 配额，
 **也不会按时触发** —— 要跑任务路由只能用 `npx ptx job run`。
 
-`--preview` 时命令还会打印应用回的预览日志（`ctx.log` 与取数 / 邮件 / 图表次数，与预览面板里的同一份），
-以及这次运行写下的邮件的本地预览页 `http://localhost:8788/__ptx/outbox/<runId>`（需要 `npm run dev` 正在跑）。
+`--preview` 时命令还会打印应用回的预览日志（`ctx.log` 与取数 / 邮件 / 图表 / 渠道消息次数，与预览面板里的同一份），
+以及这次运行写下的邮件与渠道消息的本地预览页 `http://localhost:8788/__ptx/outbox/<runId>`（需要 `npm run dev` 正在跑）。
 
-`npm run doctor` 会检查：`jobs:run` 是否声明、任务路由是否在 `backend/src` 的 `routes` 里、路由里有没有 `requireTrigger(`、`preview: true` 时有没有读 `ctx.auth.preview`、用了 `ctx.pt.notify` / `render.chart` 时有没有声明 `notify:send`。
+`npm run doctor` 会检查：`jobs:run` 是否声明、任务路由是否在 `backend/src` 的 `routes` 里、路由里有没有 `requireTrigger(`、`preview: true` 时有没有读 `ctx.auth.preview`、用了 `ctx.pt.notify.*`（邮件 / 渠道 / 列渠道）/ `render.chart` 时有没有声明 `notify:send`。
 
 ---
 
@@ -639,8 +696,8 @@ npm run dev        # 同时起 vite（前端）与 wrangler dev（后端），�
 （`scripts/local-gateway/`），`backend/wrangler.jsonc` 的 `PT_GATEWAY` 按服务名绑到它：
 
 - 本地 `ctx.pt.jobs.*` 走它，**内存存储，重启即清空**，不会按时触发（运行任务路由用 `npx ptx job run`）；
-- 本地 `ctx.pt.notify.email` / `ctx.pt.render.chart` 由它转给 `ptx dev` 进程里的推送 / 图表桩（`127.0.0.1:8788`），
-  写 `.ptx/`、不真实发信，见[推送：邮件与图表](#推送邮件与图表notifysend)；
+- 本地 `ctx.pt.notify.email` / `notify.channel` / `notify.listChannels` / `ctx.pt.render.chart` 由它转给 `ptx dev` 进程里的推送 / 图表桩（`127.0.0.1:8788`），
+  写 `.ptx/`、不真实发信、不真实投递，见[推送：邮件与图表](#推送邮件与图表notifysend)与[推送：通知渠道](#推送通知渠道notifysend)；
 - 本地 `ctx.pt.query()` / `ctx.pt.asset.*` / `ctx.pt.ai.*` 仍返回 501 `PT_GATEWAY_NOT_BOUND`。提示语比以前笼统
   （「本地没有数据网关……请在平台部署后联调」），并会多一条 `pt-gateway-query-failed` / `pt-gateway-asset-failed`
   日志 —— 都属预期，不是故障；
@@ -746,7 +803,7 @@ npm run package    # 组装 zip + 结构自检
 | `ui:notify` | 宿主 UI 能力（`PtApp.ui` 的 toast / confirm） | — |
 | `asset:write` | `ctx.pt.asset.ensureFolder / create / update / uploadSource` | **写类，没有 first-party 豁免**：管理员必须显式同意，否则 403 `SCOPE_DENIED` |
 | `ai:invoke` | `ctx.pt.ai.chat / stream` | **写类**（花钱），同上；额度用完返回 `AI_BUDGET_EXCEEDED` |
-| `notify:send` | `ctx.pt.notify.email` / `ctx.pt.render.chart` | **写类**，管理员必须显式同意；以 Ptengine 的名义给工作区成员发信，授权文案已含「向工作区通知渠道发消息」（渠道推送上线时复用） |
+| `notify:send` | `ctx.pt.notify.email` / `notify.channel` / `notify.listChannels` / `ctx.pt.render.chart` | **写类**，管理员必须显式同意；以 Ptengine 的名义给工作区成员发信、向工作区通知渠道发消息（同一个 scope） |
 
 数据类 scope（取数 / 资产 / AI / Open API）决定平台给不给后端挂数据网关或 Open API 地址：
 一条都没声明 → 没有 binding，501（`PT_GATEWAY_NOT_BOUND` / `PT_OPENAPI_NOT_DECLARED`）；

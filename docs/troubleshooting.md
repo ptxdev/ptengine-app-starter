@@ -170,9 +170,9 @@ Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc`
 （`wrangler dev -c wrangler.jsonc -c ../scripts/local-gateway/wrangler.jsonc`）会把它一起拉起来。
 用 `npm run dev`，不要绕过它。
 
-### 推送 / 图表本地桩
+### 推送 / 图表 / 通知渠道本地桩
 
-- **`ctx.pt.notify.email` / `ctx.pt.render.chart` 本地 503 `PTX_STUB_UNAVAILABLE`**：本地桩（`127.0.0.1:8788`）没起来。用 `npm run dev` 启动（不要单独跑 `wrangler dev`）；
+- **`ctx.pt.notify.email` / `notify.channel` / `notify.listChannels` / `ctx.pt.render.chart` 本地 503 `PTX_STUB_UNAVAILABLE`**：本地桩（`127.0.0.1:8788`）没起来。用 `npm run dev` 启动（不要单独跑 `wrangler dev`）；
   横幅里若是「推送 / 图表本地桩没起来（…EADDRINUSE）：8788 被占」，是 8788 被别的进程（常见是另一个 `ptx dev`）占了，停掉它再重启。
   8788 被另一个 `ptx dev` 占用时请求可能成功，但邮件和图片会写到那个项目的 `.ptx/`。
   消息里写「wrangler.jsonc 缺 vars.PTX_STUB_ORIGIN」的，是 `scripts/local-gateway/wrangler.jsonc` 被改坏了，补回 `"PTX_STUB_ORIGIN": "http://127.0.0.1:8788"` 或升级 starter。
@@ -181,6 +181,16 @@ Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc`
 - **本地 403 `SCOPE_DENIED`（requiredScope: notify:send）**：manifest 的 `scopes` 没有 `notify:send`，加上后重启 `npm run dev`（本地令牌照抄 manifest）。
 - **直接访问本地桩得到 421 `PTX_STUB_BAD_HOST`**：本地桩只认 `127.0.0.1:8788` / `localhost:8788` 这两个 Host（防 DNS rebinding 读到 outbox），换用这两个地址打开。
 - **本地看到的邮件和预览面板里不一样**：本地外框是简化版、清洗只删平台一定会删的东西；以产品里的预览面板为准。
+- **`ctx.pt.notify.channel` 本地 404 `NOTIFY_CHANNEL_NOT_FOUND`**：项目里有 `.ptx/channels.json` 且没有这个名字 —— 补上它，或删掉这个文件（没有文件时任何合法名字都接受）。
+  消息里写「不合规」的，是名字不符合规则（小写字母、数字、`-`、`_`，最多 64 个字符，不能以 `-` / `_` 开头），线上也不可能有这个渠道。
+- **本地 500 `PTX_STUB_FAILED`，消息提到 `.ptx/channels.json`**：文件格式不对，应为 `[{ "name": "alerts", "type": "slack" }]`（type 是 slack / teams / chatwork / webhook）。
+- **本地 `listChannels()` 回 `[]`**：没有 `.ptx/channels.json`。线上的渠道由工作区管理员在「管理 → 通知渠道」里配置。
+- **本地 400 `NOTIFY_CHANNEL_MESSAGE_INVALID`**：看 `e.detail.field` 是哪个字段（线上同样带）。
+  - `message.imageUrl`：本地只收 `ctx.pt.render.chart()` 本地桩返回的 `http://localhost:8788/__ptx/media/…`（或路径形状同平台 media 地址的 https）；外链图片线上同样会被拒。
+  - `message.link.path`：只接受应用内路径 —— 首段不能带 scheme（`https:`、`javascript:`、`reports:42` 这种首段带冒号的也算），
+    不能以 `//` 开头、去掉一个前导 `#/` / `/` 后也不能再以 `/` 开头，`?` 之前不能有 `.` / `..` 路径段（含 `%2e` 编码）。线上同口径拒。
+- **本地 `notify.channel` 能过、线上 404**：线上的名字由管理员配置，且可能没对本应用开放（「可用应用」）；请管理员核对。
+- **报「notifyChannel 段缺 …（规则快照过旧）」**：使用者升级 starter；维护者跑 `npm run sync-rules`。
 - `.ptx/` 可以随时删除（已在 `.gitignore`）。
 
 ## 其他

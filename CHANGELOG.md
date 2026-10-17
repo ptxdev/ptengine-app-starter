@@ -33,7 +33,7 @@
 
 ## Unreleased
 
-> **待办（发版时）**：依赖区间升到含 `notify:send` / `PtApp.jobs.openPreview` 的 app-sdk 与含 `ctx.pt.notify` / `ctx.pt.render` /
+> **待办（发版时）**：依赖区间升到含 `notify:send` / `PtApp.jobs.openPreview` 的 app-sdk 与含 `ctx.pt.notify`（含 1c 的 `notify.channel` / `listChannels`）/ `ctx.pt.render` /
 > 预览日志的 app-backend，`PACKAGE_FLOORS` 同步，版本号确定，兼容矩阵补一行。在那之前本段能力在现有依赖区间上类型里没有、运行时拿不到。
 >
 > **发版前置（平台侧 chore，未完成不得发本版 starter）**——只看「npm 包已发」不够，下面两件没做时，照 `AGENTS.md` 写出的应用线上会被拒或崩：
@@ -70,6 +70,15 @@
 - 文档：`AGENTS.md` 新增「推送：邮件与图表」「预览模式写法」；定时任务第 4 条改为「预览里照常调用 notify.email（平台拦截）」；
   `docs/troubleshooting.md` 新增「推送 / 图表本地桩」。`.gitignore` 加 `.ptx/`。
 - 本地 `ctx.pt.jobs.*` 桩接受 `archiveToAssets`（布尔，JobView 缺省 false；非布尔 400 `JOB_OP_INVALID`）；`AGENTS.md` 补「结果归档」说明（定时任务 1b+）。
+- **通知渠道的本地桩**（定时任务 1c）：`ctx.pt.notify.channel` / `listChannels` 经本地网关桩转到 `127.0.0.1:8788`。消息按 `scripts/rules.json` 的 `notifyChannel` 段同口径校验
+  （名字、标题 / 正文 / 链接 / 图片形状、每 run 10 次、与邮件共用的本地并发闸、16 KiB 体积上限），写 `.ptx/outbox/<runId|interactive>/<seq>.channel.json`（与邮件共用序号），**永远不真实投递**；
+  渠道目录读项目内 `.ptx/channels.json`（没有时任何合法名字都接受、`listChannels` 回 `[]`）。本地推送预览页同时列出渠道消息（JSON 展示）。工作区分钟限额本地不模拟。
+  `link.path` 与平台同口径：带 scheme、以 `//` 开头（或去掉一个前导后仍以 `/` 开头）、含 `.` / `..` 段（含 `%2e`）一律 400 `NOTIFY_CHANNEL_MESSAGE_INVALID`；`text` 可省略或 `null`；本地 400 带 `details.field`。
+- `npx ptx job run --preview`：预览日志接受并显示 `stats.notifyChannel`（出现但不合规时与平台同口径整头作废）；预览尾部改指「本地推送预览（邮件 / 渠道消息）」。
+  上面 1b 条目里的「本地邮件预览页」现为「本地推送预览页」（邮件与渠道消息）。
+- `ptx doctor`：`notify:send` 检查的话术点名 `notify.channel` / `notify.listChannels`（识别范围不变，原本就覆盖）。
+- 规则快照同步：新增 `notifyChannel` 段。
+- `AGENTS.md` 新增「推送：通知渠道」（含告警任务示例与本地 `.ptx/channels.json` 用法），预览写法与 troubleshooting 同步。
 
 ## [3.7.1] - 2026-10-13
 
