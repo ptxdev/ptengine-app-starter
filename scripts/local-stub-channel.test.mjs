@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RULES } from './manifest.mjs';
-import { LINK_PATH_DOT_SEGMENT, LINK_PATH_SCHEME, channelRules, handleListChannels, handleNotifyChannel, loadLocalChannels, validateChannelMessage } from './local-stub/channel.mjs';
+import { channelRules, handleListChannels, handleNotifyChannel, loadLocalChannels, validateChannelMessage } from './local-stub/channel.mjs';
 import { createStubState, runCounters } from './local-stub/notify.mjs';
 
 const C = RULES.notifyChannel;
@@ -71,11 +71,9 @@ test('400 NOTIFY_CHANNEL_MESSAGE_INVALID 带 details.field，字段名与平台 
     assert.equal(validateChannelMessage(null).error.body.error.details, undefined);
 });
 
-test('LINK_PATH_SCHEME / LINK_PATH_DOT_SEGMENT 锁值 = contract NOTIFY_CHANNEL_LINK_PATH_SCHEME_PATTERN / NOTIFY_CHANNEL_LINK_PATH_DOT_SEGMENT_PATTERN（未进 rules.json 的本地副本，R11）', () => {
-    assert.equal(LINK_PATH_SCHEME.source, '^[a-z][a-z0-9+.-]*:');
-    assert.equal(LINK_PATH_SCHEME.flags, 'i');
-    assert.equal(LINK_PATH_DOT_SEGMENT.source, '^(?:[^?]*\\/)?(?:\\.|%2e){1,2}(?:[/?]|$)');
-    assert.equal(LINK_PATH_DOT_SEGMENT.flags, 'i');
+test('rules.json 的 linkPathSchemePattern / linkPathDotSegmentPattern = contract NOTIFY_CHANNEL_LINK_PATH_SCHEME_PATTERN / NOTIFY_CHANNEL_LINK_PATH_DOT_SEGMENT_PATTERN（{ source, flags }，R11 / R13）', () => {
+    assert.deepEqual(C.linkPathSchemePattern, { source: '^[a-z][a-z0-9+.-]*:', flags: 'i' });
+    assert.deepEqual(C.linkPathDotSegmentPattern, { source: '^(?:[^?]*\\/)?(?:\\.|%2e){1,2}(?:[/?]|$)', flags: 'i' });
 });
 
 test('link.path 点段（R11）：? 之前的 . / .. 段（含任意大小写 %2e，含 #/ 或 / 前导之后）→ 400 message.link.path', () => {
@@ -183,4 +181,13 @@ test('rules 缺 notifyChannel 段 / 缺键 → 抛「规则快照过旧」，不
     const { titleMax: _t, ...stale } = C;
     assert.throws(() => validateChannelMessage({ channel: 'a', message: MSG }, stale), /titleMax[\s\S]*规则快照过旧/);
     assert.throws(() => handleNotifyChannel(createStubState(), { claims: USER, body: { channel: 'a', message: MSG }, appName: 'x', channels: null, rules: stale }), /规则快照过旧/);
+});
+
+test('rules 缺 linkPathSchemePattern / linkPathDotSegmentPattern → 抛「规则快照过旧」（不留本地正则兜底）', () => {
+    const body = { channel: 'a', message: { title: 't', link: { label: 'x', path: 'reports/1' } } };
+    for (const key of ['linkPathSchemePattern', 'linkPathDotSegmentPattern']) {
+        const { [key]: _drop, ...stale } = C;
+        assert.throws(() => channelRules(stale), new RegExp(`${key}[\\s\\S]*规则快照过旧`), key);
+        assert.throws(() => validateChannelMessage(body, stale), /规则快照过旧/, key);
+    }
 });

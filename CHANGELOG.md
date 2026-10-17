@@ -77,7 +77,7 @@
 - `npx ptx job run --preview`：预览日志接受并显示 `stats.notifyChannel`（出现但不合规时与平台同口径整头作废）；预览尾部改指「本地推送预览（邮件 / 渠道消息）」。
   上面 1b 条目里的「本地邮件预览页」现为「本地推送预览页」（邮件与渠道消息）。
 - `ptx doctor`：`notify:send` 检查的话术点名 `notify.channel` / `notify.listChannels`（识别范围不变，原本就覆盖）。
-- 规则快照同步：新增 `notifyChannel` 段。
+- 规则快照同步：新增 `notifyChannel` 段。`link.path` 的 scheme / 点段正则也在其中（`linkPathSchemePattern` / `linkPathDotSegmentPattern`，`{ source, flags }`），本地渠道桩直接读它、不留副本；快照缺这两键时报「规则快照过旧」。
 - `AGENTS.md` 新增「推送：通知渠道」（含告警任务示例与本地 `.ptx/channels.json` 用法），预览写法与 troubleshooting 同步。
 
 ## [3.7.1] - 2026-10-13

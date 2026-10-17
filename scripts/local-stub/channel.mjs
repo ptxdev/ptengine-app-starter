@@ -3,9 +3,9 @@
  *
  * 判定顺序与线上平台一致（brief §4.5）：消息形状（第 3 步）→ 查渠道（第 5 步）→ 本 run 调用次数（第 6 步）→ 预览拦截（第 8 步）。
  * 被第 3 / 5 步拒掉的调用不计次（与平台同）。
- * 上限、正则与类型表全部读 scripts/rules.json 的 notifyChannel 段（缺键报「规则快照过旧」，不写字面量兜底）；错误码与线上同名。
- * 唯一例外是 link.path 的 scheme / 点段正则（LINK_PATH_SCHEME / LINK_PATH_DOT_SEGMENT，见下）：contract 已导出但未进 rules.json，暂留本地副本。
- * 可以比平台**严**，不能比平台**宽**（本地能过、线上被拒不可接受）。
+ * 上限、正则与类型表全部读 scripts/rules.json 的 notifyChannel 段（含 link.path 的 scheme / 点段正则 linkPathSchemePattern / linkPathDotSegmentPattern，
+ * 形如 { source, flags }，以 new RegExp(source, flags) 还原；缺键报「规则快照过旧」，不写字面量兜底）；错误码与线上同名。
+ * 与平台同口径（本地能过、线上被拒不可接受）。
  * link.path 与平台 parseChannelMessage 逐条同序：去一个前导 `#/` 或 `/` → 长度 → 字符集 → 带 scheme 或仍以 `/` 开头（P15）→ 含 . / .. 段（R11）→ 400。
  *
  * 本地**永远不真实投递**（含非预览）：本地没有渠道凭据，也不该从开发机往客户频道发消息（裁定 C34）。
@@ -25,7 +25,7 @@ import { LOCAL_MEDIA_SRC, jobRunOf, runCounters } from './notify.mjs';
  * maxConcurrentPerApp / maxBodyBytes 本模块不读，是 server.mjs（Task C3：并发闸、413 体积上限）经 channelRules 校验后用的，不是死键。
  */
 const REQUIRED_CHANNEL_KEYS = ['types', 'namePattern', 'titleMax', 'textMax', 'linkLabelMax', 'linkPathMax', 'linkPathPattern',
-    'maxPerRun', 'mediaPathPattern', 'maxConcurrentPerApp', 'maxBodyBytes'];
+    'maxPerRun', 'mediaPathPattern', 'maxConcurrentPerApp', 'maxBodyBytes', 'linkPathSchemePattern', 'linkPathDotSegmentPattern'];
 
 export function channelRules(rules) {
     const missing = rules ? REQUIRED_CHANNEL_KEYS.filter(k => rules[k] == null) : ['notifyChannel'];
@@ -35,18 +35,8 @@ export function channelRules(rules) {
     return rules;
 }
 
-/**
- * contract `NOTIFY_CHANNEL_LINK_PATH_SCHEME_PATTERN`（packages/contract/src/limits.ts）的本地副本，source / flags 逐字照抄（R4/P15）：
- * 去前导之后带 scheme（`https:`、`javascript:` 等）的 link.path 即绝对地址。
- * 该常量尚未进 buildRules().notifyChannel（rules.json 读不到）；待导出后改读 rules.json 并删掉本副本。
- */
-export const LINK_PATH_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
-/**
- * contract `NOTIFY_CHANNEL_LINK_PATH_DOT_SEGMENT_PATTERN`（packages/contract/src/limits.ts）的本地副本，source / flags 逐字照抄（R11）：
- * 去前导之后 `?` 之前的路径部分含 `.` / `..` 段（含任意大小写 `%2e`）即拒——线上深链经 URL 归一化会逃出 apps/<appUuid>/。
- * `a.b/c..d`、`?q=..` 不受影响。该常量尚未进 buildRules().notifyChannel（rules.json 读不到）；待导出后改读 rules.json 并删掉本副本。
- */
-export const LINK_PATH_DOT_SEGMENT = /^(?:[^?]*\/)?(?:\.|%2e){1,2}(?:[/?]|$)/i;
+/** rules.json 里以 { source, flags } 存的正则还原成 RegExp（contract buildRules().notifyChannel 的序列化形状）。 */
+const regexOf = ({ source, flags }) => new RegExp(source, flags);
 
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const codePoints = s => [...s].length;
@@ -129,11 +119,11 @@ export function validateChannelMessage(body, rules = RULES.notifyChannel) {
             return invalid('message.link.path', 'message.link.path 只能是应用内路径，只含 URL 路径字符（不含 # 空白 控制字符等）');
         }
         // P15：带 scheme，或去一个前导后仍以 / 开头（即原值 // 开头）= 绝对地址
-        if (LINK_PATH_SCHEME.test(path) || path.startsWith('/')) {
-            return invalid('message.link.path', 'message.link.path 只接受应用内路径：首段不能带 scheme（https: / javascript: / reports:42 …），也不能以 // 开头');
+        if (regexOf(r.linkPathSchemePattern).test(path) || path.startsWith('/')) {
+            return invalid('message.link.path', 'message.link.path 只接受应用内路径：首段不能带 scheme（https: / javascript: / reports:42 …），去掉一个前导后不能再以 / 开头');
         }
         // R11：点段（含 %2e）在线上会经 URL 归一化逃出 apps/<appUuid>/
-        if (LINK_PATH_DOT_SEGMENT.test(path)) {
+        if (regexOf(r.linkPathDotSegmentPattern).test(path)) {
             return invalid('message.link.path', 'message.link.path 不能含 . 或 .. 路径段（含 %2e 编码；文件名与 ? 之后的点不受影响）');
         }
         link = { label, path };

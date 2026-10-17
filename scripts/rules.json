@@ -232,6 +232,14 @@
         },
         "signatureVersion": "v1",
         "maxConcurrentPerApp": 2,
-        "maxBodyBytes": 16384
+        "maxBodyBytes": 16384,
+        "linkPathSchemePattern": {
+            "source": "^[a-z][a-z0-9+.-]*:",
+            "flags": "i"
+        },
+        "linkPathDotSegmentPattern": {
+            "source": "^(?:[^?]*\\/)?(?:\\.|%2e){1,2}(?:[/?]|$)",
+            "flags": "i"
+        }
     }
 }
