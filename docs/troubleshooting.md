@@ -187,7 +187,8 @@ Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc`
 - **本地 500 `PTX_STUB_FAILED`，消息提到 `.ptx/channels.json`**：文件格式不对，应为 `[{ "name": "alerts", "type": "slack" }]`（type 是 slack / teams / chatwork / webhook）。
 - **本地 `listChannels()` 回 `[]`**：没有 `.ptx/channels.json`。线上的渠道由工作区管理员在「管理 → 通知渠道」里配置。
 - **本地 `.ptx/outbox/…/<seq>.channel.json` 和线上运行记录里的渠道存档对不上**：本地文件是简化版 ——
-  `message.link` 是原始 `{ label, path }`（不展开；线上存展开后的 `{ label, url }`）、多一个 `status` 字段（线上没有）、`rendered` 为 `null`（线上是平台渲染出的渠道请求体）。属预期，不是 bug。
+  `message.link` 是原始 `{ label, path }`（不展开；线上存展开后的 `{ label, url }`）、多一个 `status` 字段（线上没有）、`rendered` 为 `null`（线上是平台渲染出的渠道请求体）、`delivery` 恒为 `null`（本地从不投递，线上存投递结果）。属预期，不是 bug。
+  另外，线上存档的 `rendered` 与实际发出的体只是语义相等（键序可能不同），不能用来重算 webhook 签名。
 - **本地 400 `NOTIFY_CHANNEL_MESSAGE_INVALID`**：看 `e.detail.field` 是哪个字段（线上同样带）。
   - `message.imageUrl`：本地只收 `ctx.pt.render.chart()` 本地桩返回的 `http://localhost:8788/__ptx/media/…`（或路径形状同平台 media 地址的 https）；外链图片线上同样会被拒。
   - `message.link.path`：只接受应用内路径 —— 不能带 scheme（以字母开头、由字母 / 数字 / `+` `.` `-` 组成并紧跟冒号的前缀，如 `https:`、`javascript:`，所以 `reports:42` 也算），

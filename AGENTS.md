@@ -505,7 +505,8 @@ const r = await ctx.pt.notify.email({
 - 本地（`npm run dev`）：**永远不真实投递**（含非预览）。消息按 `scripts/rules.json` 的 `notifyChannel` 段同口径校验（名字、标题 / 正文 / 链接 / 图片、每 run 10 次、与邮件共用的本地并发闸、16 KiB 体积上限），
   写进 `.ptx/outbox/<runId|interactive>/<seq>.channel.json`（与邮件共用序号），终端打印一行；被拒的调用不写文件。工作区分钟限额本地不模拟。
   这个文件是线上存档（运行记录里的 outbox）的**简化版**，三处不同：`message.link` 存你传的原样 `{ label, path }`（线上存的是展开成绝对地址的 `{ label, url }`）；
-  多一个 `status`（`sent` / `intercepted`，给本地预览用，线上存档没有）；`rendered` 恒为 `null`（各渠道的实际请求体只在平台渲染）。别拿本地文件的形状去写解析线上存档的代码。
+  多一个 `status`（`sent` / `intercepted`，给本地预览用，线上存档没有）；`rendered` 恒为 `null`（各渠道的实际请求体只在平台渲染）；`delivery` 恒为 `null`（本地从不投递，线上存的是投递结果）。别拿本地文件的形状去写解析线上存档的代码。
+  线上存档里的 `rendered` 与实际发出的请求体**语义相等、键序可能不同**（不保证逐字节相同），不能拿它重算或核对 webhook 签名，验签只认收到的原始字节。
   渠道目录用项目内 `.ptx/channels.json`（`[{ "name": "alerts", "type": "slack" }]`，改了即时生效）：**有这个文件**时名字不在里面 → 404，`listChannels()` 回它；
   **没有**时任何合法名字都接受（类型记 `webhook`），`listChannels()` 回 `[]`。图片本地收本地图表桩返回的 `http://localhost:8788/__ptx/media/…`；
   路径形状同平台 media 地址的 https 也放行（本地核不了主机与工作区 / 应用段，终端会提示），其余一律 400。
