@@ -375,7 +375,7 @@ Worker 自己不能起定时（见[硬边界 3](#3-后端没有的能力写了�
    **应用代码不用改**。在应用里用 `PtApp.jobs.openPreview()` 让用户订阅时，把结果里的 `archiveToAssets` 原样传给
    `ctx.pt.jobs.create({ …, archiveToAssets })`；只有创建者本人能改它。归档失败不影响运行成败，运行记录里会显示归档状态。
    本地与线上的差异：本地 `ctx.pt.jobs.*` 桩只存取 `archiveToAssets` 这个开关（非布尔同样 400 `JOB_OP_INVALID`），
-   **不做真实归档**、也没有运行记录与归档状态；`npx ptx job run` 打印的 `stored` 只表示「线上平台会采集这份结果」。
+   **不做真实归档**、也没有运行记录与归档状态；`npm run ptx -- job run` 打印的 `stored` 只表示「线上平台会采集这份结果」。
 
 示例用 D1 记占位，需要 manifest 的 `backend.resources.database: true`，并加一个迁移
 （序号接在已有迁移之后，例如 `backend/migrations/0002_job_runs.sql`）：
@@ -560,8 +560,8 @@ const r = await ctx.pt.notify.email({
 `npm run dev` 跑着时，另开一个终端：
 
 ```bash
-npx ptx job run weekly-report --params '{"channel":"x"}'    # 正式运行
-npx ptx job run weekly-report --preview                      # 预览运行（ctx.auth.preview === true）
+npm run ptx -- job run weekly-report --params '{"channel":"x"}'    # 正式运行
+npm run ptx -- job run weekly-report --preview                      # 预览运行（ctx.auth.preview === true）
 ```
 
 它读 `manifest.backend.jobs` 找到路由，用 `web/.ptx-dev-key.json` 签一枚任务模式令牌
@@ -579,7 +579,7 @@ POST 到 `http://127.0.0.1:$PTX_API_PORT/api<route>`（`PTX_API_PORT` 缺省 878
 | `too_large` | **整个响应体**的 UTF-8 字节数超过 `jobResult.maxBytes`（`files` 也算在内），平台不采集 |
 
 本地的 `ctx.pt.jobs.*` 走 `ptx dev` 拉起的内存桩（见[本地开发](#本地开发)）：重启即清空，不校验 cron / 时区 / 配额，
-**也不会按时触发** —— 要跑任务路由只能用 `npx ptx job run`。
+**也不会按时触发** —— 要跑任务路由只能用 `npm run ptx -- job run`。
 
 `--preview` 时命令还会打印应用回的预览日志（`ctx.log` 与取数 / 邮件 / 图表 / 渠道消息次数，与预览面板里的同一份），
 以及这次运行写下的邮件与渠道消息的本地预览页 `http://localhost:8788/__ptx/outbox/<runId>`（需要 `npm run dev` 正在跑）。
@@ -698,7 +698,7 @@ npm run dev        # 同时起 vite（前端）与 wrangler dev（后端），�
 **本地网关桩 `ptx-local-gateway`。** `ptx dev` 在同一个 `wrangler dev` 会话里多拉起一个桩 worker
 （`scripts/local-gateway/`），`backend/wrangler.jsonc` 的 `PT_GATEWAY` 按服务名绑到它：
 
-- 本地 `ctx.pt.jobs.*` 走它，**内存存储，重启即清空**，不会按时触发（运行任务路由用 `npx ptx job run`）；
+- 本地 `ctx.pt.jobs.*` 走它，**内存存储，重启即清空**，不会按时触发（运行任务路由用 `npm run ptx -- job run`）；
 - 本地 `ctx.pt.notify.email` / `notify.channel` / `notify.listChannels` / `ctx.pt.render.chart` 由它转给 `ptx dev` 进程里的推送 / 图表桩（`127.0.0.1:8788`），
   写 `.ptx/`、不真实发信、不真实投递，见[推送：邮件与图表](#推送邮件与图表notifysend)与[推送：通知渠道](#推送通知渠道notifysend)；
 - 本地 `ctx.pt.query()` / `ctx.pt.asset.*` / `ctx.pt.ai.*` 仍返回 501 `PT_GATEWAY_NOT_BOUND`。提示语比以前笼统
@@ -825,9 +825,9 @@ npm run package    # 组装 zip + 结构自检
 ## 发布与 CI
 
 ```bash
-npx ptx deploy --dry-run           # 只打印将要做什么，不发请求
-npx ptx deploy --publish           # 上传并立即发布
-npx ptx deploy --publish --stream  # 同上，流式打印九步进度（否则要等 20–40 秒）
+npm run ptx -- deploy --dry-run           # 只打印将要做什么，不发请求
+npm run ptx -- deploy --publish           # 上传并立即发布
+npm run ptx -- deploy --publish --stream  # 同上，流式打印九步进度（否则要等 20–40 秒）
 ```
 
 需要环境变量 `PTENGINE_TOKEN` 与 `PTENGINE_APP_ID`，可选 `PTENGINE_API_BASE`（默认线上）。
@@ -842,7 +842,7 @@ npx ptx deploy --publish --stream  # 同上，流式打印九步进度（否则�
 > CI 里任何一个恶意依赖都能读到它。
 >
 > **令牌绝不能进仓** —— 写死在代码、`.env` 提交、CI 配置文件明文都算。
-> `npx ptx doctor` 会扫已入库的文件，发现令牌明文会直接报 bad。
+> `npm run ptx -- doctor` 会扫已入库的文件，发现令牌明文会直接报 bad。
 
 ---
 

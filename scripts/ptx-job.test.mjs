@@ -30,8 +30,8 @@ const decode = t => JSON.parse(Buffer.from(t.replace(/^Bearer /, '').split('.')[
 test('parseJobArgs', () => {
     assert.deepEqual(parseJobArgs(['run', 'weekly-report']), { type: 'weekly-report', params: {}, preview: false });
     assert.deepEqual(parseJobArgs(['run', 'w', '--params', '{"a":1}', '--preview']), { type: 'w', params: { a: 1 }, preview: true });
-    assert.throws(() => parseJobArgs([]), /ptx job run/);
-    assert.throws(() => parseJobArgs(['list']), /ptx job run/);
+    assert.throws(() => parseJobArgs([]), /npm run ptx -- job run/);
+    assert.throws(() => parseJobArgs(['list']), /npm run ptx -- job run/);
     assert.throws(() => parseJobArgs(['run']), /<type>/);
     assert.throws(() => parseJobArgs(['run', '--preview']), /<type>/);
     assert.throws(() => parseJobArgs(['run', 'w', '--params', '{x']), /不是合法 JSON/);

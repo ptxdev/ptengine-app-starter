@@ -1,7 +1,7 @@
 /**
  * ptx job run —— 在本地以「定时任务」的身份调一次任务路由。
  *
- *   npx ptx job run <type> [--params '<json>'] [--preview]
+ *   npm run ptx -- job run <type> [--params '<json>'] [--preview]
  *
  * 读 manifest.backend.jobs 找到 route，用 ptx dev 生成的本地开发密钥（web/.ptx-dev-key.json）签一枚
  * 任务模式 token（trg='job'、job='local'、run=<uuid>、mode），POST 到本地 worker，打印状态码、响应体，
@@ -28,7 +28,7 @@ export const LOCAL_JOB_TOKEN_TTL_SEC = 360;
 /** = 平台 JOB_RUN_BUDGET_SEC × 1000（scheduler 调应用时的超时）。 */
 export const LOCAL_JOB_TIMEOUT_MS = 300_000;
 
-const USAGE = "用法：npx ptx job run <type> [--params '<json>'] [--preview]";
+const USAGE = "用法：npm run ptx -- job run <type> [--params '<json>'] [--preview]";
 
 export function parseJobArgs(args) {
     const [sub, type, ...rest] = args;

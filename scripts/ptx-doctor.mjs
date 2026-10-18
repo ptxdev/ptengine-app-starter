@@ -8,8 +8,8 @@
  * 收录标准：只查那些**违反后不报错、现象不直观**的东西（白屏、没样式、
  * 上传被拒、线上 401）。能靠 tsc 或 vite 报出来的，这里不重复查。
  *
- *   npx ptx doctor            本地检查
- *   npx ptx doctor --deps     额外检查 @ptengine/* 依赖是否落后于 npm 最新版（需要网络）
+ *   npm run ptx -- doctor            本地检查
+ *   npm run ptx -- doctor --deps     额外检查 @ptengine/* 依赖是否落后于 npm 最新版（需要网络）
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';

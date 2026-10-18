@@ -2,7 +2,7 @@
  * 本地 ctx.pt.jobs.* 的内存桩（ptx dev 期间生效）。纯逻辑，worker.mjs 包一层 HTTP。
  *
  * 只模拟「本人视角」（asAdmin=false）：能管的只有自己创建的任务。**不校验 cron / 时区 / 间隔 / 配额、
- * 不会按时触发** —— 要跑任务路由用 `npx ptx job run <type>`。错误码与平台同名，方便本地写错误分支。
+ * 不会按时触发** —— 要跑任务路由用 `npm run ptx -- job run <type>`。错误码与平台同名，方便本地写错误分支。
  * 令牌只解不验：这是本机开发桩，验签由 app-backend 在任务路由那一侧真做。
  */
 

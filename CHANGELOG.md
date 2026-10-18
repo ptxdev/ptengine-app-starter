@@ -54,7 +54,7 @@
   邮件写 `.ptx/outbox/<runId|interactive>/<seq>.json` 与 `.html`（**不真实发信**，终端打印本地预览地址与「平台会去掉的东西」），
   图表用与平台同一套 echarts + resvg 渲染进 `.ptx/media/`。校验、本 run 限额与错误码与线上同名，上限读 `scripts/rules.json`。
   `echarts@^5.6.0` / `@resvg/resvg-js@^2.6.2` 是 optionalDependencies，装不上时只有本地渲染报 501 `PTX_RENDER_DEPS_MISSING`。
-- **`npx ptx job run <type> --preview`**：另打印应用回的预览日志（`x-pt-job-log`：`ctx.log` 与取数 / 邮件 / 图表次数）与本地邮件预览页。
+- **`npm run ptx -- job run <type> --preview`**：另打印应用回的预览日志（`x-pt-job-log`：`ctx.log` 与取数 / 邮件 / 图表次数）与本地邮件预览页。
 - **`ptx doctor`**：后端用了 `ctx.pt.notify` / `ctx.pt.render.chart` 却没声明 `notify:send` → bad。
 - 规则快照同步：`validScopes` 加 `notify:send`，新增 `notify` / `render` / `jobLog` 段。
 - 规则快照同步：`notify` / `render` 段新增 `maxConcurrentPerApp`（各 2），`render` 段新增 `timeoutMs`（5000）；本地桩的每应用并发闸默认生效。
@@ -74,11 +74,17 @@
   （名字、标题 / 正文 / 链接 / 图片形状、每 run 10 次、与邮件共用的本地并发闸、16 KiB 体积上限），写 `.ptx/outbox/<runId|interactive>/<seq>.channel.json`（与邮件共用序号），**永远不真实投递**；
   渠道目录读项目内 `.ptx/channels.json`（没有时任何合法名字都接受、`listChannels` 回 `[]`）。本地推送预览页同时列出渠道消息（JSON 展示）。工作区分钟限额本地不模拟。
   `link.path` 与平台同口径：带 scheme、以 `//` 开头（或去掉一个前导后仍以 `/` 开头）、含 `.` / `..` 段（含 `%2e`）一律 400 `NOTIFY_CHANNEL_MESSAGE_INVALID`；`text` 可省略或 `null`；本地 400 带 `details.field`。
-- `npx ptx job run --preview`：预览日志接受并显示 `stats.notifyChannel`（出现但不合规时与平台同口径整头作废）；预览尾部改指「本地推送预览（邮件 / 渠道消息）」。
+- `npm run ptx -- job run --preview`：预览日志接受并显示 `stats.notifyChannel`（出现但不合规时与平台同口径整头作废）；预览尾部改指「本地推送预览（邮件 / 渠道消息）」。
   上面 1b 条目里的「本地邮件预览页」现为「本地推送预览页」（邮件与渠道消息）。
 - `ptx doctor`：`notify:send` 检查的话术点名 `notify.channel` / `notify.listChannels`（识别范围不变，原本就覆盖）。
 - 规则快照同步：新增 `notifyChannel` 段。`link.path` 的 scheme / 点段正则也在其中（`linkPathSchemePattern` / `linkPathDotSegmentPattern`，`{ source, flags }`），本地渠道桩直接读它、不留副本；快照缺这两键时报「规则快照过旧」。
 - `AGENTS.md` 新增「推送：通知渠道」（含告警任务示例与本地 `.ptx/channels.json` 用法），预览写法与 troubleshooting 同步。
+
+### 安全
+
+- 文档、命令提示、`.github/workflows/deploy.yml` 里用 `npx` 调 `ptx` 的写法全部改为 `npm run ptx -- <command>`：`ptx` 只是本项目
+  `package.json` 的 script、没有 bin，`npx` 在本地找不到时会去 npm 下载并执行一个同名的无关公共包。新增 `scripts/no-npx-ptx.test.mjs`
+  禁止仓内再出现这种写法。**已从旧版脚手架生成的项目**请同样改自己的 CI 与脚本。
 
 ## [3.7.1] - 2026-10-13
 
@@ -143,7 +149,7 @@
 
 ### 新增
 
-- **`npx ptx job run <type> [--params '<json>'] [--preview]`**：用本地开发密钥签一枚任务模式令牌
+- **`npm run ptx -- job run <type> [--params '<json>'] [--preview]`**：用本地开发密钥签一枚任务模式令牌
   （`trg=job`、`job=local`、`run=<uuid>`），POST 到本地 worker 的任务路由，打印状态码、响应体，
   以及平台会把返回结果判成 `stored / none / invalid（原因）/ too_large`。需要先 `npm run dev`。
 - **`ptx doctor` 定时任务检查**：声明了 `backend.jobs` 却没有 `jobs:run`（bad）；任务路由不在
@@ -153,7 +159,7 @@
   `backend/wrangler.jsonc` 的 `PT_GATEWAY` 绑到它；重启即清空，不会按时触发。
   副作用：本地 `ctx.pt.query()` / `ctx.pt.asset.*` / `ctx.pt.ai.*` 仍是 501 `PT_GATEWAY_NOT_BOUND`，但提示语变笼统，
   并多一条 `pt-gateway-*-failed` 日志（预期行为）；直接在 `backend/` 里跑 `wrangler dev` 会解析不到该服务，请用 `npm run dev`。
-- `npx ptx job run` 签的任务 token 与 dev token 同一口径：scopes 照抄 `manifest.json` 的 `scopes`（3.7.1 起），
+- `npm run ptx -- job run` 签的任务 token 与 dev token 同一口径：scopes 照抄 `manifest.json` 的 `scopes`（3.7.1 起），
   manifest 声明 `jobs:run` 后本地 `ctx.pt.jobs.*` 即可用。
 - 规则快照同步：`validScopes` 加 `jobs:run`，新增 `jobResult` 上限段；`scripts/job-result.mjs` 按平台口径本地判定任务返回结果。
 - 文档：README / AGENTS.md 新增「定时任务（backend.jobs）」—— `requireTrigger('job')`、用 `ctx.auth.runId` 做幂等

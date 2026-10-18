@@ -24,7 +24,7 @@ npm run build      # type-check + build the front end + bundle the backend
 npm run package    # assemble an uploadable zip
 ```
 
-Upload the zip from `npm run package` on the Ptengine **Custom App management** page, or run `npx ptx deploy --publish` from CI.
+Upload the zip from `npm run package` on the Ptengine **Custom App management** page, or run `npm run ptx -- deploy --publish` from CI.
 
 > **Platform prerequisite** — uploading and publishing require App Runtime to be enabled on your Ptengine backend; without it `ptx deploy` returns 404 or 401. **Local `npm run dev` is unaffected.**
 
@@ -71,11 +71,13 @@ Plenty of apps need no backend at all. To go front-end only: `rm -rf backend/`, 
 
 ## `ptx` commands
 
-| Command (also `npx ptx <command>`) | What it does |
+> `ptx` is a script in this project's `package.json`, not an installed binary — run it as `npm run ptx -- <command>`. Don't use `npx` for it: `npx` would download and run an unrelated public package of the same name from npm.
+
+| Command (also `npm run ptx -- <command>`) | What it does |
 |---|---|
 | `npm run dev` | vite + `wrangler dev` (your worker plus the local gateway stub `ptx-local-gateway`) + a local token endpoint. `PTX_WEB_PORT` / `PTX_API_PORT` move the ports |
 | `npm run doctor` | Checks conventions and manifest consistency. `--deps` also reports dependency drift |
-| `npx ptx job run <type> [--params '<json>'] [--preview]` | Calls a job route locally as a scheduled job (needs `npm run dev` running; port `PTX_API_PORT`, default 8787); prints the status, body and how the platform would classify the returned result |
+| `npm run ptx -- job run <type> [--params '<json>'] [--preview]` | Calls a job route locally as a scheduled job (needs `npm run dev` running; port `PTX_API_PORT`, default 8787); prints the status, body and how the platform would classify the returned result |
 | `npm run build` | Type-check (web + backend + shared) + vite build + wrangler bundle |
 | `npm run package` | Assemble the zip and self-check its structure |
 | `npm run deploy` | Upload. `--publish` releases immediately, `--stream` streams progress, `--dry-run` only prints |
@@ -86,7 +88,7 @@ Plenty of apps need no backend at all. To go front-end only: `rm -rf backend/`, 
 
 Your own configuration and secrets go in `backend/.dev.vars`, one `KEY=VALUE` per line; `ptx dev` only rewrites the `PT_`-prefixed keys it manages and leaves your lines untouched. That file and `web/.ptx-dev-key.json` are gitignored — never commit them. Full rules, including how values are injected and why a restart is needed: [`AGENTS.md`](./AGENTS.md#本地配置backenddevvars).
 
-Scheduled jobs follow the same rule: to use `ctx.pt.jobs.*` locally, declare `jobs:run` in the manifest and restart — the dev token (and the job token `npx ptx job run` signs) carries exactly the manifest's `scopes`.
+Scheduled jobs follow the same rule: to use `ctx.pt.jobs.*` locally, declare `jobs:run` in the manifest and restart — the dev token (and the job token `npm run ptx -- job run` signs) carries exactly the manifest's `scopes`.
 
 `ptx dev` also starts a local gateway stub, `ptx-local-gateway`, in the same `wrangler dev` session (`PT_GATEWAY` in `backend/wrangler.jsonc` binds to it). It only implements `ctx.pt.jobs.*`, in memory — a restart wipes it, and nothing ever fires on schedule. Locally `ctx.pt.query()` / `ctx.pt.asset.*` / `ctx.pt.ai.*` still answer 501 `PT_GATEWAY_NOT_BOUND` (with a more generic message than before, plus a `pt-gateway-*-failed` log line — expected). Don't run `wrangler dev` directly inside `backend/`: without `ptx dev` the `ptx-local-gateway` service can't be resolved.
 
@@ -95,7 +97,7 @@ Scheduled jobs follow the same rule: to use `ctx.pt.jobs.*` locally, declare `jo
 Declare job types in `manifest.json` (`backend.jobs`, plus the `jobs:run` scope), add a route with the **same key** to `shared/api.ts` and `backend/src/index.ts` whose first line is `ctx.requireTrigger('job')`, and let users subscribe via `ctx.pt.jobs.create()` from a user request. Then, with `npm run dev` running:
 
 ```bash
-npx ptx job run weekly-report --params '{"channel":"email"}'   # add --preview for a preview run
+npm run ptx -- job run weekly-report --params '{"channel":"email"}'   # add --preview for a preview run
 ```
 
 It signs a job-mode token with your local dev key, POSTs the params to `/api<route>` and prints the status, the response body and a verdict: `stored` (the platform would archive the returned `{ archive }`), `none` (nothing to collect — no `archive`, non-2xx or non-JSON), `invalid (reason)` (the `archive` breaks a rule; the run still counts, but nothing is archived) or `too_large` (the whole response body, `files` included, exceeds `jobResult.maxBytes`). Idempotency via `ctx.auth.runId`, preview handling and the full walkthrough: [`AGENTS.md`](./AGENTS.md#定时任务backendjobs). `ctx.auth.trigger` / `preview` and `ctx.pt.jobs` need an `@ptengine/app-backend` release that includes scheduled jobs.
@@ -164,9 +166,9 @@ jobs:
   deploy:
     steps:
       - run: npm ci
-      - run: npx ptx doctor
-      - run: npx ptx build && npx ptx package
-      - run: npx ptx deploy --publish
+      - run: npm run ptx -- doctor
+      - run: npm run ptx -- build && npm run ptx -- package
+      - run: npm run ptx -- deploy --publish
         env:
           PTENGINE_TOKEN: ${{ secrets.PTENGINE_TOKEN }}
           PTENGINE_APP_ID: ${{ vars.PTENGINE_APP_ID }}

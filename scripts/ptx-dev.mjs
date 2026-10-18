@@ -182,7 +182,7 @@ export async function run(args, root) {
 
   令牌的 scopes 照抄 manifest.json：要改权限就改 manifest 再重启。
   临时模拟别的站点 / 缺某个权限：直接改 web/.ptx-dev-key.json 的 sid / scopes，不用重启（下次 ptx dev 会重写它）。
-  ctx.pt.jobs.* 走本地内存桩（重启即清空）；运行任务路由：npx ptx job run <type> [--params '{…}'] [--preview]
+  ctx.pt.jobs.* 走本地内存桩（重启即清空）；运行任务路由：npm run ptx -- job run <type> [--params '{…}'] [--preview]
   ${stubLine}
   密钥与普通配置都写在 backend/.dev.vars（一个文件，一行一个 KEY=VALUE），ptx 不会覆盖它们。
   线上只注入 manifest.backend.secrets / backend.vars 声明过的名字。

@@ -25,8 +25,8 @@ README 里列了最常撞上的五条，这里是全集。绝大多数问题 `np
 要么 `PTENGINE_TOKEN` 无效或已撤销 —— 到「自定义应用管理」→ 部署令牌 重新生成。
 
 **想先看看会做什么、不真发请求？**
-`npx ptx deploy --dry-run`。想看实时进度而不是等 20–40 秒一次性返回，
-用 `npx ptx deploy --publish --stream`。
+`npm run ptx -- deploy --dry-run`。想看实时进度而不是等 20–40 秒一次性返回，
+用 `npm run ptx -- deploy --publish --stream`。
 
 ## 前端
 
@@ -117,7 +117,7 @@ dev 模式下 `window.PtApp` 是异步挂上的，去掉它 `useMemo(getPtApp, [
 先确认你走的是平台调度器（manifest `backend.jobs` + `jobs:run`，见 AGENTS.md 的「定时任务」）。
 Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc` 里写 `triggers.crons`
 会被**静默丢弃**（无报错、定时永不触发）。本地更不会按时触发：本地 `ctx.pt.jobs.*` 只是内存桩，
-要运行任务路由用 `npx ptx job run <type>`。
+要运行任务路由用 `npm run ptx -- job run <type>`。
 
 > `ctx.auth.trigger` / `preview`、`ctx.requireTrigger()` 与 `ctx.pt.jobs.*` 需要升级到含定时任务的
 > `@ptengine/app-backend` 版本后才生效；旧版本上 tsc 会说这些属性不存在。
@@ -132,14 +132,14 @@ Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc`
 
 ## 定时任务与本地网关
 
-**`npx ptx job run` 报「没找到本地开发密钥」或「请求本地 worker 失败」？**
+**`npm run ptx -- job run` 报「没找到本地开发密钥」或「请求本地 worker 失败」？**
 它要连正在跑的 `npm run dev`：先在另一个终端启动它；后端端口改过的话，两边用同一个 `PTX_API_PORT`（缺省 8787）。
 
-**`npx ptx job run` 报「backend.jobs 里没有类型 …」？**
+**`npm run ptx -- job run` 报「backend.jobs 里没有类型 …」？**
 `<type>` 要与 `manifest.json` 的 `backend.jobs[].type` 完全一致；`--params` 必须是 JSON **对象**
 （shell 里用单引号包住：`--params '{"channel":"email"}'`）。
 
-**`npx ptx job run` 打印的结果是 `none` / `invalid` / `too_large`？**
+**`npm run ptx -- job run` 打印的结果是 `none` / `invalid` / `too_large`？**
 
 - `none` —— 平台没东西可采集：没返回 `archive`，或者不是 2xx、不是 JSON（括号里写了是哪种）。
   只想跑副作用、不需要存档的任务，`none` 就是正常结果。
@@ -151,11 +151,11 @@ Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc`
 
 **任务路由返回 403 `JOB_ONLY`？**
 路由第一行是 `ctx.requireTrigger('job')`，而这次请求来自用户（前端 `api()`、curl 带用户令牌）。
-这是设计行为：本地用 `npx ptx job run` 调，线上由平台调度器调。
+这是设计行为：本地用 `npm run ptx -- job run` 调，线上由平台调度器调。
 
 **本地 `ctx.pt.jobs.*` 报 403 `SCOPE_DENIED`（令牌里没有 `jobs:run`）？**
 本地 dev token 的 scopes 照抄 `manifest.json` 的 `scopes`。在 manifest 里加 `"jobs:run"` 后**重启**
-`npm run dev`（临时改 `web/.ptx-dev-key.json` 的 `scopes` 只影响前端拿到的令牌，下次 `ptx dev` 会被重写；`npx ptx job run` 始终按 manifest 算）。
+`npm run dev`（临时改 `web/.ptx-dev-key.json` 的 `scopes` 只影响前端拿到的令牌，下次 `ptx dev` 会被重写；`npm run ptx -- job run` 始终按 manifest 算）。
 
 **本地 `ctx.pt.jobs.*` 建的任务重启后没了？**
 本地网关桩 `ptx-local-gateway` 是内存存储，`ptx dev` 重启即清空。它也不校验 cron / 时区 / 配额，以平台为准。

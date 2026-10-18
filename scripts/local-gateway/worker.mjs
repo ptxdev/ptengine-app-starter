@@ -47,7 +47,7 @@ export default {
             if (!store.hinted) {
                 store.hinted = true;
                 console.log('[ptx] ctx.pt.jobs.* 走的是本地内存桩：ptx dev 重启即清空，不校验 cron / 时区 / 配额，也不会按时触发。' +
-                            '要运行任务路由：npx ptx job run <type>');
+                            '要运行任务路由：npm run ptx -- job run <type>');
             }
             let body;
             try { body = await request.json(); } catch { return json(400, { error: { code: 'JOB_OP_INVALID', message: 'body 不是合法 JSON' } }); }

@@ -51,7 +51,7 @@ const dcDist = resolveDesignComponentsDist();
  *    这条**必须按包名解析成绝对路径**（上面的 resolveDesignComponentsDist），
  *    不要改回 './node_modules/@ptengine/design-components/dist/**' —— 相对 glob
  *    按 web/ 解析，而依赖装在项目根，改回去就是静默地一个文件都扫不到。
- *    `npx ptx doctor` 会真的去验证这条 glob 能不能匹配到文件。
+ *    `npm run ptx -- doctor` 会真的去验证这条 glob 能不能匹配到文件。
  *
  * 自定义主题请写在 theme.extend 下（会与 preset 合并），不要覆盖 preset 的同名键。
  *

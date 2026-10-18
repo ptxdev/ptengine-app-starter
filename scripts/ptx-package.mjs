@@ -247,7 +247,7 @@ function assertFresh(root, outFile, srcDirs, label) {
                 : '（无）'}
 
      上传：到 Ptengine -> 「自定义应用管理」选这个 zip，
-           或在 CI 里跑 \`npx ptx deploy --publish\`。
+           或在 CI 里跑 \`npm run ptx -- deploy --publish\`。
 `);
     } finally {
         rmSync(stage, { recursive: true, force: true });
