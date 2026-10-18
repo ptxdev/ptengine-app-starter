@@ -76,7 +76,7 @@ Plenty of apps need no backend at all. To go front-end only: `rm -rf backend/`, 
 | Command (also `npm run ptx -- <command>`) | What it does |
 |---|---|
 | `npm run dev` | vite + `wrangler dev` (your worker plus the local gateway stub `ptx-local-gateway`) + a local token endpoint. `PTX_WEB_PORT` / `PTX_API_PORT` move the ports |
-| `npm run doctor` | Checks conventions and manifest consistency. `--deps` also reports dependency drift |
+| `npm run doctor` | Checks conventions and manifest consistency. `npm run doctor -- --deps` also reports dependency drift |
 | `npm run ptx -- job run <type> [--params '<json>'] [--preview]` | Calls a job route locally as a scheduled job (needs `npm run dev` running; port `PTX_API_PORT`, default 8787); prints the status, body and how the platform would classify the returned result |
 | `npm run build` | Type-check (web + backend + shared) + vite build + wrangler bundle |
 | `npm run package` | Assemble the zip and self-check its structure |

@@ -76,7 +76,7 @@ npx skills add ptxdev/ptengine-skills          # 大多数助手
 | 命令（也可以 `npm run ptx -- <command>`） | 作用 |
 |---|---|
 | `npm run dev` | vite + `wrangler dev`（你的 worker 加本地网关桩 `ptx-local-gateway`）+ 本地令牌端点。端口冲突用 `PTX_WEB_PORT` / `PTX_API_PORT` |
-| `npm run doctor` | 查约定与 manifest 自洽性。`--deps` 额外报依赖漂移 |
+| `npm run doctor` | 查约定与 manifest 自洽性。`npm run doctor -- --deps` 额外报依赖漂移 |
 | `npm run ptx -- job run <type> [--params '<json>'] [--preview]` | 以定时任务身份在本地调一次任务路由（需 `npm run dev` 在跑；端口取 `PTX_API_PORT`，缺省 8787）；打印状态码、响应体，以及平台会把返回结果判成什么 |
 | `npm run build` | 类型检查（web + backend + shared）+ vite build + wrangler bundle |
 | `npm run package` | 组装 zip 并做结构自检 |
