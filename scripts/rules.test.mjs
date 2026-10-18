@@ -51,7 +51,8 @@ test('notifyChannel 段（1c brief §1.6）：键齐全、数值与 brief 一致
           maxPerRun: c.maxPerRun, maxPerWorkspacePerMinute: c.maxPerWorkspacePerMinute, maxBodyBytes: c.maxBodyBytes },
         { titleMax: 150, textMax: 3000, linkLabelMax: 50, linkPathMax: 512, maxPerRun: 10, maxPerWorkspacePerMinute: 30, maxBodyBytes: 16384 }
     );
-    // 渠道与邮件共用网关的 notifyInflight（brief §1.3 / C21）
+    // 渠道与邮件共用网关的 notifyInflight（brief §1.3 / C21）。先断言是正整数：两边都缺时 undefined == undefined 也会相等（ST-01）。
+    assert.ok(Number.isInteger(c.maxConcurrentPerApp) && c.maxConcurrentPerApp > 0, `maxConcurrentPerApp=${c.maxConcurrentPerApp}`);
     assert.equal(c.maxConcurrentPerApp, RULES.notify.maxConcurrentPerApp);
     const name = new RegExp(c.namePattern);
     for (const ok of ['alerts', 'ops-team_1', '0', 'a'.repeat(64)]) assert.ok(name.test(ok), ok);

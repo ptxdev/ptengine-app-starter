@@ -307,11 +307,11 @@ test('formatJobLog：首行三项计数，逐行 +<t>ms 消息 字段；截断�
     assert.match(formatJobLog({ ...LOG, entries: [] }), /没有 ctx\.log/);
 });
 
-test('run --preview：打印解码后的预览日志与本地邮件预览地址（.ptx/outbox/<runId> 存在时）', async () => {
+test('run --preview：打印解码后的预览日志与本地推送预览地址（邮件 / 渠道消息，.ptx/outbox/<runId> 存在时）', async () => {
     const root = project();
     const out = await captureLogs(() => withServer((req, res) => {
         const claims = JSON.parse(Buffer.from(req.headers.authorization.split('.')[1], 'base64url'));
-        mkdirSync(join(root, '.ptx', 'outbox', claims.run), { recursive: true });       // 模拟本地桩写下的邮件
+        mkdirSync(join(root, '.ptx', 'outbox', claims.run), { recursive: true });       // 模拟本地桩写下的邮件 / 渠道消息
         req.resume();
         req.on('end', () => {
             res.writeHead(200, { 'content-type': 'application/json', [J.headerName]: b64(LOG) });
@@ -336,15 +336,14 @@ test('run --preview：头不合平台口径 → 打印原因与「线上会被�
     assert.match(out, /第 1 条的 m/);
 });
 
-test('run --preview 但响应没有头 → 提示 app-backend 版本；没调 notify.email → 明说', async () => {
+test('run --preview 但响应没有头 → 提示 app-backend 版本；没调 notify.email / notify.channel → 明说', async () => {
     const root = project();
     const out = await captureLogs(() => withServer((req, res) => {
         req.resume();
         req.on('end', () => { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{}'); });
     }, () => run(['run', 'weekly-report', '--preview'], root)));
     assert.match(out, /响应里没有 x-pt-job-log/);
-    assert.match(out, /没有调用 ctx\.pt\.notify\.email/);
-    assert.match(out, /notify\.channel/);
+    assert.match(out, /这次运行没有调用 ctx\.pt\.notify\.email \/ notify\.channel。/);
 });
 
 test('非预览运行的响应带了头 → 警告（app-backend 不该这样）', async () => {
