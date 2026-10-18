@@ -31,9 +31,20 @@ const REQUIRED_CHANNEL_KEYS = ['types', 'namePattern', 'titleMax', 'textMax', 'l
 const REGEX_CHANNEL_KEYS = ['linkPathSchemePattern', 'linkPathDotSegmentPattern'];
 const isRegexShape = v => typeof v?.source === 'string' && typeof v?.flags === 'string';
 
+/**
+ * 渠道名长度上限：从 rules.json 的 namePattern（contract NOTIFY_CHANNEL_NAME_PATTERN，形如 `^[a-z0-9][a-z0-9_-]{0,63}$`）推出
+ * = 首字符 1 + 尾段上限。快照里没有单独的长度键，这里不写字面量（ST-02）；形状推不出时 channelRules 报「规则快照过旧」。
+ */
+const NAME_PATTERN_SHAPE = /^\^\[[^\]]+\]\[[^\]]+\]\{0,(\d+)\}\$$/;
+export function channelNameMax(namePattern) {
+    const m = typeof namePattern === 'string' ? NAME_PATTERN_SHAPE.exec(namePattern) : null;
+    return m ? Number(m[1]) + 1 : null;
+}
+
 export function channelRules(rules) {
     const missing = rules
-        ? REQUIRED_CHANNEL_KEYS.filter(k => rules[k] == null || (REGEX_CHANNEL_KEYS.includes(k) && !isRegexShape(rules[k])))
+        ? REQUIRED_CHANNEL_KEYS.filter(k => rules[k] == null || (REGEX_CHANNEL_KEYS.includes(k) && !isRegexShape(rules[k]))
+            || (k === 'namePattern' && channelNameMax(rules[k]) === null))
         : ['notifyChannel'];
     if (missing.length) {
         throw new Error(`scripts/rules.json 的 notifyChannel 段缺 ${missing.join(' / ')}（规则快照过旧）。维护者请跑 npm run sync-rules。`);
@@ -73,7 +84,8 @@ const DEFAULT_LOCAL_TYPE = 'webhook';
  */
 export function validateChannelMessage(body, rules = RULES.notifyChannel) {
     const r = channelRules(rules);
-    // 平台对非对象请求体回的是另一个通用 400（opInvalid），没有 field；本地沿用本码、不带 details
+    // 非对象请求体：线上在 backend 网关（notify-internal.controller 的 notify/channel）就回 400 NOTIFY_CHANNEL_MESSAGE_INVALID、
+    // 不带 details，到不了平台（平台此处的通用 400 JOB_OP_INVALID 在真实链路上不可达）。本地与线上链路同码同形（ST-03）。
     if (!isObj(body)) return invalid(null, '请求体必须是 JSON 对象 { channel, message }');
     if (typeof body.channel !== 'string') return invalid('channel', 'channel 必须是字符串（渠道名）');
     const m = body.message;
@@ -177,7 +189,7 @@ export function handleNotifyChannel(state, { claims, body, appName, channels, ru
         if (new RegExp(r.namePattern).test(name)) channel = { name, type: DEFAULT_LOCAL_TYPE };
     }
     if (!channel) {
-        const shown = JSON.stringify(name.slice(0, 64));
+        const shown = JSON.stringify(name.slice(0, channelNameMax(r.namePattern)));
         return err(404, 'NOTIFY_CHANNEL_NOT_FOUND', channels
             ? `渠道 ${shown} 不在 .ptx/channels.json 里（线上：工作区里没有这个名字，或它没对本应用开放）`
             : `渠道名 ${shown} 不合规（须匹配 ${r.namePattern}），线上不可能存在`);

@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RULES } from './manifest.mjs';
-import { channelRules, handleListChannels, handleNotifyChannel, loadLocalChannels, validateChannelMessage } from './local-stub/channel.mjs';
+import { channelNameMax, channelRules, handleListChannels, handleNotifyChannel, loadLocalChannels, validateChannelMessage } from './local-stub/channel.mjs';
 import { createStubState, runCounters } from './local-stub/notify.mjs';
 
 const C = RULES.notifyChannel;
@@ -111,6 +111,22 @@ test('无渠道目录（channels = null）：任何合法名字都接受，type 
     assert.equal(r.outbox.dir, 'interactive');
     for (const name of ['Alerts', '-x', 'a b', '', 'a'.repeat(65)]) {
         assert.equal(codeOf(call(s, USER, { channel: name, message: MSG })), 'NOTIFY_CHANNEL_NOT_FOUND', name);
+    }
+});
+
+test('404 话术里的渠道名截断长度取自 rules.json 的 namePattern（不写字面量 64，ST-02）', () => {
+    assert.equal(channelNameMax(C.namePattern), 64);
+    assert.ok(new RegExp(C.namePattern).test('a'.repeat(channelNameMax(C.namePattern))));
+    assert.equal(channelNameMax('^[a-z0-9][a-z0-9_-]{0,9}$'), 10);
+    const rules = { ...C, namePattern: '^[a-z0-9][a-z0-9_-]{0,9}$' };
+    const r = handleNotifyChannel(createStubState(), { claims: USER, body: { channel: 'B'.repeat(30), message: MSG }, appName: 'x', channels: null, rules });
+    assert.equal(codeOf(r), 'NOTIFY_CHANNEL_NOT_FOUND');
+    assert.ok(r.body.error.message.includes(`"${'B'.repeat(10)}"`) && !r.body.error.message.includes('B'.repeat(11)), r.body.error.message);
+});
+
+test('namePattern 推不出名字长度上限 → 抛「规则快照过旧」（启动即报，不写字面量兜底）', () => {
+    for (const bad of ['^[a-z]+$', '^[a-z0-9][a-z0-9_-]{0,63}', 'x{0,3}$']) {
+        assert.throws(() => channelRules({ ...C, namePattern: bad }), /namePattern[\s\S]*规则快照过旧/, bad);
     }
 });
 

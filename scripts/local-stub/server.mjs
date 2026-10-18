@@ -139,6 +139,8 @@ const concurrencyLimit = section => (Number.isInteger(section?.maxConcurrentPerA
     ? section.maxConcurrentPerApp : null);
 
 export function createLocalStub({ root, appName = 'local-dev', loadRenderer, log = m => console.log(m), rules = RULES }) {
+    // notifyChannel 段在启动时就校验一遍（缺段 / 缺键 → 抛「规则快照过旧」），而不是等第一次 /notify/channel 请求才 500（ST-05）。
+    channelRules(rules.notifyChannel);
     const state = createStubState();
     const gateMax = { notify: concurrencyLimit(rules.notify), render: concurrencyLimit(rules.render) };
     const inflight = { notify: 0, render: 0 };
