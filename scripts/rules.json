@@ -16,7 +16,8 @@
             "static",
             "cdn",
             "mail",
-            "ptengine"
+            "ptengine",
+            "media"
         ],
         "reservedPrefix": "pt-"
     },
@@ -60,7 +61,9 @@
         "openapi:read",
         "asset:write",
         "ai:invoke",
-        "asset:read"
+        "asset:read",
+        "jobs:run",
+        "notify:send"
     ],
     "aiModels": [
         "claude-opus-5-5",
@@ -87,5 +90,150 @@
         "gemini-2.5-flash",
         "gemini-3.1-flash-lite",
         "gemini-2.5-flash-lite"
-    ]
+    ],
+    "jobResult": {
+        "maxBytes": 262144,
+        "markdownMaxBytes": 204800,
+        "maxFiles": 5,
+        "fileTypes": [
+            "text/csv"
+        ],
+        "titleMax": 200,
+        "fileNameMax": 120
+    },
+    "notify": {
+        "maxRefsPerCall": 50,
+        "maxRecipientsPerRun": 50,
+        "maxCallsPerRun": 20,
+        "subjectMax": 200,
+        "htmlMaxBytes": 262144,
+        "textMaxBytes": 65536,
+        "locales": [
+            "zh-CN",
+            "en-US",
+            "ja-JP"
+        ],
+        "defaultLocale": "ja-JP",
+        "refPattern": "^(user:[A-Za-z0-9_-]{1,64}|role:(owner|admin|member))$",
+        "replyToPattern": "^user:[A-Za-z0-9_-]{1,64}$",
+        "roles": [
+            "owner",
+            "admin",
+            "member"
+        ],
+        "maxConcurrentPerApp": 2
+    },
+    "render": {
+        "optionMaxBytes": 524288,
+        "minDimension": 100,
+        "maxDimension": 2000,
+        "defaultWidth": 800,
+        "defaultHeight": 400,
+        "themes": [
+            "light",
+            "dark"
+        ],
+        "maxPerRun": 20,
+        "maxDepth": 32,
+        "forbiddenKeys": [
+            "image"
+        ],
+        "forbiddenStringPrefixes": [
+            "image://"
+        ],
+        "droppedTopLevelKeys": [
+            "toolbox",
+            "brush",
+            "timeline"
+        ],
+        "jsonOnly": true,
+        "maxNodes": 100000,
+        "maxArrayLength": 50000,
+        "maxStringLength": 16384,
+        "forbiddenCharsPattern": "[\"<>\\u0000-\\u0008\\u000b-\\u001f]",
+        "forbiddenSubstrings": [
+            "&#"
+        ],
+        "cssFieldKeyPattern": "^(?:color|fill|stroke|font|fontFamily|fontWeight|fontStyle|fontSize)$|Color$",
+        "cssFieldForbiddenChars": [
+            ";"
+        ],
+        "protoKeys": [
+            "__proto__",
+            "constructor",
+            "prototype"
+        ],
+        "svgAllowedElements": [
+            "svg",
+            "g",
+            "path",
+            "rect",
+            "circle",
+            "ellipse",
+            "line",
+            "polyline",
+            "polygon",
+            "text",
+            "tspan",
+            "defs",
+            "linearGradient",
+            "radialGradient",
+            "stop",
+            "clipPath",
+            "pattern",
+            "filter",
+            "feDropShadow",
+            "title",
+            "desc"
+        ],
+        "maxConcurrentPerApp": 2,
+        "timeoutMs": 5000
+    },
+    "jobLog": {
+        "headerName": "x-pt-job-log",
+        "headerMaxBytes": 12288,
+        "maxEntries": 200,
+        "entryMessageMax": 2000,
+        "entryFieldsMaxBytes": 4096
+    },
+    "gateway": {
+        "gateHeader": {
+            "name": "x-pt-gate",
+            "concurrencyValue": "concurrency"
+        }
+    },
+    "notifyChannel": {
+        "types": [
+            "slack",
+            "teams",
+            "chatwork",
+            "webhook"
+        ],
+        "namePattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+        "titleMax": 150,
+        "textMax": 3000,
+        "linkLabelMax": 50,
+        "linkPathMax": 512,
+        "linkPathPattern": "^[A-Za-z0-9\\-._~!$&'()*+,;=:@\\/?%]*$",
+        "maxPerRun": 10,
+        "maxPerWorkspacePerMinute": 30,
+        "mediaPathPattern": "^\\/media\\/[A-Za-z0-9_-]{1,64}\\/[a-z0-9-]{1,63}\\/[0-9a-f]{32}\\.png$",
+        "testTitlePrefix": "[TEST] ",
+        "webhookHeaders": {
+            "id": "x-pt-webhook-id",
+            "timestamp": "x-pt-webhook-timestamp",
+            "signature": "x-pt-webhook-signature"
+        },
+        "signatureVersion": "v1",
+        "maxConcurrentPerApp": 2,
+        "maxBodyBytes": 16384,
+        "linkPathSchemePattern": {
+            "source": "^[a-z][a-z0-9+.-]*:",
+            "flags": "i"
+        },
+        "linkPathDotSegmentPattern": {
+            "source": "^(?:[^?]*\\/)?(?:\\.|%2e){1,2}(?:[/?]|$)",
+            "flags": "i"
+        }
+    }
 }
