@@ -234,7 +234,18 @@
         "linkPathDotSegmentPattern": {
             "source": "^(?:[^?]*\\/)?(?:\\.|%2e){1,2}(?:[/?]|$)",
             "flags": "i"
-        }
+        },
+        "noTargetsReasons": [
+            "JOB_TARGETS_EMPTY",
+            "APP_DEFAULT_EMPTY",
+            "APP_INSTANT_NOT_DECLARED"
+        ]
+    },
+    "manifestNotify": {
+        "keys": [
+            "instant"
+        ],
+        "instantRequiresScope": "notify:send"
     },
     "jobs": {
         "displayNameMax": 100,
