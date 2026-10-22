@@ -397,7 +397,7 @@ Worker 自己不能起定时（见[硬边界 3](#3-后端没有的能力写了�
    openSubscriptions({ type: 'weekly-report', params: { segment: 'paid' }, title: '周报 · 付费用户' });   // 直接打开表单并预填
    ```
    `type` 不在订阅项里不 reject（抽屉照开、顶部提示）；结构性违规（`type` 形状、`params` 非对象或 > 16 KiB、`title` 非 1–100 字）→ `PT_BAD_PAYLOAD`。
-   详见 `@ptengine/app-sdk` README「Subscriptions」。**1c 预发布期的 `PtApp.jobs.openPreview` 已删除**（任务改由宿主创建，不要再做「预览 → 后端 create」）。
+   详见 `@ptengine/app-sdk` README「Subscriptions」。**1b 引入的 `PtApp.jobs.openPreview` 已删除**（任务改由宿主创建，不要再做「预览 → 后端 create」）。
 6. **应用自建任务**（`subscribable: false` 的类型，或确有需要时）：在某个**用户请求**的路由里调
    `ctx.pt.jobs.create({ type, cron, timezone, params })`（任务运行中不能创建，`JOB_CREATE_FROM_JOB`）。另有 `list / get / update / pause / resume / delete`。
    **不接受 `channelIds`**（传了 400 `JOB_OP_INVALID`）：这样建的任务复制一份应用默认通知渠道。`JobView.targetCount` 只告诉你有几个投递目标，不告诉你是哪些（本地 jobs 桩：创建时 `.ptx/notify-targets.json` 的条数，没有文件为 1，之后改文件不影响已建任务）。
