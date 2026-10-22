@@ -34,14 +34,14 @@ export function parseJobArgs(args) {
     const [sub, type, ...rest] = args;
     if (sub !== 'run') throw new Error(USAGE);
     if (!type || type.startsWith('--')) throw new Error(`缺少任务类型 <type>。${USAGE}`);
-    let params = {};
+    let params = null;
     let preview = false;
     for (let i = 0; i < rest.length; i++) {
         const a = rest[i];
         if (a === '--preview') { preview = true; continue; }
         if (a === '--params') {
             const raw = rest[++i];
-            if (raw === undefined) throw new Error('--params 后面要跟一段 JSON 对象，例如 --params \'{"channel":"email"}\'');
+            if (raw === undefined) throw new Error('--params 后面要跟一段 JSON 对象，例如 --params \'{"range":"last7d"}\'');
             try { params = JSON.parse(raw); } catch { throw new Error(`--params 不是合法 JSON：${raw}`); }
             if (params === null || typeof params !== 'object' || Array.isArray(params)) {
                 throw new Error('--params 必须是 JSON 对象（平台传给任务路由的 body 就是这个对象）');
@@ -140,9 +140,10 @@ export function decodeJobLogHeader(value, rules = RULES.jobLog) {
     if (!isPlainObject(s) || !isCount(s.query) || !isCount(s.notifyEmail) || !isCount(s.renderChart)) {
         return no('stats 不是三个非负整数（query / notifyEmail / renderChart）');
     }
-    // 1c：可选键（app-backend 1c 起恒带）。出现但不合规 → 整头作废，与平台 parseRunLogHeader 同口径（brief §1.5）。
-    if (s.notifyChannel !== undefined && !isCount(s.notifyChannel)) {
-        return no('stats.notifyChannel 出现了但不是非负整数');
+    // 可选键 notifySend（notify.send 调用次数，app-backend 恒带；1c 的 notifyChannel 改名而来，旧键当未知键忽略，裁定 N28）。
+    // 出现但不合规 → 整头作废，与平台 parseRunLogHeader 同口径。
+    if (s.notifySend !== undefined && !isCount(s.notifySend)) {
+        return no('stats.notifySend 出现了但不是非负整数');
     }
     for (const [i, e] of o.entries.entries()) {
         if (!isPlainObject(e) || typeof e.t !== 'number' || !Number.isFinite(e.t) || e.t < 0) return no(`第 ${i + 1} 条的 t 不是非负数`);
@@ -157,7 +158,7 @@ export function decodeJobLogHeader(value, rules = RULES.jobLog) {
 export function formatJobLog(log) {
     const s = log.stats ?? {};
     const lines = [`  预览日志（${jobLogRules(RULES.jobLog).headerName}）：取数 ${s.query ?? 0} 次 · 邮件 ${s.notifyEmail ?? 0} 次 · 图表 ${s.renderChart ?? 0} 次` +
-        ` · 渠道 ${s.notifyChannel ?? 0} 次` +
+        ` · 通知 ${s.notifySend ?? 0} 次` +
         `${log.truncated ? ' · 已截断（线上同样只保留前面能放进上限的部分）' : ''}`];
     if (log.entries.length === 0) lines.push('    （没有 ctx.log）');
     for (const e of log.entries) lines.push(`    +${e.t}ms  ${e.m}${e.f ? ` ${JSON.stringify(e.f)}` : ''}`);
@@ -169,9 +170,13 @@ function pretty(text) {
 }
 
 export async function run(args, root) {
-    const { type, params, preview } = parseJobArgs(args);
+    const parsed = parseJobArgs(args);
+    const { type, preview } = parsed;
     const manifest = readManifest(root);
-    const { path } = findJobRoute(manifest, type);
+    const { job, path } = findJobRoute(manifest, type);
+    // 没给 --params：用该类型的 manifest defaultParams —— 从订阅中心创建的任务拿到的就是它（通知投递目标 brief §2.3）。
+    const useDefault = parsed.params === null && job.defaultParams !== null && typeof job.defaultParams === 'object' && !Array.isArray(job.defaultParams);
+    const params = parsed.params ?? (useDefault ? job.defaultParams : {});
 
     const keyPath = join(root, 'web', '.ptx-dev-key.json');
     if (!existsSync(keyPath)) {
@@ -183,7 +188,8 @@ export async function run(args, root) {
 
     const port = process.env.PTX_API_PORT || '8787';
     const url = `http://127.0.0.1:${port}/api${path}`;
-    console.log(`\n  POST ${url}\n  runId = ${runId}${preview ? '（预览模式：ctx.auth.preview === true）' : ''}\n`);
+    console.log(`\n  POST ${url}\n  runId = ${runId}${preview ? '（预览模式：ctx.auth.preview === true）' : ''}` +
+        `${useDefault ? '\n  params = manifest 的 defaultParams（订阅中心创建的任务同样拿到它；--params 可覆盖）' : ''}\n`);
 
     let res;
     try {
@@ -213,8 +219,8 @@ export async function run(args, root) {
             console.log(`  预览日志：响应里没有 ${headerName}（@ptengine/app-backend 版本不含预览日志，或这条路由没经 createApp 返回）`);
         }
         console.log(existsSync(join(root, '.ptx', 'outbox', runId))
-            ? `  本地推送预览（邮件 / 渠道消息）：http://localhost:${LOCAL_STUB_PORT}/__ptx/outbox/${runId}`
-            : '  这次运行没有调用 ctx.pt.notify.email / notify.channel。');
+            ? `  本地推送预览（邮件 / 通知）：http://localhost:${LOCAL_STUB_PORT}/__ptx/outbox/${runId}`
+            : '  这次运行没有调用 ctx.pt.notify.email / notify.send。');
         console.log('');
     } else if (rawLog) {
         console.log(`  [!] 非预览运行的响应带了 ${headerName}：@ptengine/app-backend 不该这样，请升级或报告。\n`);
