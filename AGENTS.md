@@ -332,7 +332,8 @@ Worker 自己不能起定时（见[硬边界 3](#3-后端没有的能力写了�
 
 > ⚠️ `ctx.auth.trigger / jobId / runId / preview`、`ctx.requireTrigger()`、`ctx.pt.jobs.*` 与 `ctx.pt.notify.send` 需要
 > **升级到含通知投递目标的 `@ptengine/app-backend` 版本**后才生效；manifest 的 `backend.jobs`（含下面的订阅项字段）与 `jobs:run`
-> 同样需要含它们的 `@ptengine/app-sdk`（旧版 SDK 的 schema 会拒绝 `displayName` 等新字段）。旧版本上类型里没有这些字段（tsc 报错），运行时也拿不到。
+> 同样需要含它们的 `@ptengine/app-sdk`：旧版 SDK 只影响编辑器里的 manifest schema 提示与 TS 类型（新字段会被标红 / 类型里没有），
+> 上传由平台按 contract 校验，不受影响。旧版 app-backend 的类型里没有这些字段（tsc 报错），运行时也拿不到。
 
 1. **`manifest.json`**：`scopes` 加 `"jobs:run"`（要发通知再加 `"notify:send"`）；`backend.jobs` 每个**订阅项**一项。
    **日报 / 周报 / 月报写成三个类型、三个 `defaultCron`**，不要一个类型再用 params 区分周期：
@@ -399,7 +400,7 @@ Worker 自己不能起定时（见[硬边界 3](#3-后端没有的能力写了�
    详见 `@ptengine/app-sdk` README「Subscriptions」。**1c 预发布期的 `PtApp.jobs.openPreview` 已删除**（任务改由宿主创建，不要再做「预览 → 后端 create」）。
 6. **应用自建任务**（`subscribable: false` 的类型，或确有需要时）：在某个**用户请求**的路由里调
    `ctx.pt.jobs.create({ type, cron, timezone, params })`（任务运行中不能创建，`JOB_CREATE_FROM_JOB`）。另有 `list / get / update / pause / resume / delete`。
-   **不接受 `channelIds`**（传了 400 `JOB_OP_INVALID`）：这样建的任务复制一份应用默认通知渠道。`JobView.targetCount` 只告诉你有几个投递目标，不告诉你是哪些。
+   **不接受 `channelIds`**（传了 400 `JOB_OP_INVALID`）：这样建的任务复制一份应用默认通知渠道。`JobView.targetCount` 只告诉你有几个投递目标，不告诉你是哪些（本地 jobs 桩：创建时 `.ptx/notify-targets.json` 的条数，没有文件为 1，之后改文件不影响已建任务）。
 7. **把结果交给平台**：在 2xx 的 JSON 响应里返回 `{ archive: { title?, markdown, files? } }`（类型 `JobRunResult`），
    平台会采集存档。不返回 `archive` 也行，只是没有存档；格式不对不影响运行成败，只是不采集。
    **结果归档**（平台 1b+）：任务创建者在订阅抽屉或管理页里开「保存到资产库」后，每次成功运行的邮件、通知内容与返回的 `archive`
@@ -517,8 +518,8 @@ Chatwork API 令牌 + 房间 / 通用 Webhook）；使用者在订阅抽屉里�
 'POST /notify-now': async (ctx) => {
     ctx.requireTrigger('user');
     const r = await ctx.pt.notify.send({ title: '手动推送', text: '……' });
-    if (r.status === 'no_targets') throw badRequest('NO_DEFAULT_CHANNELS', '请管理员在应用设置里配置默认通知渠道');
-    return r;
+    // no_targets 不是错误：照常返回结果，由前端提示「请管理员在应用设置里配置默认通知渠道」
+    return { ...r, hint: r.status === 'no_targets' ? '请管理员在应用设置里配置默认通知渠道' : null };
 }
 ```
 
@@ -540,12 +541,13 @@ Chatwork API 令牌 + 房间 / 通用 Webhook）；使用者在订阅抽屉里�
 - 并发：与 `notify.email` **共用**「每应用 2 个在途」那道闸（邮件与渠道合计）；网关闸的 429 由 app-backend 有界重试。按顺序 `await`，不要 `Promise.all`。
 - **不自动重试、没有死信**（每次调用对每个目标至多投递一次）：502 `NOTIFY_CHANNEL_SEND_FAILED` = **所有**目标都没收下，按目标顺序的投递错误码在
   `e.detail.deliveryErrors`，去重后写进 message（「渠道投递全部失败：<码>」）：`CHANNEL_HTTP_<状态码>`、`CHANNEL_TIMEOUT`、`CHANNEL_NETWORK`、`CHANNEL_DNS_FAILED`、
-  `CHANNEL_ADDRESS_BLOCKED`、`CHANNEL_REDIRECT_BLOCKED`。所有目标凭据都解不开或发送前时间预算已用完时是 503 `NOTIFY_UNAVAILABLE`。
+  `CHANNEL_ADDRESS_BLOCKED`、`CHANNEL_REDIRECT_BLOCKED`、`CHANNEL_KEY_UNAVAILABLE`（某个目标的凭据解不开）。**所有**目标凭据都解不开或发送前时间预算已用完时是 503 `NOTIFY_UNAVAILABLE`。
   **`CHANNEL_TIMEOUT` / 504 可能已送达** —— 自己重试就要接受重复。
 - 预览：**照常调用**，平台拦截不投递（`preview: true`、`status: 'intercepted'`）；面板里消息内容只展示一次，下面列「将发到」，每个渠道一张对应格式的卡片；
   面板里「发一条测试」只能发到管理员标了「测试」的渠道。
 - 本地（`npm run dev`）：**永远不真实投递**（含非预览）。消息按 `scripts/rules.json` 的 `notifySend` 段同口径校验（标题 / 正文 / 链接 / 图片、每 run 10 个单位、与邮件共用的本地并发闸、16 KiB 体积上限），
   写进 `.ptx/outbox/<runId|interactive>/<seq>.send.json`（与邮件共用序号；`{ message, targets: [{ name, type }], status, noTargetsReason, … }`），终端打印一行；被拒的调用不写文件。工作区分钟限额本地不模拟，本地也没有 partial / 502。
+  与线上存档的两处行为差异：**本地用户请求里的 `no_targets` 也写文件**（线上交互调用不写 outbox）；**本地 409 `NOTIFY_RUN_LIMIT_EXCEEDED` 不写文件**（线上任务 run 会写一行 failed 存档）。
   **投递目标**用项目内 `.ptx/notify-targets.json` 模拟（`[{ "name": "alerts", "type": "slack" }]`，最多 5 个，改了即时生效；任务与用户请求共用这一份）：
   **没有这个文件**时是一个虚拟目标 `local`（`webhook`），本地默认走通 `sent`；**文件内容为 `[]`** 时走 `no_targets`（任务 `JOB_TARGETS_EMPTY`、用户请求 `APP_DEFAULT_EMPTY`），用来测无目标分支。
   这个文件是线上存档（运行记录里的 outbox）的**简化版**：`message.link` 存你传的原样 `{ label, path }`（线上存展开后的 `{ label, url }`）；`targets` 只有 name / type（线上还有每个目标的渲染结果与投递结果）。别拿本地文件的形状去写解析线上存档的代码。

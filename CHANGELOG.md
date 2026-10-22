@@ -40,7 +40,8 @@
 > 1. **ptengine-x backend 已把 `@ptengine/app-sdk` 升到含 `notify:send` 的版本并部署**：上传包由
 >    `backend/src/components/custom-app/helpers/bundle-validator.ts` 用 app-sdk 的 manifest schema 校验，旧 schema 没有
 >    `notify:send`，声明了它的包上传即被拒（本地 doctor 读 `rules.json` 会放行，本地发现不了）。
->    同理，旧 schema 的 job 项 `additionalProperties: false`，写了订阅项字段（`displayName` 等）的包也会被拒。
+>    订阅项字段（`displayName` 等）**不受这条影响**：`backend.jobs` 只出现在有后端（`schemaVersion: 2`）的应用里，这类包的上传走 platform 轨道、
+>    由 contract `validateManifestJobs` 校验，与 backend pin 的 app-sdk 版本无关（bundle-validator 只用于旧的轻量应用路径）。
 > 2. **workers 已重新生成 edge 的 SDK 资产并部署**（`workers/package.json` 的 app-sdk 升到含 `PtApp.subscriptions` 的 minor、跑 `build:sdk-asset`、
 >    改 `EXPECTED_APP_SDK_MINOR`，见 workers/README「Edge 自持的运行时 SDK」）：应用运行时的 `window.PtApp` 来自 edge `/__pt/app-sdk.js`，
 >    旧资产上 `PtApp.subscriptions` 为 `undefined`（AGENTS.md 的标准写法会退回提示「点右上角『订阅』」，不会崩，但加速入口不可用）。
@@ -78,6 +79,7 @@
     投递目标读项目内 `.ptx/notify-targets.json`（`[{ "name", "type" }]`，最多 `maxTargets` 个）：**没有文件 → 一个虚拟目标 `local / webhook`**（本地默认走通 `sent`）；
     **`[]` → `no_targets`**（任务 `JOB_TARGETS_EMPTY`、交互 `APP_DEFAULT_EMPTY`）。写 `.ptx/outbox/<runId|interactive>/<seq>.send.json`（`{ message, targets, status, noTargetsReason, … }`，与邮件共用序号），
     **永远不真实投递**。本地推送预览页按「消息一次 + 将发到列表」展示。`.ptx/channels.json` 不再读取。
+  - 本地 `ctx.pt.jobs.*` 桩：`JobView.targetCount` = 创建时的本地目标数（本地桩新增 `GET /__ptx/notify-targets` 回 `{ count }`，没有目录文件为 1，桩不可达按 1）；`channelIds` → 400 `JOB_OP_INVALID`（与平台同码）。
   - `npm run ptx -- job run`：预览日志认 `stats.notifySend`（1c 的 `notifyChannel` 当未知键忽略，与平台同口径），首行显示「通知 n 次」；
     没给 `--params` 时用该类型 manifest 的 `defaultParams`（= 订阅中心创建的任务拿到的 params），再没有才是 `{}`。
   - `ptx doctor`：代码里出现 `ctx.pt.notify.channel` / `notify.listChannels` → **bad**（「已移除，改用 notify.send，投递目标由使用者配置」）；

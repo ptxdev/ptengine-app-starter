@@ -189,16 +189,17 @@ Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc`
   渠道被管理员删除或「可用应用」收窄后，订阅里的引用会被自动摘掉，订阅可能因此变空。
 - **本地 409 `NOTIFY_RUN_LIMIT_EXCEEDED`**：一次运行最多 10 个单位，每次 `notify.send` 消耗 `max(1, 目标数)`。`.ptx/notify-targets.json` 里目标多时，一次运行能发的条数就少（5 个目标 → 2 条）。
 - **本地 500 `PTX_STUB_FAILED`，消息提到 `.ptx/notify-targets.json`**：文件格式不对，应为 `[{ "name": "alerts", "type": "slack" }]`（type 是 slack / teams / chatwork / webhook，最多 5 项，名字不能重复）。
-- **本地 `.ptx/outbox/…/<seq>.send.json` 和线上运行记录里的通知存档对不上**：本地文件是简化版 ——
+- **本地 `.ptx/outbox/…/<seq>.send.json` 和线上运行记录里的通知存档对不上**：本地用户请求里的 `no_targets` 也会写文件（线上交互调用不写存档），本地 409 不写文件（线上任务 run 会写一行 failed）；而且本地文件是简化版 ——
   `message.link` 是原始 `{ label, path }`（不展开；线上存展开后的 `{ label, url }`）、`targets` 只有 name / type（线上每个目标还有渲染出的请求体与投递结果）。属预期，不是 bug。
   另外，线上存档里的渲染结果与实际发出的体只是语义相等（键序可能不同），不能用来重算 webhook 签名。
 - **本地 400 `NOTIFY_CHANNEL_MESSAGE_INVALID`**：看 `e.detail.field` 是哪个字段（线上同样带）。
   - `message.imageUrl`：本地只收 `ctx.pt.render.chart()` 本地桩返回的 `http://localhost:8788/__ptx/media/…`（或路径形状同平台 media 地址的 https）；外链图片线上同样会被拒。
   - `message.link.path`：只接受应用内路径 —— 不能带 scheme（以字母开头、由字母 / 数字 / `+` `.` `-` 组成并紧跟冒号的前缀，如 `https:`、`javascript:`，所以 `reports:42` 也算），
     不能以 `//` 开头、去掉一个前导 `#/` / `/` 后也不能再以 `/` 开头，`?` 之前不能有 `.` / `..` 路径段（含 `%2e` 编码）。线上同口径拒。
-- **线上 `notify.send` 502 `NOTIFY_CHANNEL_SEND_FAILED`**：这次的**所有**目标都没收下，`e.detail.deliveryErrors` 按目标顺序给出投递错误码；部分成功不会报错（`status: 'partial'`）。
+- **线上 `notify.send` 502 `NOTIFY_CHANNEL_SEND_FAILED`**：这次的**所有**目标都没收下，`e.detail.deliveryErrors` 按目标顺序给出投递错误码（含 `CHANNEL_KEY_UNAVAILABLE`：该目标凭据解不开）；部分成功不会报错（`status: 'partial'`）。
 - **报「notifySend 段缺 …（规则快照过旧）」**：使用者升级 starter；维护者跑 `npm run sync-rules`。
-- **订阅中心里看不到我的任务类型**：manifest 里该类型写了 `"subscribable": false`；或应用是草稿 / 没有 `jobs:run` / 是从商店安装的（商店应用没有订阅中心）。
+- **订阅中心里看不到我的任务类型**：manifest 里该类型写了 `"subscribable": false`；或当前版本没有 `jobs:run`；或应用是从商店安装的（商店应用没有订阅中心）。
+  **草稿应用**的订阅项照常列出，只是工具栏「订阅」按钮置灰、不能订阅 —— 发布后即可用。
 - **`PtApp.subscriptions` 是 `undefined` / 调用 reject `PT_METHOD_NOT_ALLOWED`**：平台注入的运行时 SDK 还没升到含它的版本。主入口是应用页上方的「订阅」按钮，界面上提示用户点它即可（AGENTS.md「定时任务」第 5 条有标准写法）。
 - `.ptx/` 可以随时删除（已在 `.gitignore`）。
 
