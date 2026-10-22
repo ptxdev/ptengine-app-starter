@@ -338,6 +338,17 @@ test('.ptx/notify-targets.json：扇出到列出的目标；[] → no_targets（
     assert.match(e.message, /\.ptx\/notify-targets\.json/);
 }));
 
+test('GET /__ptx/notify-targets：回本地目标数（无文件 1 = 虚拟目标；有文件 = 其长度；[] → 0；坏文件 → 500）', () => withStub(async ({ root, base }) => {
+    const count = async () => (await (await fetch(`${base}/__ptx/notify-targets`)).json()).count;
+    assert.equal(await count(), 1);
+    targetsFile(root, [{ name: 'a', type: 'slack' }, { name: 'b', type: 'teams' }]);
+    assert.equal(await count(), 2);
+    targetsFile(root, []);
+    assert.equal(await count(), 0);
+    targetsFile(root, '{');
+    assert.equal((await fetch(`${base}/__ptx/notify-targets`)).status, 500);
+}));
+
 test('/notify/send：无 notify:send → 403 SCOPE_DENIED（requiredScope）；无令牌 → 401；坏 JSON → 400 NOTIFY_CHANNEL_MESSAGE_INVALID；1c 的 /notify/channel(s) → 404', () => withStub(async ({ base }) => {
     const denied = await post(base, '/notify/send', NO_SCOPE, SEND);
     assert.equal(denied.status, 403);

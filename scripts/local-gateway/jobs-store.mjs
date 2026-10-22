@@ -48,10 +48,16 @@ function checkFields(b, { partial }) {
         return err(400, 'JOB_TITLE_INVALID', `title 必须是 1..${MAX_TITLE} 字符`);
     }
     if (has('archiveToAssets') && typeof b.archiveToAssets !== 'boolean') return err(400, 'JOB_OP_INVALID', 'archiveToAssets 必须是布尔值');
+    // 通知投递目标：应用（gateway 链路）不能设渠道，与平台同码（brief §4.2）
+    if (has('channelIds')) return err(400, 'JOB_OP_INVALID', '投递目标只能由使用者在订阅中心设置（ctx.pt.jobs.* 不接受 channelIds）');
     return null;
 }
 
-export function handleJobsRequest(store, { appId, authorization, body, now = new Date(), uuid = () => crypto.randomUUID() }) {
+/**
+ * `targetCount`：创建时的本地投递目标数（worker 向本地桩取 .ptx/notify-targets.json 的条数；没有文件 = 1 个虚拟目标）。
+ * 与线上「创建时复制应用默认渠道」同语义：只在 create 时写入，之后改目录不影响已有任务。
+ */
+export function handleJobsRequest(store, { appId, authorization, body, targetCount = 1, now = new Date(), uuid = () => crypto.randomUUID() }) {
     const claims = decodeClaims(authorization);
     if (!claims) return err(401, 'APP_TOKEN_INVALID', '缺少或无法解析 App Token');
     const scopes = Array.isArray(claims.scopes) ? claims.scopes : [];
@@ -72,6 +78,7 @@ export function handleJobsRequest(store, { appId, authorization, body, now = new
             pauseReason: null, consecutiveFailures: 0, nextRunAt: null, lastRunAt: null,
             // 本地只模拟本人视角，「只有创建者能改 archiveToAssets」天然满足；本地不做真实归档
             archiveToAssets: b.archiveToAssets ?? false,
+            targetCount,
             scheduleDescription: stubDescription(b.cron, b.timezone), createdAt: iso, updatedAt: iso
         };
         store.jobs.set(job.id, job);

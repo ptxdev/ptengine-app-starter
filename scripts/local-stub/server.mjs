@@ -8,6 +8,7 @@
  *   POST /notify/send                   → 按 .ptx/notify-targets.json 扇出（没有文件 = 一个虚拟目标 local / webhook；[] = 没有投递目标），
  *                                         写 .ptx/outbox/<runId|interactive>/<seq>.send.json（与邮件共用序号），打印一行；永不投递
  *   POST /render/chart                  → 写 .ptx/media/<hex>.png，返回 http://localhost:<port>/__ptx/media/<hex>.png
+ *   GET  /__ptx/notify-targets          → { count }：本地投递目标数（本地网关桩创建任务时写进 JobView.targetCount）
  *   GET  /__ptx/media/<hex>.png         → 图片
  *   GET  /__ptx/outbox/<id>             → 这次运行写下的邮件与通知列表（本地推送预览页；通知 = 消息一次 + 将发到列表）
  *   GET  /__ptx/outbox/<id>/<seq>.html  → 单封邮件（退订链接已换成 #）
@@ -36,7 +37,7 @@ import { join, resolve, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { decodeClaims } from '../local-gateway/jobs-store.mjs';
 import { RUN_ID_RE, createStubState, handleNotifyEmail, jobRunOf } from './notify.mjs';
-import { handleNotifySend, loadLocalTargets, sendRules } from './send.mjs';
+import { handleNotifySend, loadLocalTargets, resolveLocalTargets, sendRules } from './send.mjs';
 import { handleRenderChart } from './render.mjs';
 import { RULES } from '../manifest.mjs';
 
@@ -273,6 +274,9 @@ export function createLocalStub({ root, appName = 'local-dev', loadRenderer, log
             }
 
             if (req.method === 'GET') {
+                if (url.pathname === '/__ptx/notify-targets') {
+                    return send(res, 200, { count: resolveLocalTargets(loadLocalTargets(root, rules.notifySend), rules.notifySend).length });
+                }
                 let m = MEDIA_RE.exec(url.pathname);
                 if (m) {
                     const p = insidePtx(ptxDir, 'media', `${m[1]}.png`);
