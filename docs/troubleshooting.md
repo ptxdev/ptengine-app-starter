@@ -137,7 +137,7 @@ Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc`
 
 **`npm run ptx -- job run` 报「backend.jobs 里没有类型 …」？**
 `<type>` 要与 `manifest.json` 的 `backend.jobs[].type` 完全一致；`--params` 必须是 JSON **对象**
-（shell 里用单引号包住：`--params '{"channel":"email"}'`）。
+（shell 里用单引号包住：`--params '{"range":"last7d"}'`；不给 `--params` 时用该类型的 `defaultParams`）。
 
 **`npm run ptx -- job run` 打印的结果是 `none` / `invalid` / `too_large`？**
 
@@ -161,7 +161,7 @@ Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc`
 本地网关桩 `ptx-local-gateway` 是内存存储，`ptx dev` 重启即清空。它也不校验 cron / 时区 / 配额，以平台为准。
 
 **本地 `ctx.pt.query()` / `ctx.pt.asset.*` / `ctx.pt.ai.*` 返回 501 `PT_GATEWAY_NOT_BOUND`，日志里还多一条 `pt-gateway-*-failed`？**
-预期如此。本地网关桩只实现 `ctx.pt.jobs.*`（`ctx.pt.notify.email` / `notify.channel` / `notify.listChannels` / `ctx.pt.render.chart` 转给本地推送 / 图表桩），其余路径一律 501；提示语是笼统的
+预期如此。本地网关桩只实现 `ctx.pt.jobs.*`（`ctx.pt.notify.email` / `notify.send` / `ctx.pt.render.chart` 转给本地推送 / 图表桩），其余路径一律 501；提示语是笼统的
 「本地没有数据网关……请在平台部署后联调」（不再点名缺哪个 scope），运行时同时记一条
 `pt-gateway-query-failed` / `pt-gateway-asset-failed` 日志。取数、资产读写与 AI 调用请在平台部署后联调。
 
@@ -170,31 +170,37 @@ Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc`
 （`wrangler dev -c wrangler.jsonc -c ../scripts/local-gateway/wrangler.jsonc`）会把它一起拉起来。
 用 `npm run dev`，不要绕过它。
 
-### 推送 / 图表 / 通知渠道本地桩
+### 推送 / 图表 / 通知本地桩
 
-- **`ctx.pt.notify.email` / `notify.channel` / `notify.listChannels` / `ctx.pt.render.chart` 本地 503 `PTX_STUB_UNAVAILABLE`**：本地桩（`127.0.0.1:8788`）没起来。用 `npm run dev` 启动（不要单独跑 `wrangler dev`）；
+- **`ctx.pt.notify.email` / `notify.send` / `ctx.pt.render.chart` 本地 503 `PTX_STUB_UNAVAILABLE`**：本地桩（`127.0.0.1:8788`）没起来。用 `npm run dev` 启动（不要单独跑 `wrangler dev`）；
   横幅里若是「推送 / 图表本地桩没起来（…EADDRINUSE）：8788 被占」，是 8788 被别的进程（常见是另一个 `ptx dev`）占了，停掉它再重启。
-  8788 被另一个 `ptx dev` 占用时请求可能成功，但邮件和图片会写到那个项目的 `.ptx/`；渠道消息也写到那个项目，且渠道目录读的是那个项目的
-  `.ptx/channels.json`（会出现莫名的 404 或列表与本项目不符）。
+  8788 被另一个 `ptx dev` 占用时请求可能成功，但邮件、图片和通知会写到那个项目的 `.ptx/`，投递目标读的也是那个项目的
+  `.ptx/notify-targets.json`（会出现莫名的 `no_targets` 或目标与本项目不符）。
   消息里写「wrangler.jsonc 缺 vars.PTX_STUB_ORIGIN」的，是 `scripts/local-gateway/wrangler.jsonc` 被改坏了，补回 `"PTX_STUB_ORIGIN": "http://127.0.0.1:8788"` 或升级 starter。
 - **`ctx.pt.render.chart` 本地 501 `PTX_RENDER_DEPS_MISSING`**：可选依赖 `echarts` / `@resvg/resvg-js` 没装上（少见平台没有 resvg 预编译包）。
   重跑 `npm install`，或 `npm i --save-optional echarts@^5.6.0 @resvg/resvg-js@^2.6.2`。线上渲染在平台侧，不受影响。
 - **本地 403 `SCOPE_DENIED`（requiredScope: notify:send）**：manifest 的 `scopes` 没有 `notify:send`，加上后重启 `npm run dev`（本地令牌照抄 manifest）。
 - **直接访问本地桩得到 421 `PTX_STUB_BAD_HOST`**：本地桩只认 `127.0.0.1:8788` / `localhost:8788` 这两个 Host（防 DNS rebinding 读到 outbox），换用这两个地址打开。
 - **本地看到的邮件和预览面板里不一样**：本地外框是简化版、清洗只删平台一定会删的东西；以产品里的预览面板为准。
-- **`ctx.pt.notify.channel` 本地 404 `NOTIFY_CHANNEL_NOT_FOUND`**：项目里有 `.ptx/channels.json` 且没有这个名字 —— 补上它，或删掉这个文件（没有文件时任何合法名字都接受）。
-  消息里写「不合规」的，是名字不符合规则（小写字母、数字、`-`、`_`，最多 64 个字符，不能以 `-` / `_` 开头），线上也不可能有这个渠道。
-- **本地 500 `PTX_STUB_FAILED`，消息提到 `.ptx/channels.json`**：文件格式不对，应为 `[{ "name": "alerts", "type": "slack" }]`（type 是 slack / teams / chatwork / webhook）。
-- **本地 `listChannels()` 回 `[]`**：没有 `.ptx/channels.json`。线上的渠道由工作区管理员在「管理 → 通知渠道」里配置。
-- **本地 `.ptx/outbox/…/<seq>.channel.json` 和线上运行记录里的渠道存档对不上**：本地文件是简化版 ——
-  `message.link` 是原始 `{ label, path }`（不展开；线上存展开后的 `{ label, url }`）、多一个 `status` 字段（线上没有）、`rendered` 为 `null`（线上是平台渲染出的渠道请求体）、`delivery` 恒为 `null`（本地从不投递，线上存投递结果）。属预期，不是 bug。
-  另外，线上存档的 `rendered` 与实际发出的体只是语义相等（键序可能不同），不能用来重算 webhook 签名。
+- **`ctx.pt.notify.channel is not a function` / `notify.listChannels is not a function`**（或 doctor 报「已移除」）：1c 预发布期的按名发送已移除。
+  改成 `ctx.pt.notify.send({ title, text?, imageUrl?, link? })`，投递目标由使用者配置（任务的「发送到」/ 应用默认通知渠道）；params 里也别再存渠道名。
+- **`notify.send` 返回 `status: 'no_targets'`**：不是错误，是没有投递目标。本地：`.ptx/notify-targets.json` 是 `[]`（删掉这个文件就回到一个虚拟目标 `local`）。
+  线上：`JOB_TARGETS_EMPTY` = 这个订阅没选渠道（在订阅抽屉或管理页「定时任务」里给它加上）；`APP_DEFAULT_EMPTY` = 用户请求里发、应用默认通知渠道为空（请能编辑应用的人在应用设置「通知」里配置）。
+  渠道被管理员删除或「可用应用」收窄后，订阅里的引用会被自动摘掉，订阅可能因此变空。
+- **本地 409 `NOTIFY_RUN_LIMIT_EXCEEDED`**：一次运行最多 10 个单位，每次 `notify.send` 消耗 `max(1, 目标数)`。`.ptx/notify-targets.json` 里目标多时，一次运行能发的条数就少（5 个目标 → 2 条）。
+- **本地 500 `PTX_STUB_FAILED`，消息提到 `.ptx/notify-targets.json`**：文件格式不对，应为 `[{ "name": "alerts", "type": "slack" }]`（type 是 slack / teams / chatwork / webhook，最多 5 项，名字不能重复）。
+- **本地 `.ptx/outbox/…/<seq>.send.json` 和线上运行记录里的通知存档对不上**：本地用户请求里的 `no_targets` 也会写文件（线上交互调用不写存档），本地 409 不写文件（线上任务 run 会写一行 failed）；而且本地文件是简化版 ——
+  `message.link` 是原始 `{ label, path }`（不展开；线上存展开后的 `{ label, url }`）、`targets` 只有 name / type（线上每个目标还有渲染出的请求体与投递结果）。属预期，不是 bug。
+  另外，线上存档里的渲染结果与实际发出的体只是语义相等（键序可能不同），不能用来重算 webhook 签名。
 - **本地 400 `NOTIFY_CHANNEL_MESSAGE_INVALID`**：看 `e.detail.field` 是哪个字段（线上同样带）。
   - `message.imageUrl`：本地只收 `ctx.pt.render.chart()` 本地桩返回的 `http://localhost:8788/__ptx/media/…`（或路径形状同平台 media 地址的 https）；外链图片线上同样会被拒。
   - `message.link.path`：只接受应用内路径 —— 不能带 scheme（以字母开头、由字母 / 数字 / `+` `.` `-` 组成并紧跟冒号的前缀，如 `https:`、`javascript:`，所以 `reports:42` 也算），
     不能以 `//` 开头、去掉一个前导 `#/` / `/` 后也不能再以 `/` 开头，`?` 之前不能有 `.` / `..` 路径段（含 `%2e` 编码）。线上同口径拒。
-- **本地 `notify.channel` 能过、线上 404**：线上的名字由管理员配置，且可能没对本应用开放（「可用应用」）；请管理员核对。
-- **报「notifyChannel 段缺 …（规则快照过旧）」**：使用者升级 starter；维护者跑 `npm run sync-rules`。
+- **线上 `notify.send` 502 `NOTIFY_CHANNEL_SEND_FAILED`**：这次的**所有**目标都没收下，`e.detail.deliveryErrors` 按目标顺序给出投递错误码（含 `CHANNEL_KEY_UNAVAILABLE`：该目标凭据解不开）；部分成功不会报错（`status: 'partial'`）。
+- **报「notifySend 段缺 …（规则快照过旧）」**：使用者升级 starter；维护者跑 `npm run sync-rules`。
+- **订阅中心里看不到我的任务类型**：manifest 里该类型写了 `"subscribable": false`；或当前版本没有 `jobs:run`；或应用是从商店安装的（商店应用没有订阅中心）。
+  **草稿应用**的订阅项照常列出，只是工具栏「订阅」按钮置灰、不能订阅 —— 发布后即可用。
+- **`PtApp.subscriptions` 是 `undefined` / 调用 reject `PT_METHOD_NOT_ALLOWED`**：平台注入的运行时 SDK 还没升到含它的版本。主入口是应用页上方的「订阅」按钮，界面上提示用户点它即可（AGENTS.md「定时任务」第 5 条有标准写法）。
 - `.ptx/` 可以随时删除（已在 `.gitignore`）。
 
 ## 其他

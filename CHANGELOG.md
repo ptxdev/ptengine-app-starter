@@ -33,16 +33,18 @@
 
 ## Unreleased
 
-> **待办（发版时）**：依赖区间升到含 `notify:send` / `PtApp.jobs.openPreview` 的 app-sdk 与含 `ctx.pt.notify`（含 1c 的 `notify.channel` / `listChannels`）/ `ctx.pt.render` /
+> **待办（发版时）**：依赖区间升到含 `notify:send` / 订阅项字段 / `PtApp.subscriptions.open` 的 app-sdk 与含 `ctx.pt.notify`（含 `notify.send`）/ `ctx.pt.render` /
 > 预览日志的 app-backend，`PACKAGE_FLOORS` 同步，版本号确定，兼容矩阵补一行。在那之前本段能力在现有依赖区间上类型里没有、运行时拿不到。
 >
 > **发版前置（平台侧 chore，未完成不得发本版 starter）**——只看「npm 包已发」不够，下面两件没做时，照 `AGENTS.md` 写出的应用线上会被拒或崩：
 > 1. **ptengine-x backend 已把 `@ptengine/app-sdk` 升到含 `notify:send` 的版本并部署**：上传包由
 >    `backend/src/components/custom-app/helpers/bundle-validator.ts` 用 app-sdk 的 manifest schema 校验，旧 schema 没有
 >    `notify:send`，声明了它的包上传即被拒（本地 doctor 读 `rules.json` 会放行，本地发现不了）。
-> 2. **workers 已重新生成 edge 的 SDK 资产并部署**（`workers/package.json` 的 app-sdk 升到含 `PtApp.jobs` 的 minor、跑 `build:sdk-asset`、
+>    订阅项字段（`displayName` 等）**不受这条影响**：`backend.jobs` 只出现在有后端（`schemaVersion: 2`）的应用里，这类包的上传走 platform 轨道、
+>    由 contract `validateManifestJobs` 校验，与 backend pin 的 app-sdk 版本无关（bundle-validator 只用于旧的轻量应用路径）。
+> 2. **workers 已重新生成 edge 的 SDK 资产并部署**（`workers/package.json` 的 app-sdk 升到含 `PtApp.subscriptions` 的 minor、跑 `build:sdk-asset`、
 >    改 `EXPECTED_APP_SDK_MINOR`，见 workers/README「Edge 自持的运行时 SDK」）：应用运行时的 `window.PtApp` 来自 edge `/__pt/app-sdk.js`，
->    旧资产上 `PtApp.jobs` 为 `undefined`，`PtApp.jobs.openPreview(...)` 直接 TypeError，拿不到 `PT_*` 错误码。
+>    旧资产上 `PtApp.subscriptions` 为 `undefined`（AGENTS.md 的标准写法会退回提示「点右上角『订阅』」，不会崩，但加速入口不可用）。
 > 3. **上线顺序**：**workers gateway 须先于或同批于新版 app-backend**——新版 app-backend 只对「429 + `TOO_MANY_CONCURRENT_QUERIES` +
 >    `x-pt-gate: concurrency`」退避重试，旧 gateway 的闸 429 不带这个头，新包跑在旧 gateway 上打满并发闸时直接失败、不重试；
 >    **ptengine-x backend 须与带 `identity.appId` 的 platform 同批或之后**——新 backend 缺这个字段时任务 run 启动一律 502。
@@ -70,15 +72,23 @@
 - 文档：`AGENTS.md` 新增「推送：邮件与图表」「预览模式写法」；定时任务第 4 条改为「预览里照常调用 notify.email（平台拦截）」；
   `docs/troubleshooting.md` 新增「推送 / 图表本地桩」。`.gitignore` 加 `.ptx/`。
 - 本地 `ctx.pt.jobs.*` 桩接受 `archiveToAssets`（布尔，JobView 缺省 false；非布尔 400 `JOB_OP_INVALID`）；`AGENTS.md` 补「结果归档」说明（定时任务 1b+）。
-- **通知渠道的本地桩**（定时任务 1c）：`ctx.pt.notify.channel` / `listChannels` 经本地网关桩转到 `127.0.0.1:8788`。消息按 `scripts/rules.json` 的 `notifyChannel` 段同口径校验
-  （名字、标题 / 正文 / 链接 / 图片形状、每 run 10 次、与邮件共用的本地并发闸、16 KiB 体积上限），写 `.ptx/outbox/<runId|interactive>/<seq>.channel.json`（与邮件共用序号），**永远不真实投递**；
-  渠道目录读项目内 `.ptx/channels.json`（没有时任何合法名字都接受、`listChannels` 回 `[]`）。本地推送预览页同时列出渠道消息（JSON 展示）。工作区分钟限额本地不模拟。
-  `link.path` 与平台同口径：带 scheme、以 `//` 开头（或去掉一个前导后仍以 `/` 开头）、含 `.` / `..` 段（含 `%2e`）一律 400 `NOTIFY_CHANNEL_MESSAGE_INVALID`；`text` 可省略或 `null`；本地 400 带 `details.field`。
-- `npm run ptx -- job run --preview`：预览日志接受并显示 `stats.notifyChannel`（出现但不合规时与平台同口径整头作废）；预览尾部改指「本地推送预览（邮件 / 渠道消息）」。
-  上面 1b 条目里的「本地邮件预览页」现为「本地推送预览页」（邮件与渠道消息）。
-- `ptx doctor`：`notify:send` 检查的话术点名 `notify.channel` / `notify.listChannels`（识别范围不变，原本就覆盖）。
-- 规则快照同步：新增 `notifyChannel` 段。`link.path` 的 scheme / 点段正则也在其中（`linkPathSchemePattern` / `linkPathDotSegmentPattern`，`{ source, flags }`），本地渠道桩直接读它、不留副本；快照缺这两键时报「规则快照过旧」。
-- `AGENTS.md` 新增「推送：通知渠道」（含告警任务示例与本地 `.ptx/channels.json` 用法），预览写法与 troubleshooting 同步。
+- **通知投递目标**（取代 1c 未发版的按名发送）：应用只声明订阅项、调 `ctx.pt.notify.send(message)`，投递目标由使用者在宿主订阅中心配置。
+  - **本地桩 `notify.send`**（`scripts/local-stub/send.mjs`，取代 `channel.mjs`）：本地网关桩把 `/notify/send` 转到 `127.0.0.1:8788`（`/notify/channel`、`/notify/channels` 不再转，未知路径 501）。
+    消息按 `scripts/rules.json` 的 `notifySend` 段同口径校验（标题 / 正文 / 链接 / 图片形状、与邮件共用的本地并发闸、16 KiB 体积上限），
+    每 run 单位按 `max(1, 目标数)` 计、合计 ≤ `maxUnitsPerRun`（超了 409 `NOTIFY_RUN_LIMIT_EXCEEDED`，整次不发）。
+    投递目标读项目内 `.ptx/notify-targets.json`（`[{ "name", "type" }]`，最多 `maxTargets` 个）：**没有文件 → 一个虚拟目标 `local / webhook`**（本地默认走通 `sent`）；
+    **`[]` → `no_targets`**（任务 `JOB_TARGETS_EMPTY`、交互 `APP_DEFAULT_EMPTY`）。写 `.ptx/outbox/<runId|interactive>/<seq>.send.json`（`{ message, targets, status, noTargetsReason, … }`，与邮件共用序号），
+    **永远不真实投递**。本地推送预览页按「消息一次 + 将发到列表」展示。`.ptx/channels.json` 不再读取。
+  - 本地 `ctx.pt.jobs.*` 桩：`JobView.targetCount` = 创建时的本地目标数（本地桩新增 `GET /__ptx/notify-targets` 回 `{ count }`，没有目录文件为 1，桩不可达按 1）；`channelIds` → 400 `JOB_OP_INVALID`（与平台同码）。
+  - `npm run ptx -- job run`：预览日志认 `stats.notifySend`（1c 的 `notifyChannel` 当未知键忽略，与平台同口径），首行显示「通知 n 次」；
+    没给 `--params` 时用该类型 manifest 的 `defaultParams`（= 订阅中心创建的任务拿到的 params），再没有才是 `{}`。
+  - `ptx doctor`：代码里出现 `ctx.pt.notify.channel` / `notify.listChannels` → **bad**（「已移除，改用 notify.send，投递目标由使用者配置」）；
+    `notify:send` 检查覆盖 `notify.send`；新增订阅项字段检查（`displayName` / `description` / `defaultCron` / `defaultParams` / `subscribable` 形状不合规 → bad，
+    `defaultCron` 不是 5 段 → warn，订阅项没写 `displayName` → 新增的 info 级提示 `[i]`，不计入通过 / 提醒 / 问题数）。
+  - 规则快照同步：删 `notifyChannel` 段，新增 `notifySend` 段（`maxUnitsPerRun` / `maxTargets` 等）与 `jobs` 段（订阅项字段上限与三语 locale）。
+  - `AGENTS.md`「定时任务」「推送：通知渠道」重写：两层模型；订阅项字段（日报 / 周报 / 月报 = 三个类型 + 三个 `defaultCron`）、`subscribable: false` 的用法；
+    `PtApp.subscriptions.open` 能力探测标准写法；`notify.send` 的四种 `status` 与 `no_targets` 处理、部分成功不要整体重发；不要在 params 里放渠道名。
+    `PtApp.jobs.openPreview` 的写法删除。`docs/troubleshooting.md`、README、`backend/src/index.ts` 注释同步。
 
 ### 安全
 

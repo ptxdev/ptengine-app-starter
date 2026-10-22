@@ -28,7 +28,8 @@ function devKey() {
 const decode = t => JSON.parse(Buffer.from(t.replace(/^Bearer /, '').split('.')[1], 'base64url'));
 
 test('parseJobArgs', () => {
-    assert.deepEqual(parseJobArgs(['run', 'weekly-report']), { type: 'weekly-report', params: {}, preview: false });
+    // 没给 --params → null（run 再按 manifest defaultParams ?? {} 补）
+    assert.deepEqual(parseJobArgs(['run', 'weekly-report']), { type: 'weekly-report', params: null, preview: false });
     assert.deepEqual(parseJobArgs(['run', 'w', '--params', '{"a":1}', '--preview']), { type: 'w', params: { a: 1 }, preview: true });
     assert.throws(() => parseJobArgs([]), /npm run ptx -- job run/);
     assert.throws(() => parseJobArgs(['list']), /npm run ptx -- job run/);
@@ -133,11 +134,11 @@ test('run：POST 到本地 worker 的 /api<path>，带任务 token，打印状�
             res.writeHead(200, { 'content-type': 'application/json' });
             res.end(JSON.stringify({ archive: { markdown: '# ok' } }));
         });
-    }, () => run(['run', 'weekly-report', '--params', '{"channel":"c"}'], root)));
+    }, () => run(['run', 'weekly-report', '--params', '{"range":"last7d"}'], root)));
     assert.equal(seen.method, 'POST');
     assert.equal(seen.url, '/api/jobs/weekly-report');
     assert.equal(seen.ct, 'application/json');
-    assert.equal(seen.body, '{"channel":"c"}');
+    assert.equal(seen.body, '{"range":"last7d"}');
     const claims = decode(seen.auth);
     assert.deepEqual([claims.trg, claims.job, claims.mode], ['job', 'local', 'run']);
     assert.match(claims.run, /^[0-9a-f-]{36}$/);
@@ -307,11 +308,11 @@ test('formatJobLog：首行三项计数，逐行 +<t>ms 消息 字段；截断�
     assert.match(formatJobLog({ ...LOG, entries: [] }), /没有 ctx\.log/);
 });
 
-test('run --preview：打印解码后的预览日志与本地推送预览地址（邮件 / 渠道消息，.ptx/outbox/<runId> 存在时）', async () => {
+test('run --preview：打印解码后的预览日志与本地推送预览地址（邮件 / 通知，.ptx/outbox/<runId> 存在时）', async () => {
     const root = project();
     const out = await captureLogs(() => withServer((req, res) => {
         const claims = JSON.parse(Buffer.from(req.headers.authorization.split('.')[1], 'base64url'));
-        mkdirSync(join(root, '.ptx', 'outbox', claims.run), { recursive: true });       // 模拟本地桩写下的邮件 / 渠道消息
+        mkdirSync(join(root, '.ptx', 'outbox', claims.run), { recursive: true });       // 模拟本地桩写下的邮件 / 通知
         req.resume();
         req.on('end', () => {
             res.writeHead(200, { 'content-type': 'application/json', [J.headerName]: b64(LOG) });
@@ -320,7 +321,23 @@ test('run --preview：打印解码后的预览日志与本地推送预览地址�
     }, () => run(['run', 'weekly-report', '--preview'], root)));
     assert.match(out, /预览日志（x-pt-job-log）：取数 2 次/);
     assert.match(out, /\+3ms\s+开始/);
-    assert.match(out, /本地推送预览（邮件 \/ 渠道消息）：http:\/\/localhost:8788\/__ptx\/outbox\/[0-9a-f-]{36}/);
+    assert.match(out, /本地推送预览（邮件 \/ 通知）：http:\/\/localhost:8788\/__ptx\/outbox\/[0-9a-f-]{36}/);
+});
+
+test('run 没给 --params：用 manifest 该类型的 defaultParams（= 订阅中心创建的任务拿到的 params）；给了 --params 以它为准；都没有 → {}', async () => {
+    const manifest = { ...MANIFEST, backend: { ...MANIFEST.backend, jobs: [{ ...MANIFEST.backend.jobs[0], defaultParams: { range: 'yesterday' } }] } };
+    const bodies = [];
+    const serve = (req, res) => {
+        let body = '';
+        req.on('data', c => { body += c; });
+        req.on('end', () => { bodies.push(body); res.writeHead(200, { 'content-type': 'application/json' }); res.end('{}'); });
+    };
+    const root = project({ manifest });
+    const out = await captureLogs(() => withServer(serve, () => run(['run', 'weekly-report'], root)));
+    await captureLogs(() => withServer(serve, () => run(['run', 'weekly-report', '--params', '{"range":"last7d"}'], root)));
+    await captureLogs(() => withServer(serve, () => run(['run', 'weekly-report'], project())));
+    assert.deepEqual(bodies, ['{"range":"yesterday"}', '{"range":"last7d"}', '{}']);
+    assert.match(out, /defaultParams/);
 });
 
 test('run --preview：头不合平台口径 → 打印原因与「线上会被平台丢弃」', async () => {
@@ -336,14 +353,14 @@ test('run --preview：头不合平台口径 → 打印原因与「线上会被�
     assert.match(out, /第 1 条的 m/);
 });
 
-test('run --preview 但响应没有头 → 提示 app-backend 版本；没调 notify.email / notify.channel → 明说', async () => {
+test('run --preview 但响应没有头 → 提示 app-backend 版本；没调 notify.email / notify.send → 明说', async () => {
     const root = project();
     const out = await captureLogs(() => withServer((req, res) => {
         req.resume();
         req.on('end', () => { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{}'); });
     }, () => run(['run', 'weekly-report', '--preview'], root)));
     assert.match(out, /响应里没有 x-pt-job-log/);
-    assert.match(out, /这次运行没有调用 ctx\.pt\.notify\.email \/ notify\.channel。/);
+    assert.match(out, /这次运行没有调用 ctx\.pt\.notify\.email \/ notify\.send。/);
 });
 
 test('非预览运行的响应带了头 → 警告（app-backend 不该这样）', async () => {
@@ -355,18 +372,20 @@ test('非预览运行的响应带了头 → 警告（app-backend 不该这样）
     assert.match(out, /非预览运行的响应带了 x-pt-job-log/);
 });
 
-test('decodeJobLogHeader：1c 的可选 stats.notifyChannel —— 缺省照收，非负整数照收，出现但不合规整头作废（与平台同口径）', () => {
+test('decodeJobLogHeader：可选 stats.notifySend —— 缺省照收，非负整数照收，出现但不合规整头作废；1c 的 notifyChannel 当未知键忽略（与平台同口径，裁定 N28）', () => {
     assert.equal(decodeJobLogHeader(b64(LOG)).reason, null);
-    assert.equal(decodeJobLogHeader(b64({ ...LOG, stats: { ...LOG.stats, notifyChannel: 3 } })).reason, null);
-    assert.equal(decodeJobLogHeader(b64({ ...LOG, stats: { ...LOG.stats, notifyChannel: 0 } })).reason, null);
+    assert.equal(decodeJobLogHeader(b64({ ...LOG, stats: { ...LOG.stats, notifySend: 3 } })).reason, null);
+    assert.equal(decodeJobLogHeader(b64({ ...LOG, stats: { ...LOG.stats, notifySend: 0 } })).reason, null);
     for (const bad of [-1, 1.5, '2', null, true]) {
-        const r = decodeJobLogHeader(b64({ ...LOG, stats: { ...LOG.stats, notifyChannel: bad } }));
+        const r = decodeJobLogHeader(b64({ ...LOG, stats: { ...LOG.stats, notifySend: bad } }));
         assert.equal(r.log, null, String(bad));
-        assert.match(r.reason, /notifyChannel/, String(bad));
+        assert.match(r.reason, /notifySend/, String(bad));
+        assert.equal(decodeJobLogHeader(b64({ ...LOG, stats: { ...LOG.stats, notifyChannel: bad } })).reason, null, `notifyChannel=${bad}`);
     }
 });
 
-test('formatJobLog：首行末尾追加「渠道 n 次」（缺省按 0），不打乱前三项的顺序', () => {
-    assert.match(formatJobLog({ ...LOG, stats: { ...LOG.stats, notifyChannel: 4 } }), /取数 2 次 · 邮件 1 次 · 图表 1 次 · 渠道 4 次/);
-    assert.match(formatJobLog(LOG), /图表 1 次 · 渠道 0 次/);
+test('formatJobLog：首行末尾追加「通知 n 次」（缺省按 0），不打乱前三项的顺序；旧 notifyChannel 不计', () => {
+    assert.match(formatJobLog({ ...LOG, stats: { ...LOG.stats, notifySend: 4 } }), /取数 2 次 · 邮件 1 次 · 图表 1 次 · 通知 4 次/);
+    assert.match(formatJobLog({ ...LOG, stats: { ...LOG.stats, notifyChannel: 4 } }), /图表 1 次 · 通知 0 次/);
+    assert.match(formatJobLog(LOG), /图表 1 次 · 通知 0 次/);
 });

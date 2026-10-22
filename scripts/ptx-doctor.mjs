@@ -646,28 +646,119 @@ const NOTIFY_USE_RES = [
 ];
 
 /**
- * 用了 `ctx.pt.notify.*`（email / channel / listChannels）/ `ctx.pt.render.*` 就必须声明 `notify:send`（定时任务 1b §13.3、1c §8.4）。
+ * 用了 `ctx.pt.notify.*`（email / send）/ `ctx.pt.render.*` 就必须声明 `notify:send`（定时任务 1b §13.3、通知投递目标 §9.3）。
  * 不声明：平台不把这个 scope 放进令牌 → 线上恒 403 SCOPE_DENIED；而本地令牌照抄 manifest，同样 403，
  * 但报错落在运行时某一次发信上，不如在 doctor 里一次说清楚。注释与字符串里出现的不算（模板插值里的算），
  * `*.test.*` / `*.spec.*` 与 `*.d.ts` 不扫；识别范围见 NOTIFY_USE_RES。
  */
 export function checkNotifyScope(root, manifest) {
-    const hits = listSourceFiles(join(root, 'backend', 'src'))
-        .filter(p => !/\.(?:test|spec)\.[^.\/\\]+$/.test(p))   // 测试里的 mock 不算
-        .filter(p => !/\.d\.[cm]?ts$/.test(p))                    // 类型声明文件里只有类型，不是调用
-        .map(p => ({ rel: relative(root, p), text: maskJsCode(readFileSync(p, 'utf8')) }))
+    const hits = backendCodeFiles(root)
         .filter(s => NOTIFY_USE_RES.some(re => re.test(s.text)))
         .map(s => s.rel);
     if (hits.length === 0) return [];
     if (!(manifest.scopes ?? []).includes('notify:send')) {
         return [{
             level: 'bad',
-            msg: `后端用了 ctx.pt.notify.email / notify.channel / notify.listChannels / render.chart（${hits.join('、')}），但 manifest.scopes 里没有 notify:send`,
+            msg: `后端用了 ctx.pt.notify.email / notify.send / render.chart（${hits.join('、')}），但 manifest.scopes 里没有 notify:send`,
             why: '把 "notify:send" 加进 manifest.json 的 scopes 并重新发布，再由工作区管理员同意授权（写类 scope，没有自建应用豁免）。' +
-                 '不声明的话发信、渠道消息、列渠道与渲染一律 403 SCOPE_DENIED。'
+                 '不声明的话发信、发通知与渲染一律 403 SCOPE_DENIED。'
         }];
     }
     return [{ level: 'ok', msg: `ctx.pt.notify.* / render.chart 已声明 notify:send（${hits.join('、')}）` }];
+}
+
+/** backend/src 下要扫的源码（剥掉注释与字符串内容）：测试与 .d.ts 不算。 */
+function backendCodeFiles(root) {
+    return listSourceFiles(join(root, 'backend', 'src'))
+        .filter(p => !/\.(?:test|spec)\.[^.\/\\]+$/.test(p))   // 测试里的 mock 不算
+        .filter(p => !/\.d\.[cm]?ts$/.test(p))                    // 类型声明文件里只有类型，不是调用
+        .map(p => ({ rel: relative(root, p), text: maskJsCode(readFileSync(p, 'utf8')) }));
+}
+
+/** 1c 的按名发送 / 列渠道（`notify.channel` / `notify.listChannels`），含可选链；解构出的 `notify` 同样命中。 */
+const REMOVED_NOTIFY_RE = /\bnotify\s*\??\.\s*(?:channel|listChannels)\b/;
+
+/**
+ * 通知投递目标（brief §9.3）：1c 的 `ctx.pt.notify.channel` / `notify.listChannels` 已从 `@ptengine/app-backend` 移除 ——
+ * 新版包里它们是 undefined，调用即 TypeError；线上网关也已删掉那两条路径。注释、字符串、测试文件里出现的不算。
+ */
+export function checkRemovedNotifyApis(root) {
+    const hits = backendCodeFiles(root).filter(s => REMOVED_NOTIFY_RE.test(s.text)).map(s => s.rel);
+    if (hits.length === 0) return [];
+    return [{
+        level: 'bad',
+        msg: `后端还在用已移除的 ctx.pt.notify.channel / notify.listChannels（${hits.join('、')}）`,
+        why: '已移除，改用 ctx.pt.notify.send({ title, text?, imageUrl?, link? })，投递目标由使用者配置：' +
+             '任务里发到订阅时选的渠道，用户请求里发到应用默认通知渠道；应用既不指定也看不到渠道名（参数里也别放渠道名）。' +
+             '本地用 .ptx/notify-targets.json 模拟投递目标。'
+    }];
+}
+
+const I18N_CONTROL = /[\u0000-\u001f\u007f]/;
+const codePointLen = s => [...s].length;
+const isPlainObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/** 订阅项三语文本的问题（合规 → null）：与 contract validateManifestJobs 同口径。 */
+function i18nTextProblem(v, max, locales) {
+    if (!isPlainObj(v)) return '必须是对象（键为语言）';
+    const keys = Object.keys(v);
+    if (keys.length === 0) return '至少要有一个语言';
+    for (const k of keys) {
+        if (!locales.includes(k)) return `的键只能是 ${locales.join(' / ')}，收到 ${JSON.stringify(k)}`;
+        const t = v[k];
+        if (typeof t !== 'string' || t.trim().length === 0) return `["${k}"] 必须是非空字符串`;
+        if (I18N_CONTROL.test(t)) return `["${k}"] 不能含换行或控制字符`;
+        if (codePointLen(t) > max) return `["${k}"] 不能超过 ${max} 个字符`;
+    }
+    return null;
+}
+
+/**
+ * manifest `backend.jobs[]` 的订阅项字段（通知投递目标 brief §2）：displayName / description / defaultCron / defaultParams / subscribable。
+ * 形状不合规 → bad（平台上传 MANIFEST_JOBS_INVALID，上限读 rules.jobs）；defaultCron 不是 5 段 → warn（解析与最小间隔由平台判）；
+ * 订阅项没写 displayName → info（可选：订阅中心会退回显示 title）。
+ */
+export function checkSubscriptionItems(manifest, rules = RULES.jobs) {
+    const jobs = manifest?.backend?.jobs;
+    if (!Array.isArray(jobs) || jobs.length === 0) return [];
+    if (!rules || ['displayNameMax', 'descriptionMax', 'defaultCronMax', 'i18nLocales'].some(k => rules[k] == null)) {
+        return [{ level: 'warn', msg: 'scripts/rules.json 没有完整的 jobs 段（规则快照过旧），跳过订阅项字段检查', why: '升级 starter 的 scripts/（维护者跑 npm run sync-rules）。' }];
+    }
+    const out = [];
+    const noName = [];
+    for (const [i, job] of jobs.entries()) {
+        if (!isPlainObj(job)) continue;
+        // 缺 type / type 不是字符串时按位置点名（类型本身的问题由 manifest 校验报）
+        const name = typeof job.type === 'string' && job.type ? job.type : `backend.jobs[${i}]`;
+        const at = typeof job.type === 'string' && job.type ? `任务 ${name}` : name;
+        const bad = (field, why) => out.push({ level: 'bad', msg: `${at} 的 ${field} ${why}`, why: '平台上传会以 MANIFEST_JOBS_INVALID 拒收。' });
+        for (const [field, max] of [['displayName', rules.displayNameMax], ['description', rules.descriptionMax]]) {
+            if (job[field] === undefined) continue;
+            const why = i18nTextProblem(job[field], max, rules.i18nLocales);
+            if (why) bad(field, why);
+        }
+        if (job.defaultCron !== undefined) {
+            if (typeof job.defaultCron !== 'string' || job.defaultCron.length > rules.defaultCronMax) {
+                bad('defaultCron', `必须是至多 ${rules.defaultCronMax} 个字符的字符串`);
+            } else if (job.defaultCron.trim().split(/\s+/).length !== 5) {
+                out.push({
+                    level: 'warn', msg: `${at} 的 defaultCron ${JSON.stringify(job.defaultCron)} 不是 5 段 cron`,
+                    why: '平台上传时会解析它并检查最小间隔，解析不了即 MANIFEST_JOBS_INVALID。只支持 5 段标准 cron（不支持秒与 L / W / #）。'
+                });
+            }
+        }
+        if (job.defaultParams !== undefined && !isPlainObj(job.defaultParams)) bad('defaultParams', '必须是 JSON 对象');
+        if (job.subscribable !== undefined && typeof job.subscribable !== 'boolean') bad('subscribable', '必须是布尔值');
+        if (job.subscribable !== false && job.displayName === undefined) noName.push(name);
+    }
+    if (noName.length) {
+        out.push({
+            level: 'info', msg: `订阅项 ${noName.join(' / ')} 没写 displayName（可选）`,
+            why: '订阅中心会显示 title。想按语言显示名称与说明，加 displayName / description（zh-CN / en-US / ja-JP）与建议调度 defaultCron。'
+        });
+    }
+    if (out.length === 0) out.push({ level: 'ok', msg: `订阅项字段合规（${jobs.length} 个任务类型）` });
+    return out;
 }
 
 /**
@@ -973,13 +1064,15 @@ export async function run(args, root) {
     checkScopeConsistency(root, manifest);
     results.push(...checkJobs(root, manifest));
     results.push(...checkNotifyScope(root, manifest));
+    results.push(...checkRemovedNotifyApis(root));
+    results.push(...checkSubscriptionItems(manifest));
     checkMigrationsAdditive(root, manifest, results);
     checkGitignore(root);
     checkTokenLeak(root);
 
     if (args.includes('--deps')) await checkDeps(root);
 
-    const icon = { ok: '[ok]', warn: '[!] ', bad: '[x] ' };
+    const icon = { ok: '[ok]', info: '[i] ', warn: '[!] ', bad: '[x] ' };
     for (const r of results) {
         console.log(`  ${icon[r.level]} ${r.msg}`);
         if (r.why) console.log(`         ${r.why}`);
@@ -987,8 +1080,9 @@ export async function run(args, root) {
 
     const bads = results.filter(r => r.level === 'bad').length;
     const warns = results.filter(r => r.level === 'warn').length;
+    const infos = results.filter(r => r.level === 'info').length;
     console.log(
-        `\n  ${results.length - bads - warns} 项通过` +
+        `\n  ${results.length - bads - warns - infos} 项通过` +
         `${warns ? `，${warns} 项提醒` : ''}` +
         `${bads ? `，${bads} 项需要修` : ''}\n`
     );

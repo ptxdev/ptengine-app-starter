@@ -2,14 +2,15 @@
  * ptx dev 的本地推送 / 图表桩服务（定时任务 1b）。跑在 ptx dev 的 Node 进程里，监听 127.0.0.1:8788。
  *
  * 为什么不在 wrangler 的本地网关桩里直接做：那是 workerd，写不了本地文件、加载不了 @resvg/resvg-js（原生模块）。
- * 所以网关桩（scripts/local-gateway/worker.mjs）只把 /notify/email、/notify/channel、/notify/channels、/render/chart 原样转过来（修订建议 S8）。
+ * 所以网关桩（scripts/local-gateway/worker.mjs）只把 /notify/email、/notify/send、/render/chart 原样转过来（修订建议 S8）。
  *
  *   POST /notify/email                  → 写 .ptx/outbox/<runId|interactive>/<seq>.json + .html，打印一行
- *   POST /notify/channel                → 写 .ptx/outbox/<runId|interactive>/<seq>.channel.json（与邮件共用序号），打印一行；永不投递
- *   POST /notify/channels               → 读 .ptx/channels.json，回 { channels: [{ name, type }] }（没有文件回 []）
+ *   POST /notify/send                   → 按 .ptx/notify-targets.json 扇出（没有文件 = 一个虚拟目标 local / webhook；[] = 没有投递目标），
+ *                                         写 .ptx/outbox/<runId|interactive>/<seq>.send.json（与邮件共用序号），打印一行；永不投递
  *   POST /render/chart                  → 写 .ptx/media/<hex>.png，返回 http://localhost:<port>/__ptx/media/<hex>.png
+ *   GET  /__ptx/notify-targets          → { count }：本地投递目标数（本地网关桩创建任务时写进 JobView.targetCount）
  *   GET  /__ptx/media/<hex>.png         → 图片
- *   GET  /__ptx/outbox/<id>             → 这次运行写下的邮件与渠道消息列表（本地推送预览页）
+ *   GET  /__ptx/outbox/<id>             → 这次运行写下的邮件与通知列表（本地推送预览页；通知 = 消息一次 + 将发到列表）
  *   GET  /__ptx/outbox/<id>/<seq>.html  → 单封邮件（退订链接已换成 #）
  *
  * 令牌只解不验（本机开发桩；验签由 app-backend 在路由那一侧真做）。scope 与线上一致：没有 notify:send → 403。
@@ -17,7 +18,7 @@
  * 安全边界（两条，都不靠 notify.mjs 的 sanitizeLocally —— 那只是「平台会删什么」的提示，不是清洗）：
  *   1. 所有 HTML 响应带 CSP `sandbox; script-src 'none'; …`：邮件 HTML 里的任何脚本（含 `<a href=javascript:…>`
  *      无引号写法、on* 属性）在预览页都执行不了；sandbox 不含 allow-scripts / allow-same-origin。
- *   2. 写盘 / 读盘路径只用通过校验的 runId（[A-Za-z0-9_-]{1,64}）、自己生成的 32 hex 文件名与数字序号（渠道名只进文件内容、绝不进路径），
+ *   2. 写盘 / 读盘路径只用通过校验的 runId（[A-Za-z0-9_-]{1,64}）、自己生成的 32 hex 文件名与数字序号（目标名只进文件内容、绝不进路径），
  *      拼接后再确认仍在 .ptx 目录内（insidePtx），防穿越。
  *   3. Host 只认 127.0.0.1:<port> / localhost:<port>，其余 421（防 DNS rebinding 读 outbox）。
  *
@@ -27,8 +28,8 @@
  * 与线上网关一致，app-backend 只对带这个头的 429 有界退避重试）。
  * 规则快照里没有两个并发上限时**不模拟**这道闸（不写字面量兜底），启动时提示一行；有上限却缺 `gateway.gateHeader`
  * 时启动即报「规则快照过旧」（不带头的本地 429 会让新 app-backend 永不重试，与线上不一致）。
- * 渠道消息（定时任务 1c）与邮件共用 notify 那道闸（线上 notifyInflight，话术「邮件与渠道合计」）；/notify/channels 是读闸档，本地不模拟。
- * /notify/channel 的体积上限读 rules.json 的 notifyChannel.maxBodyBytes（= 线上网关的渠道档上限），超了 413 GATEWAY_BAD_REQUEST。
+ * 通知（notify.send）与邮件共用 notify 那道闸（线上 notifyInflight，话术「邮件与渠道合计」）。
+ * /notify/send 的体积上限读 rules.json 的 notifySend.maxBodyBytes（= 线上网关的通知档上限），超了 413 GATEWAY_BAD_REQUEST。
  */
 import { createServer } from 'node:http';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -36,7 +37,7 @@ import { join, resolve, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { decodeClaims } from '../local-gateway/jobs-store.mjs';
 import { RUN_ID_RE, createStubState, handleNotifyEmail, jobRunOf } from './notify.mjs';
-import { channelRules, handleListChannels, handleNotifyChannel, loadLocalChannels } from './channel.mjs';
+import { handleNotifySend, loadLocalTargets, resolveLocalTargets, sendRules } from './send.mjs';
 import { handleRenderChart } from './render.mjs';
 import { RULES } from '../manifest.mjs';
 
@@ -50,9 +51,9 @@ const MEDIA_RE = /^\/__ptx\/media\/([0-9a-f]{32})\.png$/;
 const OUTBOX_LIST_RE = /^\/__ptx\/outbox\/([A-Za-z0-9_-]{1,64})\/?$/;
 const OUTBOX_ITEM_RE = /^\/__ptx\/outbox\/([A-Za-z0-9_-]{1,64})\/(\d{1,9})\.html$/;
 /** 本地桩接的 POST 路径（与线上网关同名）→ 内部种类。 */
-const POST_ROUTES = { '/notify/email': 'email', '/notify/channel': 'channel', '/notify/channels': 'listChannels', '/render/chart': 'render' };
+const POST_ROUTES = { '/notify/email': 'email', '/notify/send': 'send', '/render/chart': 'render' };
 /** 请求体不是合法 JSON 时回的码（与线上平台对同一输入的码一致）。 */
-const BAD_JSON_CODE = { email: 'NOTIFY_CONTENT_INVALID', channel: 'NOTIFY_CHANNEL_MESSAGE_INVALID', render: 'RENDER_OPTION_INVALID' };
+const BAD_JSON_CODE = { email: 'NOTIFY_CONTENT_INVALID', send: 'NOTIFY_CHANNEL_MESSAGE_INVALID', render: 'RENDER_OPTION_INVALID' };
 /** 闸满 429 的话术：通知档是邮件与渠道合计（与线上网关 1c 话术同口径）。 */
 const GATE_MESSAGE = {
     notify: max => `该应用通知并发过高(>${max})（邮件与渠道合计），请减少同时发起的发送`,
@@ -113,25 +114,35 @@ function insidePtx(ptxDir, ...parts) {
     return p;
 }
 
-/** 邮件（<seq>.json）与渠道消息（<seq>.channel.json）共用一个序号空间：新条目取两者最大值 + 1。 */
-const allSeqs = dir => readdirSync(dir).map(f => /^(\d+)\.(?:channel\.)?json$/.exec(f)).filter(Boolean).map(m => Number(m[1])).sort((a, b) => a - b);
+/** 邮件（<seq>.json）与通知（<seq>.send.json）共用一个序号空间：新条目取两者最大值 + 1。 */
+const allSeqs = dir => readdirSync(dir).map(f => /^(\d+)\.(?:send\.)?json$/.exec(f)).filter(Boolean).map(m => Number(m[1])).sort((a, b) => a - b);
+
+/** 通知的状态 → 本地预览页 / 终端的人话。 */
+const SEND_STATUS_TEXT = { intercepted: '预览拦截', sent: '本地未真实投递', skipped: '没有投递目标，未发送', no_targets: '没有投递目标，未发送' };
+const targetsText = targets => targets.map(t => `${t.name}（${t.type}）`).join('、');
 
 function outboxIndex(ptxDir, dir, id) {
     const items = allSeqs(dir).map(seq => {
-        const channelFile = insidePtx(ptxDir, 'outbox', id, `${seq}.channel.json`);
-        if (existsSync(channelFile)) {
-            const p = JSON.parse(readFileSync(channelFile, 'utf8'));
-            const status = p.status === 'intercepted' ? '预览拦截' : '本地未真实投递';
-            return `<li>渠道 <b>${escapeHtml(p.channel?.name ?? '')}</b>（${escapeHtml(p.channel?.type ?? '')}）「${escapeHtml(p.message?.title ?? '')}」 — ${status}` +
-                `<pre style="font:12px monospace;white-space:pre-wrap;margin:4px 0 12px">${escapeHtml(JSON.stringify(p.message, null, 2))}</pre></li>`;
+        const sendFile = insidePtx(ptxDir, 'outbox', id, `${seq}.send.json`);
+        if (existsSync(sendFile)) {
+            // 与产品预览面板同形：消息内容只展示一次，下面列「将发到」（各渠道的实际卡片只在平台渲染）
+            const p = JSON.parse(readFileSync(sendFile, 'utf8'));
+            const targets = Array.isArray(p.targets) ? p.targets : [];
+            const to = targets.length
+                ? `将发到：${escapeHtml(targetsText(targets))}`
+                : `没有投递目标（${escapeHtml(p.noTargetsReason ?? '')}）`;
+            return `<li>通知 — ${SEND_STATUS_TEXT[p.status] ?? escapeHtml(p.status ?? '')}` +
+                `<pre style="font:12px monospace;white-space:pre-wrap;margin:4px 0">${escapeHtml(JSON.stringify(p.message, null, 2))}</pre>` +
+                `<div style="font:12px sans-serif;margin:0 0 12px">${to}</div></li>`;
         }
         const p = JSON.parse(readFileSync(insidePtx(ptxDir, 'outbox', id, `${seq}.json`), 'utf8'));
         const status = p.recipients?.[0]?.status === 'intercepted' ? '预览拦截' : '本地未真实发送';
         return `<li><a href="/__ptx/outbox/${id}/${seq}.html">${escapeHtml(p.subject)}</a> — ${p.recipients?.length ?? 0} 人 · ${status}</li>`;
     });
     return `<!doctype html><meta charset="utf-8"><title>ptx outbox ${escapeHtml(id)}</title>` +
-        `<h1 style="font:bold 18px sans-serif">运行 ${escapeHtml(id)} 的推送（${items.length} 条：邮件与渠道消息）</h1><ol>${items.join('')}</ol>` +
-        '<p style="color:#888;font:12px sans-serif">本地简化外框；逐字的最终邮件、各渠道的实际卡片以产品里的预览面板为准（本地渠道消息不渲染、不投递）。</p>';
+        `<h1 style="font:bold 18px sans-serif">运行 ${escapeHtml(id)} 的推送（${items.length} 条：邮件与通知）</h1><ol>${items.join('')}</ol>` +
+        '<p style="color:#888;font:12px sans-serif">本地简化外框；逐字的最终邮件、各渠道的实际卡片以产品里的预览面板为准（本地通知不渲染、不投递；' +
+        '投递目标来自 .ptx/notify-targets.json，线上由使用者在订阅中心配置）。</p>';
 }
 
 /** rules 段里的每应用并发上限；没有（快照过旧 / 平台未导出）返回 null = 不模拟闸。 */
@@ -139,8 +150,8 @@ const concurrencyLimit = section => (Number.isInteger(section?.maxConcurrentPerA
     ? section.maxConcurrentPerApp : null);
 
 export function createLocalStub({ root, appName = 'local-dev', loadRenderer, log = m => console.log(m), rules = RULES }) {
-    // notifyChannel 段在启动时就校验一遍（缺段 / 缺键 → 抛「规则快照过旧」），而不是等第一次 /notify/channel 请求才 500（ST-05）。
-    channelRules(rules.notifyChannel);
+    // notifySend 段在启动时就校验一遍（缺段 / 缺键 → 抛「规则快照过旧」），而不是等第一次 /notify/send 请求才 500（ST-05）。
+    sendRules(rules.notifySend);
     const state = createStubState();
     const gateMax = { notify: concurrencyLimit(rules.notify), render: concurrencyLimit(rules.render) };
     const inflight = { notify: 0, render: 0 };
@@ -161,8 +172,8 @@ export function createLocalStub({ root, appName = 'local-dev', loadRenderer, log
         }
     };
     /**
-     * 取下一个 outbox 槽位：目录名只用校验过的 runId（否则 interactive），序号是邮件与渠道共用空间里的最大值 + 1。
-     * 渠道名等应用给的字符串绝不进路径；file(后缀) 再经 insidePtx 确认仍在 .ptx 内。
+     * 取下一个 outbox 槽位：目录名只用校验过的 runId（否则 interactive），序号是邮件与通知共用空间里的最大值 + 1。
+     * 目标名等外部给的字符串绝不进路径；file(后缀) 再经 insidePtx 确认仍在 .ptx 内。
      */
     const nextOutboxSlot = dirHint => {
         const id = RUN_ID_RE.test(dirHint) ? dirHint : 'interactive';
@@ -192,11 +203,7 @@ export function createLocalStub({ root, appName = 'local-dev', loadRenderer, log
                         '令牌里没有 notify:send。在 manifest.json 的 scopes 里声明 notify:send 后重启 ptx dev（本地令牌的 scopes 照抄 manifest）。',
                         { requiredScope: 'notify:send' });
                 }
-                if (post === 'listChannels') {
-                    req.resume();
-                    return send(res, 200, handleListChannels({ channels: loadLocalChannels(root, rules.notifyChannel) }).body);
-                }
-                // 并发闸：线上网关在读体、转发之前判，这里同样在读体之前占位，响应发出后释放。邮件与渠道共用 notify 闸。
+                // 并发闸：线上网关在读体、转发之前判，这里同样在读体之前占位，响应发出后释放。邮件与通知共用 notify 闸。
                 const kind = post === 'render' ? 'render' : 'notify';
                 if (gateMax[kind] !== null) {
                     if (inflight[kind] >= gateMax[kind]) {
@@ -210,14 +217,14 @@ export function createLocalStub({ root, appName = 'local-dev', loadRenderer, log
                     res.once('finish', releaseGate);
                     res.once('close', releaseGate);
                 }
-                const maxBody = post === 'channel' ? channelRules(rules.notifyChannel).maxBodyBytes : MAX_BODY_BYTES;
+                const maxBody = post === 'send' ? sendRules(rules.notifySend).maxBodyBytes : MAX_BODY_BYTES;
                 let body;
                 try {
                     body = JSON.parse(await readBody(req, maxBody));
                 } catch (e) {
                     return e.status === 413
-                        ? fail(res, 413, 'GATEWAY_BAD_REQUEST', post === 'channel'
-                            ? `渠道消息请求体超过线上网关上限 ${maxBody} 字节`
+                        ? fail(res, 413, 'GATEWAY_BAD_REQUEST', post === 'send'
+                            ? `通知请求体超过线上网关上限 ${maxBody} 字节`
                             : `请求体超过本地桩上限 ${maxBody} 字节`)
                         : fail(res, 400, BAD_JSON_CODE[post], '请求体不是合法 JSON');
                 }
@@ -236,17 +243,19 @@ export function createLocalStub({ root, appName = 'local-dev', loadRenderer, log
                     return send(res, r.status, r.body);
                 }
 
-                if (post === 'channel') {
-                    warnBadRun(claims, '渠道消息');
-                    const r = handleNotifyChannel(state, {
-                        claims, body, appName, channels: loadLocalChannels(root, rules.notifyChannel), rules: rules.notifyChannel
+                if (post === 'send') {
+                    warnBadRun(claims, '通知');
+                    const r = handleNotifySend(state, {
+                        claims, body, appName, targets: loadLocalTargets(root, rules.notifySend), rules: rules.notifySend
                     });
                     if (r.outbox) {
                         const { id, file } = nextOutboxSlot(r.outbox.dir);
-                        writeFileSync(file('.channel.json'), `${JSON.stringify(r.outbox.payload, null, 2)}\n`);
-                        const how = r.body.preview ? '预览，平台会拦截' : '本地桩，未真实投递';
-                        log(`[ptx] 渠道消息（${how}）→ ${r.body.channel.name}（${r.body.channel.type}）「${r.outbox.payload.message.title}」：` +
-                            `${publicBase}/__ptx/outbox/${id}`);
+                        const p = r.outbox.payload;
+                        writeFileSync(file('.send.json'), `${JSON.stringify(p, null, 2)}\n`);
+                        const how = r.body.preview ? '预览，平台会拦截' : r.body.status === 'no_targets' ? '没有投递目标，未发送' : '本地桩，未真实投递';
+                        const to = p.targets.length ? targetsText(p.targets)
+                            : `没有投递目标（${p.noTargetsReason}；本地用 .ptx/notify-targets.json 配置，线上由使用者在订阅中心配置）`;
+                        log(`[ptx] 通知（${how}）「${p.message.title}」→ ${to}：${publicBase}/__ptx/outbox/${id}`);
                         for (const w of r.warnings) log(`[ptx]   [!] ${w}`);
                     }
                     return send(res, r.status, r.body);
@@ -265,6 +274,9 @@ export function createLocalStub({ root, appName = 'local-dev', loadRenderer, log
             }
 
             if (req.method === 'GET') {
+                if (url.pathname === '/__ptx/notify-targets') {
+                    return send(res, 200, { count: resolveLocalTargets(loadLocalTargets(root, rules.notifySend), rules.notifySend).length });
+                }
                 let m = MEDIA_RE.exec(url.pathname);
                 if (m) {
                     const p = insidePtx(ptxDir, 'media', `${m[1]}.png`);
@@ -278,7 +290,7 @@ export function createLocalStub({ root, appName = 'local-dev', loadRenderer, log
                 m = OUTBOX_LIST_RE.exec(url.pathname);
                 if (m) {
                     const dir = insidePtx(ptxDir, 'outbox', m[1]);
-                    return existsSync(dir) ? send(res, 200, outboxIndex(ptxDir, dir, m[1]), 'text/html; charset=utf-8') : fail(res, 404, 'NOT_FOUND', '这次运行没有推送（邮件 / 渠道消息）');
+                    return existsSync(dir) ? send(res, 200, outboxIndex(ptxDir, dir, m[1]), 'text/html; charset=utf-8') : fail(res, 404, 'NOT_FOUND', '这次运行没有推送（邮件 / 通知）');
                 }
             }
             return fail(res, 404, 'NOT_FOUND', '本地桩没有这个路径');

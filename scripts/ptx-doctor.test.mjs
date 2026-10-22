@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkMigrationsAdditive, checkTailwindContent, checkPackageFloors, PACKAGE_FLOORS, checkJobs, findRouteHandler, checkNotifyScope } from './ptx-doctor.mjs';
+import { checkMigrationsAdditive, checkTailwindContent, checkPackageFloors, PACKAGE_FLOORS, checkJobs, findRouteHandler, checkNotifyScope, checkRemovedNotifyApis, checkSubscriptionItems } from './ptx-doctor.mjs';
+import { RULES } from './manifest.mjs';
 
 function fixture(files) {
     const root = mkdtempSync(join(tmpdir(), 'ptx-doctor-'));
@@ -375,20 +376,91 @@ test('*.d.ts 里的类型声明不算（最终评审 Minor 13）', () => {
     assert.deepEqual(checkNotifyScope(root, mf([JOB])), []);
 });
 
-test('1c：四种写法（ctx.pt.notify.channel / ctx.pt.notify.listChannels / 解构 notify / 路由形参 ({ pt })）用了渠道却没声明 notify:send → bad，话术点名 notify.channel；声明了 → ok，话术点名文件', () => {
+test('notify.send：四种写法（ctx.pt.notify.send / 可选链 / 解构 notify / 路由形参 ({ pt })）没声明 notify:send → bad，话术点名 notify.send；声明了 → ok，话术点名文件', () => {
     for (const src of [
-        "await ctx.pt.notify.channel('alerts', { title: 't' });",
-        'const list = await ctx.pt.notify.listChannels();',
-        'const { notify } = ctx.pt;\nawait notify.channel(name, msg);',
-        "export default createApp({ routes: { 'GET /channels': async ({ pt }) => pt.notify.listChannels() } });"
+        "await ctx.pt.notify.send({ title: 't' });",
+        'const r = await ctx.pt?.notify?.send(msg);',
+        'const { notify } = ctx.pt;\nawait notify.send(msg);',
+        "export default createApp({ routes: { 'POST /notify-now': async ({ pt }) => pt.notify.send(msg) } });"
     ]) {
         const out = checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]));
         assert.equal(out.length, 1, src);
         assert.equal(out[0].level, 'bad', src);
-        assert.match(out[0].msg, /notify\.channel/, src);
-        assert.match(out[0].why, /渠道/, src);
+        assert.match(out[0].msg, /notify\.send/, src);
+        assert.match(out[0].why, /通知/, src);
         const ok = checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB], ['jobs:run', 'notify:send']));
         assert.deepEqual(ok.map(r => r.level), ['ok'], src);
         assert.match(ok[0].msg, /已声明 notify:send（backend[\/\\]src[\/\\]index\.ts）/, src);
     }
+});
+
+// ─── 通知投递目标：已移除的 1c API 与订阅项字段 ───────────────────────
+
+test('代码里还在用 ctx.pt.notify.channel / notify.listChannels（含可选链、解构、子文件）→ bad，点名文件与「改用 notify.send，投递目标由使用者配置」', () => {
+    for (const [file, src] of [
+        ['backend/src/index.ts', "await ctx.pt.notify.channel('alerts', { title: 't' });"],
+        ['backend/src/index.ts', 'const list = await ctx.pt.notify.listChannels();'],
+        ['backend/src/index.ts', 'await ctx.pt?.notify?.channel(name, msg);'],
+        ['backend/src/jobs/ping.ts', 'const { notify } = ctx.pt;\nawait notify.channel(name, msg);']
+    ]) {
+        const out = checkRemovedNotifyApis(jobsProject({ 'backend/src/index.ts': '', [file]: src }));
+        assert.equal(out.length, 1, src);
+        assert.equal(out[0].level, 'bad', src);
+        assert.match(out[0].msg, /已移除/, src);
+        assert.ok(out[0].msg.includes(file.replace(/\//g, '/')) || out[0].msg.includes(file.replace(/\//g, '\\')), src);
+        assert.match(out[0].why, /notify\.send/, src);
+        assert.match(out[0].why, /投递目标由使用者配置/, src);
+    }
+});
+
+test('已移除 API 只出现在注释 / 字符串 / 测试文件里 → 不报；用 notify.send 不报', () => {
+    const root = jobsProject({
+        'backend/src/index.ts': "// 以前是 ctx.pt.notify.channel('a', m)\nconst s = 'notify.listChannels()';\nawait ctx.pt.notify.send(m);",
+        'backend/src/index.test.ts': 'await ctx.pt.notify.channel(a, m);'
+    });
+    assert.deepEqual(checkRemovedNotifyApis(root), []);
+});
+
+const J = RULES.jobs;
+test('checkSubscriptionItems：没有 backend.jobs → 不产出；字段齐全 → 一条 ok', () => {
+    assert.deepEqual(checkSubscriptionItems({ backend: {} }), []);
+    const full = { ...JOB, displayName: { 'zh-CN': '周报', 'en-US': 'Weekly report' }, description: { 'en-US': 'x' }, defaultCron: '0 9 * * 1', defaultParams: { a: 1 } };
+    assert.deepEqual(checkSubscriptionItems(mf([full, { type: 'sync', route: 'POST /sync', title: '同步', subscribable: false }])).map(r => r.level), ['ok']);
+});
+
+test('checkSubscriptionItems：订阅项没写 displayName → info（可选）；subscribable:false 的不提示', () => {
+    const out = checkSubscriptionItems(mf([JOB, { ...JOB, type: 'sync', route: 'POST /sync', subscribable: false }]));
+    assert.deepEqual(out.map(r => r.level), ['info']);
+    assert.match(out[0].msg, /weekly-report/);
+    assert.ok(!out[0].msg.includes('sync'));
+    assert.match(out[0].why, /title/);
+});
+
+test('checkSubscriptionItems：字段形状不合规 → bad（上传会被拒 MANIFEST_JOBS_INVALID）；上限读 rules.jobs', () => {
+    const bad = [
+        { displayName: {} }, { displayName: { fr: 'x' } }, { displayName: 'x' }, { displayName: { 'zh-CN': '  ' } },
+        { displayName: { 'zh-CN': 'a\nb' } }, { displayName: { 'zh-CN': 'x'.repeat(J.displayNameMax + 1) } },
+        { description: { 'en-US': 'x'.repeat(J.descriptionMax + 1) } }, { description: { 'en-US': 1 } },
+        { defaultCron: 9 }, { defaultCron: 'x'.repeat(J.defaultCronMax + 1) },
+        { defaultParams: [] }, { defaultParams: 'x' }, { defaultParams: null },
+        { subscribable: 'false' }
+    ];
+    for (const patch of bad) {
+        const out = checkSubscriptionItems(mf([{ ...JOB, displayName: { 'zh-CN': '周报' }, ...patch }]));
+        assert.ok(out.some(r => r.level === 'bad' && r.msg.includes('weekly-report')), JSON.stringify(patch));
+    }
+    const edge = { ...JOB, displayName: { 'ja-JP': '😀'.repeat(J.displayNameMax) }, description: { 'zh-CN': '字'.repeat(J.descriptionMax) }, defaultCron: '0 9 * * 1' };
+    assert.deepEqual(checkSubscriptionItems(mf([edge])).map(r => r.level), ['ok']);
+});
+
+test('checkSubscriptionItems：defaultCron 不是 5 段 → warn（能否解析与最小间隔由平台上传时判）', () => {
+    const out = checkSubscriptionItems(mf([{ ...JOB, displayName: { 'zh-CN': '周报' }, defaultCron: '0 9 * *' }]));
+    assert.deepEqual(out.map(r => r.level), ['warn']);
+    assert.match(out[0].msg, /defaultCron/);
+});
+
+test('checkSubscriptionItems：项缺 type 时文案用 backend.jobs[i] 定位，不出现 undefined', () => {
+    const out = checkSubscriptionItems(mf([{ route: 'POST /x', title: 'x', subscribable: 'no' }]));
+    assert.ok(out.some(r => r.level === 'bad' && r.msg.includes('backend.jobs[0]')));
+    assert.ok(out.every(r => !r.msg.includes('undefined')), JSON.stringify(out));
 });

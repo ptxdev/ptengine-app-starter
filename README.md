@@ -94,10 +94,10 @@ Scheduled jobs follow the same rule: to use `ctx.pt.jobs.*` locally, declare `jo
 
 ### Scheduled jobs
 
-Declare job types in `manifest.json` (`backend.jobs`, plus the `jobs:run` scope), add a route with the **same key** to `shared/api.ts` and `backend/src/index.ts` whose first line is `ctx.requireTrigger('job')`, and let users subscribe via `ctx.pt.jobs.create()` from a user request. Then, with `npm run dev` running:
+Declare job types in `manifest.json` (`backend.jobs`, plus the `jobs:run` scope) and add a route with the **same key** to `shared/api.ts` and `backend/src/index.ts` whose first line is `ctx.requireTrigger('job')`. Every declared type is a **subscription item**: users subscribe — pick a schedule and which notification channels to send to — in the subscription drawer Ptengine shows above your app; give each item `displayName` / `description` / `defaultCron` in the manifest (daily / weekly / monthly reports = three types), and mark app-internal ones `"subscribable": false`. Your job route produces the content and calls `ctx.pt.notify.send(message)`; it never names a channel. Locally, `.ptx/notify-targets.json` plays the role of the subscription's channels. Then, with `npm run dev` running:
 
 ```bash
-npm run ptx -- job run weekly-report --params '{"channel":"email"}'   # add --preview for a preview run
+npm run ptx -- job run weekly-report --params '{"range":"last7d"}'   # add --preview for a preview run
 ```
 
 It signs a job-mode token with your local dev key, POSTs the params to `/api<route>` and prints the status, the response body and a verdict: `stored` (the platform would archive the returned `{ archive }`), `none` (nothing to collect — no `archive`, non-2xx or non-JSON), `invalid (reason)` (the `archive` breaks a rule; the run still counts, but nothing is archived) or `too_large` (the whole response body, `files` included, exceeds `jobResult.maxBytes`). Idempotency via `ctx.auth.runId`, preview handling and the full walkthrough: [`AGENTS.md`](./AGENTS.md#定时任务backendjobs). `ctx.auth.trigger` / `preview` and `ctx.pt.jobs` need an `@ptengine/app-backend` release that includes scheduled jobs.

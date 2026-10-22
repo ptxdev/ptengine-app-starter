@@ -94,10 +94,10 @@ npx skills add ptxdev/ptengine-skills          # 大多数助手
 
 ### 定时任务
 
-在 `manifest.json` 里声明任务类型（`backend.jobs`，并在 `scopes` 加 `jobs:run`），在 `shared/api.ts` 与 `backend/src/index.ts` 加一条**同名键**的路由、第一行写 `ctx.requireTrigger('job')`，再在某个用户请求里用 `ctx.pt.jobs.create()` 让用户订阅。然后在 `npm run dev` 跑着的前提下：
+在 `manifest.json` 里声明任务类型（`backend.jobs`，并在 `scopes` 加 `jobs:run`），在 `shared/api.ts` 与 `backend/src/index.ts` 加一条**同名键**的路由、第一行写 `ctx.requireTrigger('job')`。每个声明的类型都是一个**订阅项**：用户在宿主于应用页上方提供的订阅抽屉里订阅、选调度和发到哪些通知渠道；在 manifest 里给订阅项写 `displayName` / `description` / `defaultCron`（日报 / 周报 / 月报 = 三个类型），只给应用自己用的写 `"subscribable": false`。任务路由只产出内容并调 `ctx.pt.notify.send(message)`，不指定渠道；本地用 `.ptx/notify-targets.json` 模拟订阅的渠道。然后在 `npm run dev` 跑着的前提下：
 
 ```bash
-npm run ptx -- job run weekly-report --params '{"channel":"email"}'   # 加 --preview 走预览运行
+npm run ptx -- job run weekly-report --params '{"range":"last7d"}'   # 加 --preview 走预览运行
 ```
 
 它用本地开发密钥签一枚任务模式令牌，把 params 作为 body POST 到 `/api<route>`，打印状态码、响应体和判定：`stored`（平台会采集返回的 `{ archive }`）、`none`（没东西可采集 —— 没有 `archive`、非 2xx 或不是 JSON）、`invalid（原因）`（`archive` 违反规则；运行照样算成功，只是不采集）、`too_large`（**整个**响应体、含 `files`，超过 `jobResult.maxBytes`）。用 `ctx.auth.runId` 做幂等、预览分支怎么写等完整步骤见 [`AGENTS.md`](./AGENTS.md#定时任务backendjobs)。`ctx.auth.trigger` / `preview` 与 `ctx.pt.jobs` 需要升级到含定时任务的 `@ptengine/app-backend` 版本后才生效。

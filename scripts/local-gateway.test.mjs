@@ -9,7 +9,7 @@ const JOB = tok({ sub: 'local-user', wid: 'local-ws', scopes: ['jobs:run'], trg:
 let n = 0;
 const call = (store, authorization, body) =>
     handleJobsRequest(store, { appId: 'local-dev', authorization, body, now: new Date(Date.UTC(2026, 9, 8, 0, 0, n++)), uuid: () => `id-${n}` });
-const CREATE = { op: 'create', type: 'weekly-report', cron: '0 9 * * 1', timezone: 'Asia/Tokyo', params: { channel: 'c' } };
+const CREATE = { op: 'create', type: 'weekly-report', cron: '0 9 * * 1', timezone: 'Asia/Tokyo', params: { range: 'last7d' } };
 
 test('decodeClaims：坏令牌 → null；能解中文 claim', () => {
     assert.equal(decodeClaims(''), null);
@@ -24,9 +24,9 @@ test('create → 201 JobView（创建者 / 工作区取自令牌，title 缺省�
     assert.deepEqual(
         { ...r.body, id: undefined, createdAt: undefined, updatedAt: undefined },
         { id: undefined, appId: 'local-dev', workspaceId: 'local-ws', type: 'weekly-report', title: 'weekly-report',
-          cron: '0 9 * * 1', timezone: 'Asia/Tokyo', params: { channel: 'c' }, createdBy: 'local-user', status: 'active',
+          cron: '0 9 * * 1', timezone: 'Asia/Tokyo', params: { range: 'last7d' }, createdBy: 'local-user', status: 'active',
           pauseReason: null, consecutiveFailures: 0, nextRunAt: null, lastRunAt: null,
-          archiveToAssets: false,
+          archiveToAssets: false, targetCount: 1,
           scheduleDescription: { zh: '（本地桩）cron 0 9 * * 1 · Asia/Tokyo', en: '(local stub) cron 0 9 * * 1 · Asia/Tokyo', ja: '（ローカルスタブ）cron 0 9 * * 1 · Asia/Tokyo' },
           createdAt: undefined, updatedAt: undefined });
 });
@@ -99,20 +99,20 @@ import worker from './local-gateway/worker.mjs';
 import { parseJsonc } from './jsonc.mjs';
 import { LOCAL_STUB_ORIGIN } from './local-stub/server.mjs';
 
-test('网关桩把 /notify/email、/notify/channel、/notify/channels、/render/chart 原样转给 PTX_STUB_ORIGIN（authorization / x-pt-app-id / body）', async () => {
+test('网关桩把 /notify/email、/notify/send、/render/chart 原样转给 PTX_STUB_ORIGIN（authorization / x-pt-app-id / body）', async () => {
     const seen = [];
     const orig = globalThis.fetch;
     globalThis.fetch = async (url, init) => { seen.push({ url, init }); return new Response('{"ok":1}', { status: 200, headers: { 'content-type': 'application/json' } }); };
     try {
-        for (const p of ['/notify/email', '/notify/channel', '/notify/channels', '/render/chart']) {
+        for (const p of ['/notify/email', '/notify/send', '/render/chart']) {
             const res = await worker.fetch(new Request(`https://gateway${p}`, {
                 method: 'POST', headers: { authorization: 'Bearer t', 'x-pt-app-id': 'local-dev', 'content-type': 'application/json' }, body: '{"a":1}'
             }), { PTX_STUB_ORIGIN: 'http://127.0.0.1:9999' });
             assert.equal(res.status, 200);
         }
     } finally { globalThis.fetch = orig; }
-    assert.deepEqual(seen.map(s => s.url), ['http://127.0.0.1:9999/notify/email', 'http://127.0.0.1:9999/notify/channel',
-        'http://127.0.0.1:9999/notify/channels', 'http://127.0.0.1:9999/render/chart']);
+    assert.deepEqual(seen.map(s => s.url), ['http://127.0.0.1:9999/notify/email', 'http://127.0.0.1:9999/notify/send',
+        'http://127.0.0.1:9999/render/chart']);
     const h = new Headers(seen[0].init.headers);
     assert.equal(h.get('authorization'), 'Bearer t');
     assert.equal(h.get('x-pt-app-id'), 'local-dev');
@@ -161,15 +161,49 @@ test('1b+：create / update 接受 archiveToAssets（布尔）；非布尔 → 4
     assert.equal(call(s, USER, { ...CREATE, archiveToAssets: 1 }).body.error.code, 'JOB_OP_INVALID');
 });
 
-test('网关桩：转发保留本地桩响应的状态与头（retry-after 等），未知路径 501 的话术点名 notify.channel', async () => {
+test('网关桩：转发保留本地桩响应的状态与头（retry-after 等），未知路径 501 的话术点名 notify.send；1c 的 /notify/channel(s) 不再转发', async () => {
     const orig = globalThis.fetch;
     globalThis.fetch = async () => new Response('{"error":{"code":"NOTIFY_CHANNEL_RATE_LIMITED","message":"x"}}', { status: 429, headers: { 'retry-after': '7' } });
     try {
-        const res = await worker.fetch(new Request('https://gateway/notify/channel', { method: 'POST', body: '{}' }), { PTX_STUB_ORIGIN: 'http://127.0.0.1:9999' });
+        const res = await worker.fetch(new Request('https://gateway/notify/send', { method: 'POST', body: '{}' }), { PTX_STUB_ORIGIN: 'http://127.0.0.1:9999' });
         assert.equal(res.status, 429);
         assert.equal(res.headers.get('retry-after'), '7');
     } finally { globalThis.fetch = orig; }
     const other = await worker.fetch(new Request('https://gateway/data-query', { method: 'POST', body: '{}' }), { PTX_STUB_ORIGIN: 'http://127.0.0.1:9999' });
     assert.equal(other.status, 501);
-    assert.match((await other.json()).error.message, /notify\.channel/);
+    assert.match((await other.json()).error.message, /notify\.send/);
+    for (const p of ['/notify/channel', '/notify/channels']) {
+        assert.equal((await worker.fetch(new Request(`https://gateway${p}`, { method: 'POST', body: '{}' }), { PTX_STUB_ORIGIN: 'http://127.0.0.1:9999' })).status, 501, p);
+    }
+});
+
+test('通知投递目标：create 时 targetCount = 当时的本地目标数（缺省 1 = 虚拟目标；复制语义，之后改目录不影响已有任务）；update 不变', () => {
+    const s = createJobsStore();
+    const opts = (targetCount, body) => handleJobsRequest(s, { appId: 'local-dev', authorization: USER, body, targetCount });
+    assert.equal(call(s, USER, CREATE).body.targetCount, 1);
+    const three = opts(3, CREATE).body;
+    assert.equal(three.targetCount, 3);
+    assert.equal(opts(0, CREATE).body.targetCount, 0);
+    assert.equal(opts(5, { op: 'update', jobId: three.id, title: 'x' }).body.targetCount, 3);
+});
+
+test('通知投递目标：create / update 带 channelIds → 400 JOB_OP_INVALID（与平台 gateway 链路同码）', () => {
+    const s = createJobsStore();
+    assert.equal(call(s, USER, { ...CREATE, channelIds: ['c1'] }).body.error.code, 'JOB_OP_INVALID');
+    const id = call(s, USER, CREATE).body.id;
+    assert.equal(call(s, USER, { op: 'update', jobId: id, channelIds: [] }).body.error.code, 'JOB_OP_INVALID');
+});
+
+test('网关桩 create 前向本地桩 GET /__ptx/notify-targets 取目标数写进 targetCount；桩连不上时按 1', async () => {
+    const orig = globalThis.fetch;
+    const body = JSON.stringify(CREATE);
+    const req = () => new Request('https://gateway/jobs', { method: 'POST', headers: { authorization: USER, 'x-pt-app-id': 'gw-app', 'content-type': 'application/json' }, body });
+    const seen = [];
+    try {
+        globalThis.fetch = async (url, init) => { seen.push([String(url), init?.method ?? 'GET']); return new Response('{"count":4}', { status: 200 }); };
+        assert.equal((await (await worker.fetch(req(), { PTX_STUB_ORIGIN: 'http://127.0.0.1:9999' })).json()).targetCount, 4);
+        assert.deepEqual(seen, [['http://127.0.0.1:9999/__ptx/notify-targets', 'GET']]);
+        globalThis.fetch = async () => { throw new Error('down'); };
+        assert.equal((await (await worker.fetch(req(), { PTX_STUB_ORIGIN: 'http://127.0.0.1:9999' })).json()).targetCount, 1);
+    } finally { globalThis.fetch = orig; }
 });
