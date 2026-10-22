@@ -36,7 +36,7 @@ export function createStubState() {
 
 export function runCounters(state, runId) {
     let c = state.runs.get(runId);
-    if (!c) { c = { emailCalls: 0, emailRecipients: 0, charts: 0, channelCalls: 0 }; state.runs.set(runId, c); }
+    if (!c) { c = { emailCalls: 0, emailRecipients: 0, charts: 0, sendUnits: 0 }; state.runs.set(runId, c); }
     return c;
 }
 
