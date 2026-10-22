@@ -5,10 +5,10 @@
  * 所以网关桩（scripts/local-gateway/worker.mjs）只把 /notify/email、/notify/send、/render/chart 原样转过来（修订建议 S8）。
  *
  *   POST /notify/email                  → 写 .ptx/outbox/<runId|interactive>/<seq>.json + .html，打印一行
- *   POST /notify/send                   → 按 .ptx/notify-targets.json 扇出（没有文件 = 一个虚拟目标 local / webhook；[] = 没有投递目标），
+ *   POST /notify/send                   → 按 .ptx/notify-targets.json 扇出（没有文件 = 一个虚拟目标 local / webhook；[] = 没有投递目标；
+ *                                         交互调用且 manifest.json 没声明 backend.notify.instant → no_targets / APP_INSTANT_NOT_DECLARED），
  *                                         写 .ptx/outbox/<runId|interactive>/<seq>.send.json（与邮件共用序号），打印一行；永不投递
  *   POST /render/chart                  → 写 .ptx/media/<hex>.png，返回 http://localhost:<port>/__ptx/media/<hex>.png
- *   GET  /__ptx/notify-targets          → { count }：本地投递目标数（本地网关桩创建任务时写进 JobView.targetCount）
  *   GET  /__ptx/media/<hex>.png         → 图片
  *   GET  /__ptx/outbox/<id>             → 这次运行写下的邮件与通知列表（本地推送预览页；通知 = 消息一次 + 将发到列表）
  *   GET  /__ptx/outbox/<id>/<seq>.html  → 单封邮件（退订链接已换成 #）
@@ -37,7 +37,8 @@ import { join, resolve, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { decodeClaims } from '../local-gateway/jobs-store.mjs';
 import { RUN_ID_RE, createStubState, handleNotifyEmail, jobRunOf } from './notify.mjs';
-import { handleNotifySend, loadLocalTargets, resolveLocalTargets, sendRules } from './send.mjs';
+import { handleNotifySend, loadLocalTargets, sendRules } from './send.mjs';
+import { declaresInstantNotify } from '../manifest.mjs';
 import { handleRenderChart } from './render.mjs';
 import { RULES } from '../manifest.mjs';
 
@@ -146,6 +147,18 @@ function outboxIndex(ptxDir, dir, id) {
 }
 
 /** rules 段里的每应用并发上限；没有（快照过旧 / 平台未导出）返回 null = 不模拟闸。 */
+/**
+ * 是否声明了即时发送：每次请求现读项目根的 manifest.json（改了即时生效，同 .ptx/notify-targets.json）。线上看应用**当前版本**的 manifest；
+ * 本地 manifest.json 就是「当前版本」。读不到 / 不是合法 JSON → 按未声明。
+ */
+function instantDeclared(root) {
+    try {
+        return declaresInstantNotify(JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8')));
+    } catch {
+        return false;
+    }
+}
+
 const concurrencyLimit = section => (Number.isInteger(section?.maxConcurrentPerApp) && section.maxConcurrentPerApp > 0
     ? section.maxConcurrentPerApp : null);
 
@@ -246,7 +259,8 @@ export function createLocalStub({ root, appName = 'local-dev', loadRenderer, log
                 if (post === 'send') {
                     warnBadRun(claims, '通知');
                     const r = handleNotifySend(state, {
-                        claims, body, appName, targets: loadLocalTargets(root, rules.notifySend), rules: rules.notifySend
+                        claims, body, appName, targets: loadLocalTargets(root, rules.notifySend), rules: rules.notifySend,
+                        instant: instantDeclared(root)
                     });
                     if (r.outbox) {
                         const { id, file } = nextOutboxSlot(r.outbox.dir);
@@ -254,7 +268,9 @@ export function createLocalStub({ root, appName = 'local-dev', loadRenderer, log
                         writeFileSync(file('.send.json'), `${JSON.stringify(p, null, 2)}\n`);
                         const how = r.body.preview ? '预览，平台会拦截' : r.body.status === 'no_targets' ? '没有投递目标，未发送' : '本地桩，未真实投递';
                         const to = p.targets.length ? targetsText(p.targets)
-                            : `没有投递目标（${p.noTargetsReason}；本地用 .ptx/notify-targets.json 配置，线上由使用者在订阅中心配置）`;
+                            : p.noTargetsReason === 'APP_INSTANT_NOT_DECLARED'
+                                ? '没有投递（APP_INSTANT_NOT_DECLARED：manifest.json 没声明 backend.notify.instant: true，用户请求里的即时发送不投递；只在定时任务里发送可以忽略）'
+                                : `没有投递目标（${p.noTargetsReason}；本地用 .ptx/notify-targets.json 配置，线上由使用者在订阅中心 / 应用的「即时通知」里配置）`;
                         log(`[ptx] 通知（${how}）「${p.message.title}」→ ${to}：${publicBase}/__ptx/outbox/${id}`);
                         for (const w of r.warnings) log(`[ptx]   [!] ${w}`);
                     }
@@ -274,9 +290,6 @@ export function createLocalStub({ root, appName = 'local-dev', loadRenderer, log
             }
 
             if (req.method === 'GET') {
-                if (url.pathname === '/__ptx/notify-targets') {
-                    return send(res, 200, { count: resolveLocalTargets(loadLocalTargets(root, rules.notifySend), rules.notifySend).length });
-                }
                 let m = MEDIA_RE.exec(url.pathname);
                 if (m) {
                     const p = insidePtx(ptxDir, 'media', `${m[1]}.png`);

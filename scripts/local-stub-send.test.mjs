@@ -16,7 +16,7 @@ const USER = { sub: 'local-user', scopes: ['notify:send'] };
 const HEX = 'a'.repeat(32);
 const LOCAL_IMG = `http://localhost:8788/__ptx/media/${HEX}.png`;
 const T2 = [{ name: 'alerts', type: 'slack' }, { name: 'ops', type: 'teams' }];
-const call = (state, claims, body, targets = null) => handleNotifySend(state, { claims, body, appName: '我的应用', targets });
+const call = (state, claims, body, targets = null, instant = true) => handleNotifySend(state, { claims, body, appName: '我的应用', targets, instant });
 
 test('validateSendMessage：合法 → 规范化（title / label trim、text CRLF/CR→LF、缺省或 null 的 text 为 ""、link 去一个前导 #/ 或 /）', () => {
     const v = validateSendMessage({ message: { title: '  标题  ', text: 'a\r\nb\rc\td', imageUrl: LOCAL_IMG, link: { label: ' 查看 ', path: '#/reports/42?x=1' } } });
@@ -230,4 +230,21 @@ test('linkPathSchemePattern / linkPathDotSegmentPattern 形状不是 { source: s
         }
     }
     assert.doesNotThrow(() => sendRules(C));
+});
+
+test('即时发送未声明（instant: false / 缺省）：交互 → no_targets / APP_INSTANT_NOT_DECLARED，不读目标、targets 0；outbox 记空目标；任务 run 不受影响', () => {
+    const user = call(createStubState(), USER, { message: MSG }, T2, false);
+    assert.deepEqual(user.body, { preview: false, status: 'no_targets', targets: 0, sent: 0, failed: 0, noTargetsReason: 'APP_INSTANT_NOT_DECLARED' });
+    assert.equal(user.outbox.dir, 'interactive');
+    assert.deepEqual(user.outbox.payload.targets, []);
+    assert.equal(user.outbox.payload.status, 'no_targets');
+    assert.equal(user.outbox.payload.noTargetsReason, 'APP_INSTANT_NOT_DECLARED');
+    // 缺省 instant = 未声明（与平台「当前版本没声明就不投」同口径）
+    const omitted = handleNotifySend(createStubState(), { claims: USER, body: { message: MSG }, appName: 'x', targets: null });
+    assert.equal(omitted.body.noTargetsReason, 'APP_INSTANT_NOT_DECLARED');
+    // 消息不合规照旧先 400（第 3 步在前）
+    assert.equal(call(createStubState(), USER, { message: {} }, T2, false).status, 400);
+    // 任务 run / 预览与 instant 无关
+    assert.equal(call(createStubState(), RUN, { message: MSG }, T2, false).body.status, 'sent');
+    assert.equal(call(createStubState(), PREVIEW, { message: MSG }, T2, false).body.status, 'intercepted');
 });

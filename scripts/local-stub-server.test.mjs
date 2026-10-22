@@ -16,8 +16,12 @@ const fakeRenderer = async () => ({
     Resvg: class { render() { return { asPng: () => Buffer.from([0x89, 0x50, 0x4e, 0x47]) }; } }
 });
 
-async function withStub(fn) {
+/** 本地桩按项目根的 manifest.json 判断是否声明了即时发送；默认声明（instant: true + notify:send），未声明的分支单独测。 */
+const INSTANT_MANIFEST = { schemaVersion: 2, version: '1.0.0', entry: 'index.html', scopes: ['notify:send'],
+    backend: { entry: '_backend/worker.js', routes: ['/api/*'], notify: { instant: true } } };
+async function withStub(fn, { manifest = INSTANT_MANIFEST } = {}) {
     const root = mkdtempSync(join(tmpdir(), 'ptx-stub-'));
+    if (manifest) writeFileSync(join(root, 'manifest.json'), JSON.stringify(manifest));
     const logs = [];
     const server = createLocalStub({ root, appName: '我的应用', loadRenderer: fakeRenderer, log: m => logs.push(m) });
     await new Promise(r => server.listen(0, '127.0.0.1', r));
@@ -93,7 +97,7 @@ test('job 令牌的 run 不合法（含路径穿越）→ 打一条警告，邮�
     const r = await post(base, '/notify/email', BAD, MAIL);
     assert.equal(r.status, 200);
     assert.ok(existsSync(join(root, '.ptx', 'outbox', 'interactive', '1.json')));
-    assert.deepEqual(readdirSync(root), ['.ptx']);
+    assert.deepEqual(readdirSync(root).sort(), ['.ptx', 'manifest.json']);
     assert.deepEqual(readdirSync(join(root, '.ptx', 'outbox')), ['interactive']);
     assert.equal(logs.filter(l => l.includes('run') && l.includes('不合法')).length, 1);
     // 合法 run / 非 job 令牌不报警
@@ -338,16 +342,28 @@ test('.ptx/notify-targets.json：扇出到列出的目标；[] → no_targets（
     assert.match(e.message, /\.ptx\/notify-targets\.json/);
 }));
 
-test('GET /__ptx/notify-targets：回本地目标数（无文件 1 = 虚拟目标；有文件 = 其长度；[] → 0；坏文件 → 500）', () => withStub(async ({ root, base }) => {
-    const count = async () => (await (await fetch(`${base}/__ptx/notify-targets`)).json()).count;
-    assert.equal(await count(), 1);
-    targetsFile(root, [{ name: 'a', type: 'slack' }, { name: 'b', type: 'teams' }]);
-    assert.equal(await count(), 2);
-    targetsFile(root, []);
-    assert.equal(await count(), 0);
-    targetsFile(root, '{');
-    assert.equal((await fetch(`${base}/__ptx/notify-targets`)).status, 500);
+test('GET /__ptx/notify-targets 已移除（应用自建任务初始不带渠道，网关桩不再问目标数）→ 404', () => withStub(async ({ base }) => {
+    assert.equal((await fetch(`${base}/__ptx/notify-targets`)).status, 404);
 }));
+
+test('manifest 未声明 backend.notify.instant：交互 /notify/send → no_targets / APP_INSTANT_NOT_DECLARED 并打印提示；改 manifest 即时生效；任务 run 照常', () => withStub(async ({ root, base, logs }) => {
+    const USER_TOK = tok({ sub: 'u', scopes: ['notify:send'] });
+    const { notify: _n, ...backend } = INSTANT_MANIFEST.backend;
+    writeFileSync(join(root, 'manifest.json'), JSON.stringify({ ...INSTANT_MANIFEST, backend }));
+    assert.deepEqual(await (await post(base, '/notify/send', USER_TOK, SEND)).json(),
+        { preview: false, status: 'no_targets', targets: 0, sent: 0, failed: 0, noTargetsReason: 'APP_INSTANT_NOT_DECLARED' });
+    assert.ok(logs.some(l => l.includes('APP_INSTANT_NOT_DECLARED') && l.includes('backend.notify.instant')));
+    assert.equal((await (await post(base, '/notify/send', RUN, SEND)).json()).status, 'sent');
+    writeFileSync(join(root, 'manifest.json'), JSON.stringify(INSTANT_MANIFEST));
+    assert.equal((await (await post(base, '/notify/send', USER_TOK, SEND)).json()).status, 'sent');
+}, { manifest: null }));
+
+test('项目根没有 manifest.json / 不是合法 JSON：交互发送按未声明处理（不 500）', () => withStub(async ({ root, base }) => {
+    const USER_TOK = tok({ sub: 'u', scopes: ['notify:send'] });
+    assert.equal((await (await post(base, '/notify/send', USER_TOK, SEND)).json()).noTargetsReason, 'APP_INSTANT_NOT_DECLARED');
+    writeFileSync(join(root, 'manifest.json'), '{');
+    assert.equal((await (await post(base, '/notify/send', USER_TOK, SEND)).json()).noTargetsReason, 'APP_INSTANT_NOT_DECLARED');
+}, { manifest: null }));
 
 test('/notify/send：无 notify:send → 403 SCOPE_DENIED（requiredScope）；无令牌 → 401；坏 JSON → 400 NOTIFY_CHANNEL_MESSAGE_INVALID；1c 的 /notify/channel(s) → 404', () => withStub(async ({ base }) => {
     const denied = await post(base, '/notify/send', NO_SCOPE, SEND);
@@ -388,7 +404,7 @@ test('job 令牌的 run 不合法 → 通知落 .ptx/outbox/interactive/，.ptx 
     const BAD = tok({ sub: 'u', scopes: ['notify:send'], trg: 'job', job: 'local', run: '../../escape', mode: 'preview' });
     targetsFile(root, [{ name: '../../alerts', type: 'slack' }]);
     assert.equal((await post(base, '/notify/send', BAD, SEND)).status, 200);
-    assert.deepEqual(readdirSync(root), ['.ptx']);
+    assert.deepEqual(readdirSync(root).sort(), ['.ptx', 'manifest.json']);
     assert.deepEqual(readdirSync(join(root, '.ptx', 'outbox')), ['interactive']);
     assert.deepEqual(readdirSync(join(root, '.ptx', 'outbox', 'interactive')), ['1.send.json']);
 }));

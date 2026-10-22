@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkMigrationsAdditive, checkTailwindContent, checkPackageFloors, PACKAGE_FLOORS, checkJobs, findRouteHandler, checkNotifyScope, checkRemovedNotifyApis, checkSubscriptionItems } from './ptx-doctor.mjs';
+import { checkMigrationsAdditive, checkTailwindContent, checkPackageFloors, PACKAGE_FLOORS, checkJobs, findRouteHandler, checkNotifyScope, checkRemovedNotifyApis, checkSubscriptionItems, checkInstantNotify } from './ptx-doctor.mjs';
 import { RULES } from './manifest.mjs';
 
 function fixture(files) {
@@ -463,4 +463,31 @@ test('checkSubscriptionItems：项缺 type 时文案用 backend.jobs[i] 定位�
     const out = checkSubscriptionItems(mf([{ route: 'POST /x', title: 'x', subscribable: 'no' }]));
     assert.ok(out.some(r => r.level === 'bad' && r.msg.includes('backend.jobs[0]')));
     assert.ok(out.every(r => !r.msg.includes('undefined')), JSON.stringify(out));
+});
+
+// ─── 即时通知声明（backend.notify.instant，2026-10-22 补充 R11）──────────
+const SEND_SRC = "export default createApp({ routes: { 'POST /alert': async ctx => ctx.pt.notify.send({ title: 't' }) } });";
+const withInstant = (notify, scopes = ['notify:send']) => ({ ...mf(undefined, scopes), backend: { ...mf(undefined).backend, ...(notify === undefined ? {} : { notify }) } });
+
+test('checkInstantNotify：用了 notify.send、有 notify:send、没声明 instant → info（只能在定时任务里投递），点名文件', () => {
+    const out = checkInstantNotify(jobsProject({ 'backend/src/index.ts': SEND_SRC }), withInstant(undefined));
+    assert.equal(out.length, 1);
+    assert.equal(out[0].level, 'info');
+    assert.match(out[0].msg, /backend\/src\/index\.ts/);
+    assert.match(out[0].msg + out[0].why, /定时任务/);
+    assert.match(out[0].why, /backend\.notify[\s\S]*instant/);
+    assert.match(out[0].why, /APP_INSTANT_NOT_DECLARED/);
+    // 解构 / 可选链同样识别
+    const destructured = "export default createApp({ routes: { 'POST /a': async ({ pt }) => { const { send } = pt.notify; return send({ title: 't' }); } } });";
+    assert.equal(checkInstantNotify(jobsProject({ 'backend/src/index.ts': destructured }), withInstant({ instant: false }))[0]?.level, 'info');
+    assert.equal(checkInstantNotify(jobsProject({ 'backend/src/index.ts': 'ctx.pt?.notify?.send({ title: "t" })' }), withInstant({}))[0]?.level, 'info');
+});
+
+test('checkInstantNotify：已声明 instant / 没用 notify.send / 只用 notify.email / 没有 notify:send（由 checkNotifyScope 报）/ 注释里 → 不产出', () => {
+    assert.deepEqual(checkInstantNotify(jobsProject({ 'backend/src/index.ts': SEND_SRC }), withInstant({ instant: true })), []);
+    assert.deepEqual(checkInstantNotify(jobsProject({ 'backend/src/index.ts': INDEX_OK }), withInstant(undefined)), []);
+    const email = "export default createApp({ routes: { 'POST /x': async ctx => ctx.pt.notify.email({ to: ['role:admin'], subject: 's', html: 'h' }) } });";
+    assert.deepEqual(checkInstantNotify(jobsProject({ 'backend/src/index.ts': email }), withInstant(undefined)), []);
+    assert.deepEqual(checkInstantNotify(jobsProject({ 'backend/src/index.ts': SEND_SRC }), withInstant(undefined, ['jobs:run'])), []);
+    assert.deepEqual(checkInstantNotify(jobsProject({ 'backend/src/index.ts': '// ctx.pt.notify.send({ title: "t" })\nexport default 1;' }), withInstant(undefined)), []);
 });

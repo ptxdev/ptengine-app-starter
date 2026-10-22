@@ -100,6 +100,44 @@ export function requireBackendResolution(manifest, root) {
 }
 
 /**
+ * manifest `backend.notify` 的本地规则（2026-10-22 即时通知补充 R1）。读 rules.json 的 `manifestNotify` 段
+ * （`keys` / `instantRequiresScope`）；规则快照还没有这一段时按补充裁定的默认值 `['instant']` / `'notify:send'`
+ * （这一段是新加的，旧快照缺它不该让 manifest 校验整个失败）。
+ */
+const MANIFEST_NOTIFY = {
+    keys: Array.isArray(RULES.manifestNotify?.keys) ? RULES.manifestNotify.keys : ['instant'],
+    instantRequiresScope: typeof RULES.manifestNotify?.instantRequiresScope === 'string' ? RULES.manifestNotify.instantRequiresScope : 'notify:send'
+};
+const isPlainObject = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * `backend.notify` 的问题（合规或未声明 → null）。与平台 contract `validateManifest` 同口径、同话术：
+ * 可选对象、只认 `instant`、`instant` 为布尔、`instant: true` 时 scopes 必须含 `notify:send`。平台上传时报 `MANIFEST_INVALID`。
+ */
+export function manifestNotifyProblem(manifest) {
+    if (!manifest?.backend || !Object.hasOwn(manifest.backend, 'notify')) return null;
+    const n = manifest.backend.notify;
+    if (!isPlainObject(n)) return `backend.notify 必须是对象（形如 { "instant": true }），收到 ${JSON.stringify(n)}`;
+    for (const k of Object.keys(n)) {
+        if (!MANIFEST_NOTIFY.keys.includes(k)) return `backend.notify.${k} 不认识，backend.notify 目前只有 ${MANIFEST_NOTIFY.keys.join(' / ')}`;
+    }
+    if (n.instant !== undefined && typeof n.instant !== 'boolean') return `backend.notify.instant 必须是布尔值，收到 ${JSON.stringify(n.instant)}`;
+    if (n.instant === true && !(Array.isArray(manifest.scopes) && manifest.scopes.includes(MANIFEST_NOTIFY.instantRequiresScope))) {
+        return `backend.notify.instant 为 true 时 scopes 必须包含 "${MANIFEST_NOTIFY.instantRequiresScope}"（即时发送要用 ctx.pt.notify.send）`;
+    }
+    return null;
+}
+
+/**
+ * 应用是否声明了即时发送：`backend.notify.instant === true` 且 scopes 含 `notify:send`（= 平台 `declaresInstantNotify`）。
+ * 没声明时，用户请求里的 `ctx.pt.notify.send` 不投递，回 `no_targets` / `APP_INSTANT_NOT_DECLARED`。
+ */
+export function declaresInstantNotify(manifest) {
+    return manifest?.backend?.notify?.instant === true &&
+        Array.isArray(manifest.scopes) && manifest.scopes.includes(MANIFEST_NOTIFY.instantRequiresScope);
+}
+
+/**
  * 校验 manifest 自身的自洽性（不依赖构建产物）。
  *
  * @returns {{ errors: string[], warnings: string[] }}
@@ -252,6 +290,9 @@ export function validateManifest(manifest, root) {
             }
         }
     }
+
+    const notifyProblem = manifestNotifyProblem(manifest);
+    if (notifyProblem) fail('MANIFEST_INVALID', notifyProblem);
 
     if (be.resources) {
         for (const key of Object.keys(be.resources)) {

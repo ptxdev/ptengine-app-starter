@@ -101,3 +101,46 @@ test('scopes 里声明 jobs:run 本地校验通过', () => {
     const { errors } = validateManifest({ schemaVersion: 1, version: '1.0.0', entry: 'index.html', scopes: ['jobs:run'] }, root);
     assert.ok(!errors.some(e => /SCOPE_UNKNOWN/.test(e)), errors.join('\n'));
 });
+
+// ─── backend.notify（即时通知声明，2026-10-22 补充 R1）────────────────────
+const withNotify = (notify, scopes = ['notify:send']) => ({ ...withBackend({ notify }), scopes });
+
+test('backend.notify：{ instant: true } + notify:send / { instant: false } / {} 都通过', () => {
+    for (const m of [withNotify({ instant: true }), withNotify({ instant: false }, []), withNotify({}, [])]) {
+        assert.deepEqual(validateManifest(m, rootWith(m)).errors, [], JSON.stringify(m.backend.notify));
+    }
+});
+
+test('backend.notify 形状不对 → MANIFEST_INVALID 并点名字段（与平台上传第 1 步同码）', () => {
+    const cases = [
+        [withNotify(true), /backend\.notify 必须是对象/],
+        [withNotify([]), /backend\.notify 必须是对象/],
+        [withNotify(null), /backend\.notify 必须是对象/],
+        [withNotify({ instant: 'true' }), /backend\.notify\.instant 必须是布尔/],
+        [withNotify({ instant: true, channels: ['a'] }), /backend\.notify\.channels 不认识/]
+    ];
+    for (const [m, re] of cases) {
+        const { errors } = validateManifest(m, rootWith(m));
+        assert.deepEqual(codes({ errors }), ['MANIFEST_INVALID'], JSON.stringify(m.backend.notify));
+        assert.match(errors[0], re);
+    }
+});
+
+test('backend.notify.instant: true 但 scopes 没有 notify:send → MANIFEST_INVALID（点名 notify:send）；instant: false 不要求', () => {
+    const m = withNotify({ instant: true }, ['jobs:run']);
+    const { errors } = validateManifest(m, rootWith(m));
+    assert.deepEqual(codes({ errors }), ['MANIFEST_INVALID']);
+    assert.match(errors[0], /backend\.notify\.instant[\s\S]*notify:send/);
+    const off = withNotify({ instant: false }, []);
+    assert.deepEqual(validateManifest(off, rootWith(off)).errors, []);
+});
+
+test('declaresInstantNotify：instant === true 且 scopes 含 notify:send 才算声明', async () => {
+    const { declaresInstantNotify } = await import('./manifest.mjs');
+    assert.equal(declaresInstantNotify(withNotify({ instant: true })), true);
+    assert.equal(declaresInstantNotify(withNotify({ instant: true }, [])), false);
+    assert.equal(declaresInstantNotify(withNotify({ instant: false })), false);
+    assert.equal(declaresInstantNotify(withNotify({ instant: 'true' })), false);
+    assert.equal(declaresInstantNotify(withBackend({})), false);
+    assert.equal(declaresInstantNotify(null), false);
+});
