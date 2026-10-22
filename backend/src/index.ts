@@ -14,8 +14,8 @@
  *   ctx.pt.openApiUrl Ptengine Open API 根地址（需 openapi:read）
  *   ctx.pt.notify.email   以 Ptengine 名义给工作区成员发邮件（需 notify:send）
  *   ctx.pt.render.chart   平台渲染 ECharts 为 PNG，返回公开地址（需 notify:send）
- *   ctx.pt.notify.channel      按名字向工作区通知渠道发消息（Slack / Teams / Chatwork / Webhook，需 notify:send）
- *   ctx.pt.notify.listChannels 列出对本应用开放的通知渠道（只有 name / type，需 notify:send）
+ *   ctx.pt.notify.send    发一条通知到使用者配置的渠道（任务的「发送到」/ 应用默认渠道；应用不指定渠道，需 notify:send）
+ *   ctx.pt.jobs.*         定时任务（需 jobs:run）。manifest backend.jobs 的每个类型都是宿主订阅中心里的一个订阅项
  * query / asset / ai / notify / render 经平台数据网关、以调用者身份执行；本地 wrangler dev 下 query / asset / ai
  * 一律 501 PT_GATEWAY_NOT_BOUND；jobs / notify / render 由 ptx dev 的本地桩提供。完整清单见 AGENTS.md「后端能用的东西（ctx）」。
  *
