@@ -726,9 +726,11 @@ export function checkSubscriptionItems(manifest, rules = RULES.jobs) {
     }
     const out = [];
     const noName = [];
-    for (const job of jobs) {
+    for (const [i, job] of jobs.entries()) {
         if (!isPlainObj(job)) continue;
-        const at = `任务 ${job.type}`;
+        // 缺 type / type 不是字符串时按位置点名（类型本身的问题由 manifest 校验报）
+        const name = typeof job.type === 'string' && job.type ? job.type : `backend.jobs[${i}]`;
+        const at = typeof job.type === 'string' && job.type ? `任务 ${name}` : name;
         const bad = (field, why) => out.push({ level: 'bad', msg: `${at} 的 ${field} ${why}`, why: '平台上传会以 MANIFEST_JOBS_INVALID 拒收。' });
         for (const [field, max] of [['displayName', rules.displayNameMax], ['description', rules.descriptionMax]]) {
             if (job[field] === undefined) continue;
@@ -747,7 +749,7 @@ export function checkSubscriptionItems(manifest, rules = RULES.jobs) {
         }
         if (job.defaultParams !== undefined && !isPlainObj(job.defaultParams)) bad('defaultParams', '必须是 JSON 对象');
         if (job.subscribable !== undefined && typeof job.subscribable !== 'boolean') bad('subscribable', '必须是布尔值');
-        if (job.subscribable !== false && job.displayName === undefined) noName.push(job.type);
+        if (job.subscribable !== false && job.displayName === undefined) noName.push(name);
     }
     if (noName.length) {
         out.push({

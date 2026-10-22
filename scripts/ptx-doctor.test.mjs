@@ -458,3 +458,9 @@ test('checkSubscriptionItems：defaultCron 不是 5 段 → warn（能否解析�
     assert.deepEqual(out.map(r => r.level), ['warn']);
     assert.match(out[0].msg, /defaultCron/);
 });
+
+test('checkSubscriptionItems：项缺 type 时文案用 backend.jobs[i] 定位，不出现 undefined', () => {
+    const out = checkSubscriptionItems(mf([{ route: 'POST /x', title: 'x', subscribable: 'no' }]));
+    assert.ok(out.some(r => r.level === 'bad' && r.msg.includes('backend.jobs[0]')));
+    assert.ok(out.every(r => !r.msg.includes('undefined')), JSON.stringify(out));
+});
