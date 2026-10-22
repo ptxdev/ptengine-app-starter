@@ -144,3 +144,24 @@ test('declaresInstantNotify：instant === true 且 scopes 含 notify:send 才算
     assert.equal(declaresInstantNotify(withBackend({})), false);
     assert.equal(declaresInstantNotify(null), false);
 });
+
+test('backend.notify：规则读 rules.manifestNotify（注入的规则生效）；缺段 / 形状不对 → RULES_STALE 提示 sync-rules，不写字面量兜底', () => {
+    const m = withNotify({ instant: true, extra: 1 });
+    const injected = { ...RULES, manifestNotify: { keys: ['instant', 'extra'], instantRequiresScope: 'notify:send' } };
+    assert.deepEqual(validateManifest(m, rootWith(m), injected).errors, []);
+    const { manifestNotify: _drop, ...stale } = RULES;
+    for (const rules of [stale, { ...RULES, manifestNotify: { keys: [] , instantRequiresScope: 'notify:send' } }, { ...RULES, manifestNotify: { keys: ['instant'] } }]) {
+        const { errors } = validateManifest(m, rootWith(m), rules);
+        assert.deepEqual(codes({ errors }), ['RULES_STALE']);
+        assert.match(errors[0], /sync-rules/);
+    }
+    // 没声明 backend.notify 的 manifest 不需要这段规则
+    const plain = withBackend({});
+    assert.deepEqual(validateManifest(plain, rootWith(plain), stale).errors, []);
+});
+
+test('declaresInstantNotify：读注入的 instantRequiresScope；缺段抛「规则快照过旧」', async () => {
+    const { declaresInstantNotify } = await import('./manifest.mjs');
+    assert.equal(declaresInstantNotify(withNotify({ instant: true }, ['jobs:run']), { keys: ['instant'], instantRequiresScope: 'jobs:run' }), true);
+    assert.throws(() => declaresInstantNotify(withNotify({ instant: true }), null), /规则快照过旧/);
+});

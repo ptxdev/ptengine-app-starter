@@ -463,3 +463,28 @@ test('并发闸：通知与邮件共用 notify 闸（线上 notifyInflight；429
         await new Promise(r => server.close(r));
     }
 });
+
+test('未声明即时发送的交互调用不读 .ptx/notify-targets.json：文件损坏时仍回 no_targets / APP_INSTANT_NOT_DECLARED（任务 run 照旧 500 点名文件）', () => withStub(async ({ root, base }) => {
+    const { notify: _n, ...backend } = INSTANT_MANIFEST.backend;
+    writeFileSync(join(root, 'manifest.json'), JSON.stringify({ ...INSTANT_MANIFEST, backend }));
+    targetsFile(root, '{');
+    const r = await post(base, '/notify/send', tok({ sub: 'u', scopes: ['notify:send'] }), SEND);
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).noTargetsReason, 'APP_INSTANT_NOT_DECLARED');
+    assert.equal((await post(base, '/notify/send', RUN, SEND)).status, 500);
+}, { manifest: null }));
+
+test('rules.json 缺 manifestNotify 段 / 形状不对 → 启动即抛「规则快照过旧」并提示 sync-rules；注入的 manifestNotify 生效', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ptx-stub-mn-'));
+    const { manifestNotify: _drop, ...noSection } = STUB_RULES;
+    assert.throws(() => createLocalStub({ root, rules: noSection, log: () => {} }), /manifestNotify[\s\S]*规则快照过旧[\s\S]*sync-rules/);
+    assert.throws(() => createLocalStub({ root, rules: { ...STUB_RULES, manifestNotify: { keys: ['instant'] } }, log: () => {} }), /规则快照过旧/);
+    // 注入的规则：instantRequiresScope 换成 jobs:run → 只有 notify:send 的 manifest 不算声明
+    writeFileSync(join(root, 'manifest.json'), JSON.stringify(INSTANT_MANIFEST));
+    const server = createLocalStub({ root, rules: { ...STUB_RULES, manifestNotify: { keys: ['instant'], instantRequiresScope: 'jobs:run' } }, log: () => {} });
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    try {
+        const base = `http://127.0.0.1:${server.address().port}`;
+        assert.equal((await (await post(base, '/notify/send', tok({ sub: 'u', scopes: ['notify:send'] }), SEND)).json()).noTargetsReason, 'APP_INSTANT_NOT_DECLARED');
+    } finally { await new Promise(r => server.close(r)); }
+});

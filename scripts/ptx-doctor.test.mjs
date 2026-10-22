@@ -491,3 +491,15 @@ test('checkInstantNotify：已声明 instant / 没用 notify.send / 只用 notif
     assert.deepEqual(checkInstantNotify(jobsProject({ 'backend/src/index.ts': SEND_SRC }), withInstant(undefined, ['jobs:run'])), []);
     assert.deepEqual(checkInstantNotify(jobsProject({ 'backend/src/index.ts': '// ctx.pt.notify.send({ title: "t" })\nexport default 1;' }), withInstant(undefined)), []);
 });
+
+test('checkInstantNotify：读注入的 manifestNotify；缺段 → warn（提示 sync-rules），不写字面量兜底', () => {
+    const root = jobsProject({ 'backend/src/index.ts': SEND_SRC });
+    const out = checkInstantNotify(root, withInstant(undefined), null);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].level, 'warn');
+    assert.match(out[0].msg + out[0].why, /sync-rules/);
+    // 注入规则：instantRequiresScope = jobs:run → 只看 jobs:run
+    const injected = { keys: ['instant'], instantRequiresScope: 'jobs:run' };
+    assert.deepEqual(checkInstantNotify(root, withInstant(undefined, ['notify:send']), injected), []);
+    assert.equal(checkInstantNotify(root, withInstant(undefined, ['jobs:run']), injected)[0]?.level, 'info');
+});

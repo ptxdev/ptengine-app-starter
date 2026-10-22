@@ -248,3 +248,19 @@ test('即时发送未声明（instant: false / 缺省）：交互 → no_targets
     assert.equal(call(createStubState(), RUN, { message: MSG }, T2, false).body.status, 'sent');
     assert.equal(call(createStubState(), PREVIEW, { message: MSG }, T2, false).body.status, 'intercepted');
 });
+
+test('本地桩可能产出的 noTargetsReason 全部在 RULES.notifySend.noTargetsReasons 内（与 contract NOTIFY_NO_TARGETS_REASONS 同源）', () => {
+    const known = RULES.notifySend.noTargetsReasons;
+    assert.ok(Array.isArray(known) && known.length > 0, 'rules.json 缺 notifySend.noTargetsReasons（跑 npm run sync-rules）');
+    const produced = new Set();
+    for (const claims of [USER, RUN, PREVIEW]) {
+        for (const instant of [true, false]) {
+            for (const targets of [[], null, T2]) {
+                const r = call(createStubState(), claims, { message: MSG }, targets, instant);
+                if (r.body.noTargetsReason !== null) produced.add(r.body.noTargetsReason);
+            }
+        }
+    }
+    assert.deepEqual([...produced].sort(), ['APP_DEFAULT_EMPTY', 'APP_INSTANT_NOT_DECLARED', 'JOB_TARGETS_EMPTY']);
+    for (const reason of produced) assert.ok(known.includes(reason), reason);
+});

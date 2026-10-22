@@ -73,8 +73,8 @@
   `docs/troubleshooting.md` 新增「推送 / 图表本地桩」。`.gitignore` 加 `.ptx/`。
 - **即时通知声明（`backend.notify.instant`，2026-10-22 补充）**：应用级渠道收窄为「即时通知渠道」，只服务于用户请求里的即时发送。
   - manifest 校验（`doctor` / `package`）：`backend.notify` 只允许 `instant`（布尔），多余键 / 非布尔 / `instant: true` 但 scopes 没有 `notify:send`
-    → `MANIFEST_INVALID`（话术同平台）。规则读 `scripts/rules.json` 的 `manifestNotify`（`keys` / `instantRequiresScope`），快照缺这一段时按 `['instant']` / `'notify:send'`。
-  - 本地桩：用户请求里的 `notify.send` 在 `manifest.json`（每次现读）没声明 `instant: true` 时回 `no_targets` / `APP_INSTANT_NOT_DECLARED`，不读 `.ptx/notify-targets.json`。
+    → `MANIFEST_INVALID`（话术同平台）。规则直接读 `scripts/rules.json` 的 `manifestNotify`（`keys` / `instantRequiresScope`），不写字面量兜底：快照缺这一段时 manifest 校验报 `RULES_STALE`（声明了 `backend.notify` 才需要）、本地桩启动即报「规则快照过旧」、doctor 给 warn，都提示 `npm run sync-rules`。
+  - 本地桩：用户请求里的 `notify.send` 在 `manifest.json`（每次现读）没声明 `instant: true` 时回 `no_targets` / `APP_INSTANT_NOT_DECLARED`，不读 `.ptx/notify-targets.json`（文件坏了也不影响这条分支）。
   - 本地 jobs 桩：`ctx.pt.jobs.create` 建出的任务 `targetCount` 恒为 0（与线上「应用自建任务初始不带渠道」一致，不再按 `.ptx/notify-targets.json` 计）；
     删掉只为它服务的 `GET /__ptx/notify-targets`。
   - `ptx doctor`：后端用了 `ctx.pt.notify.send`、有 `notify:send` 但没声明 `instant` → info「只能在定时任务里投递；即时发送需声明」。

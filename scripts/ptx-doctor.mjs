@@ -15,7 +15,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
-import { RULES, declaresInstantNotify, readManifest, resolveBackend, validateManifest } from './manifest.mjs';
+import { MANIFEST_NOTIFY_STALE, RULES, declaresInstantNotify, manifestNotifyRules, readManifest, resolveBackend, validateManifest } from './manifest.mjs';
 import { parseJsonc } from './jsonc.mjs';
 
 const results = [];
@@ -682,9 +682,11 @@ const NOTIFY_SEND_USE_RES = [
  * 的发送会被平台回 `no_targets` / `APP_INSTANT_NOT_DECLARED`，本地桩同样如此。没有 `notify:send` 的情况由 checkNotifyScope 报。
  * 形状问题（instant 非布尔、多余键、instant 缺 notify:send）由 validateManifest 报 MANIFEST_INVALID。
  */
-export function checkInstantNotify(root, manifest) {
-    if (!(manifest?.scopes ?? []).includes('notify:send')) return [];
-    if (declaresInstantNotify(manifest)) return [];
+export function checkInstantNotify(root, manifest, rules = RULES.manifestNotify) {
+    const r = manifestNotifyRules(rules);
+    if (!r) return [{ level: 'warn', msg: '跳过即时发送声明检查：' + MANIFEST_NOTIFY_STALE, why: '升级 starter 的 scripts/（维护者跑 npm run sync-rules）。' }];
+    if (!(manifest?.scopes ?? []).includes(r.instantRequiresScope)) return [];
+    if (declaresInstantNotify(manifest, r)) return [];
     const hits = backendCodeFiles(root).filter(s => NOTIFY_SEND_USE_RES.some(re => re.test(s.text))).map(s => s.rel);
     if (hits.length === 0) return [];
     return [{

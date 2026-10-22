@@ -38,9 +38,8 @@ import { randomBytes } from 'node:crypto';
 import { decodeClaims } from '../local-gateway/jobs-store.mjs';
 import { RUN_ID_RE, createStubState, handleNotifyEmail, jobRunOf } from './notify.mjs';
 import { handleNotifySend, loadLocalTargets, sendRules } from './send.mjs';
-import { declaresInstantNotify } from '../manifest.mjs';
 import { handleRenderChart } from './render.mjs';
-import { RULES } from '../manifest.mjs';
+import { MANIFEST_NOTIFY_STALE, RULES, declaresInstantNotify, manifestNotifyRules } from '../manifest.mjs';
 
 export const LOCAL_STUB_PORT = 8788;
 export const LOCAL_STUB_ORIGIN = `http://127.0.0.1:${LOCAL_STUB_PORT}`;
@@ -146,25 +145,30 @@ function outboxIndex(ptxDir, dir, id) {
         '投递目标来自 .ptx/notify-targets.json，线上由使用者在订阅中心配置）。</p>';
 }
 
-/** rules 段里的每应用并发上限；没有（快照过旧 / 平台未导出）返回 null = 不模拟闸。 */
 /**
  * 是否声明了即时发送：每次请求现读项目根的 manifest.json（改了即时生效，同 .ptx/notify-targets.json）。线上看应用**当前版本**的 manifest；
- * 本地 manifest.json 就是「当前版本」。读不到 / 不是合法 JSON → 按未声明。
+ * 本地 manifest.json 就是「当前版本」。读不到 / 不是合法 JSON → 按未声明。`notifyRules` 是启动时校验过的 manifestNotify 段。
  */
-function instantDeclared(root) {
+function instantDeclared(root, notifyRules) {
+    let manifest;
     try {
-        return declaresInstantNotify(JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8')));
+        manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
     } catch {
         return false;
     }
+    return declaresInstantNotify(manifest, notifyRules);
 }
 
+/** rules 段里的每应用并发上限；没有（快照过旧 / 平台未导出）返回 null = 不模拟闸。 */
 const concurrencyLimit = section => (Number.isInteger(section?.maxConcurrentPerApp) && section.maxConcurrentPerApp > 0
     ? section.maxConcurrentPerApp : null);
 
 export function createLocalStub({ root, appName = 'local-dev', loadRenderer, log = m => console.log(m), rules = RULES }) {
     // notifySend 段在启动时就校验一遍（缺段 / 缺键 → 抛「规则快照过旧」），而不是等第一次 /notify/send 请求才 500（ST-05）。
     sendRules(rules.notifySend);
+    // manifestNotify 段同样启动即校验（交互 /notify/send 要靠它判断是否声明了即时发送；不写字面量兜底）
+    const notifyRules = manifestNotifyRules(rules.manifestNotify);
+    if (!notifyRules) throw new Error(MANIFEST_NOTIFY_STALE);
     const state = createStubState();
     const gateMax = { notify: concurrencyLimit(rules.notify), render: concurrencyLimit(rules.render) };
     const inflight = { notify: 0, render: 0 };
@@ -258,9 +262,12 @@ export function createLocalStub({ root, appName = 'local-dev', loadRenderer, log
 
                 if (post === 'send') {
                     warnBadRun(claims, '通知');
+                    // 未声明即时发送的交互调用：线上不读默认渠道，本地同样不读 .ptx/notify-targets.json（文件坏了也不影响这条分支）
+                    const instant = instantDeclared(root, notifyRules);
+                    const undeclared = !jobRunOf(claims).isJob && !instant;
                     const r = handleNotifySend(state, {
-                        claims, body, appName, targets: loadLocalTargets(root, rules.notifySend), rules: rules.notifySend,
-                        instant: instantDeclared(root)
+                        claims, body, appName, targets: undeclared ? null : loadLocalTargets(root, rules.notifySend), rules: rules.notifySend,
+                        instant
                     });
                     if (r.outbox) {
                         const { id, file } = nextOutboxSlot(r.outbox.dir);
