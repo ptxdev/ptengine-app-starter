@@ -217,7 +217,7 @@ ctx.pt.openApiUrl  // 当前环境的 Ptengine Open API 根地址（需 manifest
 ctx.pt.jobs.*            // 定时任务：create / list / get / update / pause / resume / delete（需 jobs:run）
 ctx.pt.notify.email({ to, subject, html, text?, replyTo?, locale? })   // 以 Ptengine 名义给工作区成员发邮件（需 notify:send）
 ctx.pt.render.chart(option, { width?, height?, theme? })              // 平台渲染 ECharts 为 PNG，返回 { url, width, height }（需 notify:send）
-ctx.pt.notify.send({ title, text?, imageUrl?, link? })   // 发一条通知到使用者配置的渠道（任务的「发送到」/ 应用默认渠道；需 notify:send）
+ctx.pt.notify.send({ title, text?, imageUrl?, link? })   // 发一条通知到使用者配置的渠道（任务的「发送到」/ 应用的即时通知渠道 —— 须声明 backend.notify.instant；需 notify:send）
 
 ctx.requireScope('analytics:read')   // 缺则抛 403 SCOPE_REQUIRED
 ctx.requireTrigger('job') // 任务路由第一行；用户请求打进来 403 JOB_ONLY
@@ -400,7 +400,8 @@ Worker 自己不能起定时（见[硬边界 3](#3-后端没有的能力写了�
    详见 `@ptengine/app-sdk` README「Subscriptions」。**1b 引入的 `PtApp.jobs.openPreview` 已删除**（任务改由宿主创建，不要再做「预览 → 后端 create」）。
 6. **应用自建任务**（`subscribable: false` 的类型，或确有需要时）：在某个**用户请求**的路由里调
    `ctx.pt.jobs.create({ type, cron, timezone, params })`（任务运行中不能创建，`JOB_CREATE_FROM_JOB`）。另有 `list / get / update / pause / resume / delete`。
-   **不接受 `channelIds`**（传了 400 `JOB_OP_INVALID`）：这样建的任务复制一份应用默认通知渠道。`JobView.targetCount` 只告诉你有几个投递目标，不告诉你是哪些（本地 jobs 桩：创建时 `.ptx/notify-targets.json` 的条数，没有文件为 1，之后改文件不影响已建任务）。
+   **不接受 `channelIds`**（传了 400 `JOB_OP_INVALID`）：这样建的任务**初始不带渠道**（`targetCount: 0`），在管理页 / 订阅中心显示「未配置渠道」，由创建者自己去补；
+   在补上之前它照常运行，`notify.send` 回 `no_targets` / `JOB_TARGETS_EMPTY`。`JobView.targetCount` 只告诉你有几个投递目标，不告诉你是哪些（本地 jobs 桩：create 恒为 0）。
 7. **把结果交给平台**：在 2xx 的 JSON 响应里返回 `{ archive: { title?, markdown, files? } }`（类型 `JobRunResult`），
    平台会采集存档。不返回 `archive` 也行，只是没有存档；格式不对不影响运行成败，只是不采集。
    **结果归档**（平台 1b+）：任务创建者在订阅抽屉或管理页里开「保存到资产库」后，每次成功运行的邮件、通知内容与返回的 `archive`
@@ -490,11 +491,21 @@ const r = await ctx.pt.notify.email({
 ### 推送：通知渠道（notify:send）
 
 **应用只写消息，发到哪里由使用者配置。** 工作区管理员在「管理 → 通知渠道」里建渠道（Slack Incoming Webhook / Teams 工作流 Webhook /
-Chatwork API 令牌 + 房间 / 通用 Webhook）；使用者在订阅抽屉里给每个订阅选「发送到」（0–5 个）；能编辑应用的人在应用设置里配**应用默认通知渠道**。
+Chatwork API 令牌 + 房间 / 通用 Webhook）；使用者在订阅抽屉里给每个订阅选「发送到」（0–5 个）；声明了**即时发送**的应用，能编辑应用的人在应用详情的「即时通知」页签里配**即时通知渠道**。
 应用既不指定、也看不到渠道（名字、类型、凭据都看不到）。同一个 `notify:send`，不用加 scope。
 
 - 任务运行里（`ctx.auth.trigger === 'job'`，含预览）调 → 发到**这个任务**配置的渠道；
-- 用户请求里调 → 发到**应用默认通知渠道**。应用自建的任务在创建时复制一份默认渠道，之后改默认值不影响它。
+- 用户请求里调（**即时发送**，不属于任何订阅）→ 发到**应用的即时通知渠道** —— **必须在 manifest 声明**（平台看应用**当前版本**的 manifest）：
+
+  ```jsonc
+  "scopes": [/* …, */ "notify:send"],
+  "backend": { /* entry、routes …, */ "notify": { "instant": true } }
+  ```
+
+  `backend.notify` 只允许 `instant`（布尔）一个键；`instant: true` 而 scopes 没有 `notify:send` → 上传 `MANIFEST_INVALID`（`npm run doctor` / `package` 本地就拦）。
+  **没声明**时用户请求里的 `notify.send` 一律不投递，回 `status: 'no_targets'`、`noTargetsReason: 'APP_INSTANT_NOT_DECLARED'`（即使以前配过渠道）；
+  声明后应用详情才出现「即时通知」页签。只在定时任务里发送的应用**不需要**声明（`npm run doctor` 会给一条 info 提醒）。
+- 应用自建的任务（`ctx.pt.jobs.create`）**初始不带渠道**，由创建者在订阅中心补。
 
 ```ts
 // 任务路由：内容由应用产出，投递目标由订阅决定
@@ -514,12 +525,13 @@ Chatwork API 令牌 + 房间 / 通用 Webhook）；使用者在订阅抽屉里�
     return {};
 },
 
-// 用户请求：立即发一条到应用默认通知渠道
+// 用户请求：立即发一条到应用的即时通知渠道（manifest 须声明 backend.notify.instant: true）
 'POST /notify-now': async (ctx) => {
     ctx.requireTrigger('user');
     const r = await ctx.pt.notify.send({ title: '手动推送', text: '……' });
-    // no_targets 不是错误：照常返回结果，由前端提示「请管理员在应用设置里配置默认通知渠道」
-    return { ...r, hint: r.status === 'no_targets' ? '请管理员在应用设置里配置默认通知渠道' : null };
+    // no_targets 不是错误：照常返回结果。APP_DEFAULT_EMPTY 由前端提示配置渠道；APP_INSTANT_NOT_DECLARED 是 manifest 漏了声明（作者的 bug）
+    const hint = r.noTargetsReason === 'APP_DEFAULT_EMPTY' ? '请管理员在应用的「即时通知」里配置渠道' : null;
+    return { ...r, hint };
 }
 ```
 
@@ -527,7 +539,8 @@ Chatwork API 令牌 + 房间 / 通用 Webhook）；使用者在订阅抽屉里�
   - `sent`：全部目标都收下了；`partial`：部分失败（`failed > 0`）—— **不要整体重发**，已收到的渠道会重复收到（渠道没有幂等键）；
   - `intercepted`：预览，没投递（`targets` 是将发到的数目）；
   - `no_targets`：**没有投递目标，没发送，也不是错误**。`noTargetsReason` = `JOB_TARGETS_EMPTY`（任务没配渠道：运行照常成功，
-    运行记录标「未配置投递目标」）或 `APP_DEFAULT_EMPTY`（用户请求里、应用默认渠道为空：在界面上提示「请管理员在应用设置里配置默认通知渠道」）。
+    运行记录标「未配置投递目标」）、`APP_DEFAULT_EMPTY`（用户请求里、已声明即时发送但即时通知渠道为空：在界面上提示「请管理员在应用的『即时通知』里配置渠道」）
+    或 `APP_INSTANT_NOT_DECLARED`（用户请求里、manifest 当前版本没声明 `backend.notify.instant: true`：补声明并重新发布，不是使用者能修的）。
   - 全部目标都失败不是结果，而是 502 `NOTIFY_CHANNEL_SEND_FAILED`（见下）。
 - **纯文本进、各家格式出**：平台按每个目标的类型转成 Slack Block Kit / Teams Adaptive Card / Chatwork `[info]` / Webhook JSON，并转义 `<!channel>`、`[toall]`、markdown 链接之类；每条带页脚 `Ptengine · <应用名>`。
 - `link.label` 1–50 字；`link.path` 去掉开头一个 `#/` 或 `/` 后 ≤ 512 字符、只能是 URL 路径字符（不含 `#` 与空白），平台把它拼在「打开本应用」的地址后面，应用从 `PtApp.context.initialPath` 读到它。
@@ -550,6 +563,7 @@ Chatwork API 令牌 + 房间 / 通用 Webhook）；使用者在订阅抽屉里�
   与线上存档的两处行为差异：**本地用户请求里的 `no_targets` 也写文件**（线上交互调用不写 outbox）；**本地 409 `NOTIFY_RUN_LIMIT_EXCEEDED` 不写文件**（线上任务 run 会写一行 failed 存档）。
   **投递目标**用项目内 `.ptx/notify-targets.json` 模拟（`[{ "name": "alerts", "type": "slack" }]`，最多 5 个，改了即时生效；任务与用户请求共用这一份）：
   **没有这个文件**时是一个虚拟目标 `local`（`webhook`），本地默认走通 `sent`；**文件内容为 `[]`** 时走 `no_targets`（任务 `JOB_TARGETS_EMPTY`、用户请求 `APP_DEFAULT_EMPTY`），用来测无目标分支。
+  **用户请求里**的发送还看 `manifest.json`（每次现读，改了即时生效）：没声明 `backend.notify.instant: true` → 不读这个文件，直接 `no_targets` / `APP_INSTANT_NOT_DECLARED`，与线上一致。
   这个文件是线上存档（运行记录里的 outbox）的**简化版**：`message.link` 存你传的原样 `{ label, path }`（线上存展开后的 `{ label, url }`）；`targets` 只有 name / type（线上还有每个目标的渲染结果与投递结果）。别拿本地文件的形状去写解析线上存档的代码。
   图片本地收本地图表桩返回的 `http://localhost:8788/__ptx/media/…`；路径形状同平台 media 地址的 https 也放行（本地核不了主机与工作区 / 应用段，终端会提示），其余一律 400。
 - 1c 预发布期的 `ctx.pt.notify.channel(name, …)` / `ctx.pt.notify.listChannels()` **已移除**（`npm run doctor` 报 bad）：改成 `notify.send(msg)`，让使用者在订阅抽屉里选渠道。

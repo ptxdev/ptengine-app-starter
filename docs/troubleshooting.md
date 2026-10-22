@@ -183,9 +183,13 @@ Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc`
 - **直接访问本地桩得到 421 `PTX_STUB_BAD_HOST`**：本地桩只认 `127.0.0.1:8788` / `localhost:8788` 这两个 Host（防 DNS rebinding 读到 outbox），换用这两个地址打开。
 - **本地看到的邮件和预览面板里不一样**：本地外框是简化版、清洗只删平台一定会删的东西；以产品里的预览面板为准。
 - **`ctx.pt.notify.channel is not a function` / `notify.listChannels is not a function`**（或 doctor 报「已移除」）：1c 预发布期的按名发送已移除。
-  改成 `ctx.pt.notify.send({ title, text?, imageUrl?, link? })`，投递目标由使用者配置（任务的「发送到」/ 应用默认通知渠道）；params 里也别再存渠道名。
-- **`notify.send` 返回 `status: 'no_targets'`**：不是错误，是没有投递目标。本地：`.ptx/notify-targets.json` 是 `[]`（删掉这个文件就回到一个虚拟目标 `local`）。
-  线上：`JOB_TARGETS_EMPTY` = 这个订阅没选渠道（在订阅抽屉或管理页「定时任务」里给它加上）；`APP_DEFAULT_EMPTY` = 用户请求里发、应用默认通知渠道为空（请能编辑应用的人在应用设置「通知」里配置）。
+  改成 `ctx.pt.notify.send({ title, text?, imageUrl?, link? })`，投递目标由使用者配置（任务的「发送到」/ 应用的即时通知渠道）；params 里也别再存渠道名。
+- **`notify.send` 返回 `status: 'no_targets'`**：不是错误，是没有投递目标。看 `noTargetsReason`：
+  `JOB_TARGETS_EMPTY` = 这个订阅没选渠道（在订阅抽屉或管理页「定时任务」里给它加上；应用用 `ctx.pt.jobs.create` 建的任务**初始就没有渠道**，由创建者补）；
+  `APP_DEFAULT_EMPTY` = 用户请求里发、应用已声明即时发送但即时通知渠道为空（请能编辑应用的人在应用详情「即时通知」页签里配置）；
+  `APP_INSTANT_NOT_DECLARED` = 用户请求里发、但 `manifest.json` 没声明 `"backend": { "notify": { "instant": true } }`（线上看**当前发布版本**的 manifest）——
+  补上声明（scopes 须有 `notify:send`）并重新发布；本地改 `manifest.json` 即时生效。
+  本地另一种原因：`.ptx/notify-targets.json` 是 `[]`（删掉这个文件就回到一个虚拟目标 `local`）。
   渠道被管理员删除或「可用应用」收窄后，订阅里的引用会被自动摘掉，订阅可能因此变空。
 - **本地 409 `NOTIFY_RUN_LIMIT_EXCEEDED`**：一次运行最多 10 个单位，每次 `notify.send` 消耗 `max(1, 目标数)`。`.ptx/notify-targets.json` 里目标多时，一次运行能发的条数就少（5 个目标 → 2 条）。
 - **本地 500 `PTX_STUB_FAILED`，消息提到 `.ptx/notify-targets.json`**：文件格式不对，应为 `[{ "name": "alerts", "type": "slack" }]`（type 是 slack / teams / chatwork / webhook，最多 5 项，名字不能重复）。

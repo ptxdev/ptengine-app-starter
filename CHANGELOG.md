@@ -71,6 +71,14 @@
   应用内容里伪造的退订占位符被中和。
 - 文档：`AGENTS.md` 新增「推送：邮件与图表」「预览模式写法」；定时任务第 4 条改为「预览里照常调用 notify.email（平台拦截）」；
   `docs/troubleshooting.md` 新增「推送 / 图表本地桩」。`.gitignore` 加 `.ptx/`。
+- **即时通知声明（`backend.notify.instant`，2026-10-22 补充）**：应用级渠道收窄为「即时通知渠道」，只服务于用户请求里的即时发送。
+  - manifest 校验（`doctor` / `package`）：`backend.notify` 只允许 `instant`（布尔），多余键 / 非布尔 / `instant: true` 但 scopes 没有 `notify:send`
+    → `MANIFEST_INVALID`（话术同平台）。规则读 `scripts/rules.json` 的 `manifestNotify`（`keys` / `instantRequiresScope`），快照缺这一段时按 `['instant']` / `'notify:send'`。
+  - 本地桩：用户请求里的 `notify.send` 在 `manifest.json`（每次现读）没声明 `instant: true` 时回 `no_targets` / `APP_INSTANT_NOT_DECLARED`，不读 `.ptx/notify-targets.json`。
+  - 本地 jobs 桩：`ctx.pt.jobs.create` 建出的任务 `targetCount` 恒为 0（与线上「应用自建任务初始不带渠道」一致，不再按 `.ptx/notify-targets.json` 计）；
+    删掉只为它服务的 `GET /__ptx/notify-targets`。
+  - `ptx doctor`：后端用了 `ctx.pt.notify.send`、有 `notify:send` 但没声明 `instant` → info「只能在定时任务里投递；即时发送需声明」。
+  - 文档：`AGENTS.md`「推送：通知渠道」、`docs/troubleshooting.md` 的 `no_targets` 条目、README 两份同步。
 - 本地 `ctx.pt.jobs.*` 桩接受 `archiveToAssets`（布尔，JobView 缺省 false；非布尔 400 `JOB_OP_INVALID`）；`AGENTS.md` 补「结果归档」说明（定时任务 1b+）。
 - **通知投递目标**（取代 1c 未发版的按名发送）：应用只声明订阅项、调 `ctx.pt.notify.send(message)`，投递目标由使用者在宿主订阅中心配置。
   - **本地桩 `notify.send`**（`scripts/local-stub/send.mjs`，取代 `channel.mjs`）：本地网关桩把 `/notify/send` 转到 `127.0.0.1:8788`（`/notify/channel`、`/notify/channels` 不再转，未知路径 501）。
