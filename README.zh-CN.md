@@ -94,7 +94,7 @@ npx skills add ptxdev/ptengine-skills          # 大多数助手
 
 ### 定时任务
 
-在 `manifest.json` 里声明任务类型（`backend.jobs`，并在 `scopes` 加 `jobs:run`），在 `shared/api.ts` 与 `backend/src/index.ts` 加一条**同名键**的路由、第一行写 `ctx.requireTrigger('job')`。每个声明的类型都是一个**订阅项**：用户在宿主于应用页上方提供的订阅抽屉里订阅、选调度和发到哪些通知渠道；在 manifest 里给订阅项写 `displayName` / `description` / `defaultCron`（日报 / 周报 / 月报 = 三个类型），只给应用自己用的写 `"subscribable": false`。任务路由只产出内容并调 `ctx.pt.notify.send(message)`，不指定渠道；本地用 `.ptx/notify-targets.json` 模拟订阅的渠道。在用户请求里**即时发送**（不属于任何订阅）还需在 `backend` 里声明 `"notify": { "instant": true }`，否则返回 `no_targets` / `APP_INSTANT_NOT_DECLARED`；后端用 `ctx.pt.jobs.create` 建的任务初始不带渠道。然后在 `npm run dev` 跑着的前提下：
+在 `manifest.json` 里声明任务类型（`backend.jobs`，并在 `scopes` 加 `jobs:run`），在 `shared/api.ts` 与 `backend/src/index.ts` 加一条**同名键**的路由、第一行写 `ctx.requireTrigger('job')`。每个声明的类型都是一个**订阅项**：用户在宿主于应用页上方提供的订阅抽屉里订阅、选调度和发到哪些通知渠道；在 manifest 里给订阅项写 `displayName` / `description` / `defaultCron`（日报 / 周报 / 月报 = 三个类型），只给应用自己用的写 `"subscribable": false`。任务路由只产出内容并调 `ctx.pt.notify.send(message)`，不指定渠道（**邮件推送暂未开放**：调 `ctx.pt.notify.email` 会返回 `NOTIFY_UNAVAILABLE`，请用 `ctx.pt.notify.send` 发到通知渠道；本地桩仍会收下邮件，本地跑通不代表线上能发）；本地用 `.ptx/notify-targets.json` 模拟订阅的渠道。在用户请求里**即时发送**（不属于任何订阅）还需在 `backend` 里声明 `"notify": { "instant": true }`，否则返回 `no_targets` / `APP_INSTANT_NOT_DECLARED`；后端用 `ctx.pt.jobs.create` 建的任务初始不带渠道。然后在 `npm run dev` 跑着的前提下：
 
 ```bash
 npm run ptx -- job run weekly-report --params '{"range":"last7d"}'   # 加 --preview 走预览运行

@@ -181,7 +181,10 @@ Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc`
   重跑 `npm install`，或 `npm i --save-optional echarts@^5.6.0 @resvg/resvg-js@^2.6.2`。线上渲染在平台侧，不受影响。
 - **本地 403 `SCOPE_DENIED`（requiredScope: notify:send）**：manifest 的 `scopes` 没有 `notify:send`，加上后重启 `npm run dev`（本地令牌照抄 manifest）。
 - **直接访问本地桩得到 421 `PTX_STUB_BAD_HOST`**：本地桩只认 `127.0.0.1:8788` / `localhost:8788` 这两个 Host（防 DNS rebinding 读到 outbox），换用这两个地址打开。
-- **本地看到的邮件和预览面板里不一样**：本地外框是简化版、清洗只删平台一定会删的东西；以产品里的预览面板为准。
+- **`ctx.pt.notify.email` 本地能发，线上返回 503 `NOTIFY_UNAVAILABLE`**（或 doctor 提醒「邮件推送暂未开放」）：邮件推送**暂未开放**，
+  调用会返回 `NOTIFY_UNAVAILABLE`。请用 `ctx.pt.notify.send` 发到通知渠道（任务的「发送到」/ 应用的即时通知渠道）。
+  本地桩仍照常收下邮件（写 `.ptx/outbox/`），所以本地跑通不代表线上能发。API 保留，开放后不用改代码。
+- **本地看到的邮件和预览面板里不一样**：本地外框是简化版、清洗只删平台一定会删的东西；以产品里的预览面板为准（邮件推送暂未开放，见上一条）。
 - **`ctx.pt.notify.channel is not a function` / `notify.listChannels is not a function`**（或 doctor 报「已移除」）：1c 预发布期的按名发送已移除。
   改成 `ctx.pt.notify.send({ title, text?, imageUrl?, link? })`，投递目标由使用者配置（任务的「发送到」/ 应用的即时通知渠道）；params 里也别再存渠道名。
 - **`notify.send` 返回 `status: 'no_targets'`**：不是错误，是没有投递目标。看 `noTargetsReason`：

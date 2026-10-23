@@ -12,7 +12,7 @@
  *                     写 ensureFolder / create / update / uploadSource（需 asset:write）
  *   ctx.pt.ai.*       调大模型 chat / stream（需 ai:invoke）
  *   ctx.pt.openApiUrl Ptengine Open API 根地址（需 openapi:read）
- *   ctx.pt.notify.email   以 Ptengine 名义给工作区成员发邮件（需 notify:send）
+ *   ctx.pt.notify.email   以 Ptengine 名义给工作区成员发邮件（需 notify:send）—— ⚠️ 暂未开放，线上返回 NOTIFY_UNAVAILABLE，请用 notify.send
  *   ctx.pt.render.chart   平台渲染 ECharts 为 PNG，返回公开地址（需 notify:send）
  *   ctx.pt.notify.send    发一条通知到使用者配置的渠道（任务的「发送到」/ 应用的即时通知渠道 —— 后者须在 manifest 声明 backend.notify.instant；应用不指定渠道，需 notify:send）
  *   ctx.pt.jobs.*         定时任务（需 jobs:run）。manifest backend.jobs 的每个类型都是宿主订阅中心里的一个订阅项

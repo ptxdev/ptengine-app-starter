@@ -98,6 +98,15 @@
     `PtApp.subscriptions.open` 能力探测标准写法；`notify.send` 的四种 `status` 与 `no_targets` 处理、部分成功不要整体重发；不要在 params 里放渠道名。
     `PtApp.jobs.openPreview` 的写法删除。`docs/troubleshooting.md`、README、`backend/src/index.ts` 注释同步。
 
+### 变更
+
+- **邮件推送暂未开放**（平台关闭邮件发送，`ctx.pt.notify.email` 线上返回 503 `NOTIFY_UNAVAILABLE`；API 保留，本地桩行为不变、仍照常收下邮件）：
+  - `ptx doctor`：后端代码里出现 `notify.email`（含可选链、解构；注释 / 字符串 / 测试文件 / `.d.ts` 不算）→ **warn**（提醒，不算错误）
+    「邮件推送暂未开放，正式运行会返回 NOTIFY_UNAVAILABLE；请改用 notify.send」。
+  - 文档：`AGENTS.md`（ctx 清单、本地桩说明、两层模型、结果归档、「推送：邮件与图表」开头、预览模式写法及示例）、README 两份、
+    `docs/troubleshooting.md`、`backend/src/index.ts` 头注释都注明暂未开放、推荐 `notify.send`；预览示例改用 `notify.send`；
+    说明本地桩能收邮件但线上暂未开放。
+
 ### 安全
 
 - 文档、命令提示、`.github/workflows/deploy.yml` 里用 `npx` 调 `ptx` 的写法全部改为 `npm run ptx -- <command>`：`ptx` 只是本项目

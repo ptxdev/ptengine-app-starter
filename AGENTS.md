@@ -215,7 +215,7 @@ ctx.pt.ai.chat(input) / .stream(input)   // 调大模型（需 ai:invoke；model
 ctx.pt.describe()                    // 服务端取数描述尚未开放（501），前端用 PtApp.data.describe()
 ctx.pt.openApiUrl  // 当前环境的 Ptengine Open API 根地址（需 manifest scopes 含 openapi:read）
 ctx.pt.jobs.*            // 定时任务：create / list / get / update / pause / resume / delete（需 jobs:run）
-ctx.pt.notify.email({ to, subject, html, text?, replyTo?, locale? })   // 以 Ptengine 名义给工作区成员发邮件（需 notify:send）
+ctx.pt.notify.email({ to, subject, html, text?, replyTo?, locale? })   // ⚠️ 暂未开放：线上返回 NOTIFY_UNAVAILABLE，请用 notify.send（以 Ptengine 名义给工作区成员发邮件，需 notify:send）
 ctx.pt.render.chart(option, { width?, height?, theme? })              // 平台渲染 ECharts 为 PNG，返回 { url, width, height }（需 notify:send）
 ctx.pt.notify.send({ title, text?, imageUrl?, link? })   // 发一条通知到使用者配置的渠道（任务的「发送到」/ 应用的即时通知渠道 —— 须声明 backend.notify.instant；需 notify:send）
 
@@ -243,6 +243,7 @@ ctx.waitUntil(promise)               // 后台任务（如写缓存，不阻塞�
 一律 501 `PT_GATEWAY_NOT_BOUND`，即使 manifest 已经声明了 scope —— 那是本地缺 binding，不是 scope 没写。
 这几条要发布到平台上验（平台内 dev 模式的 `/api` 仍然代理到本地 wrangler，同样没有网关）。
 例外：`ctx.pt.jobs.*`（内存桩）与 `ctx.pt.notify.email` / `notify.send` / `ctx.pt.render.chart`（写 `.ptx/`，不真实发信、不真实投递）由 `ptx dev` 提供本地桩。
+注意本地桩**照常收下邮件**，而线上邮件推送暂未开放（`NOTIFY_UNAVAILABLE`）—— 本地跑通不代表线上能发，推送请用 `notify.send`。
 
 ### 资源由平台注入
 
@@ -325,7 +326,7 @@ const res = await ctx.fetch(`${ctx.pt.openApiUrl}/datacenter/query`, {
 平台调度器按用户订阅的 cron 调你的**任务路由**（`POST /api<route>`，body = 订阅的 `params`）。
 Worker 自己不能起定时（见[硬边界 3](#3-后端没有的能力写了也不会有)），一律走这条路。
 
-**两层模型**：应用只**声明订阅项**（manifest 里的任务类型）并在任务路由里**产出内容**（`ctx.pt.notify.send` / `notify.email` / 返回 `archive`）；
+**两层模型**：应用只**声明订阅项**（manifest 里的任务类型）并在任务路由里**产出内容**（`ctx.pt.notify.send` / 返回 `archive`；邮件 `notify.email` 暂未开放）；
 **谁订阅、什么时候跑、发到哪些通知渠道，全由使用者在宿主的订阅中心里决定**。应用页上方有宿主提供的「订阅」按钮，
 点开是订阅抽屉：选订阅项 → 标题 → 调度（预设或 cron，实时显示下次运行）→ 发送到（工作区的通知渠道，最多 5 个）→ 预览 → 订阅；
 之后在抽屉里看 / 改 / 删自己的订阅。**应用不用写订阅界面，也不碰渠道。**
@@ -404,8 +405,8 @@ Worker 自己不能起定时（见[硬边界 3](#3-后端没有的能力写了�
    在补上之前它照常运行，`notify.send` 回 `no_targets` / `JOB_TARGETS_EMPTY`。`JobView.targetCount` 只告诉你有几个投递目标，不告诉你是哪些（本地 jobs 桩：create 恒为 0）。
 7. **把结果交给平台**：在 2xx 的 JSON 响应里返回 `{ archive: { title?, markdown, files? } }`（类型 `JobRunResult`），
    平台会采集存档。不返回 `archive` 也行，只是没有存档；格式不对不影响运行成败，只是不采集。
-   **结果归档**（平台 1b+）：任务创建者在订阅抽屉或管理页里开「保存到资产库」后，每次成功运行的邮件、通知内容与返回的 `archive`
-   （markdown、CSV、图表图片）会自动存进**创建者本人**的资产库（「我的知识资产 / 应用名 / 任务标题」，最多留 100 份），
+   **结果归档**（平台 1b+）：任务创建者在订阅抽屉或管理页里开「保存到资产库」后，每次成功运行的结果（通知内容与返回的 `archive`：
+   markdown、CSV、图表图片）会自动存进**创建者本人**的资产库（「我的知识资产 / 应用名 / 任务标题」，最多留 100 份），
    **应用代码不用改**；只有创建者本人能改它。没有投递目标的订阅 + 保存到资产库是正当用法（只存档、不推送）。归档失败不影响运行成败。
    本地与线上的差异：本地 `ctx.pt.jobs.*` 桩只存取 `archiveToAssets` 这个开关（非布尔同样 400 `JOB_OP_INVALID`），
    **不做真实归档**、也没有运行记录与归档状态；`npm run ptx -- job run` 打印的 `stored` 只表示「线上平台会采集这份结果」。
@@ -423,7 +424,7 @@ CREATE TABLE IF NOT EXISTS job_runs (run_id TEXT PRIMARY KEY, sid TEXT NOT NULL)
     const markdown = await buildReport(ctx);
     if (ctx.auth.preview) {
         // 预览：只生成内容并返回；不占位（不写会影响正式运行的状态），不碰外部系统。
-        // 这里跳过的是你自己的外部副作用（如自己调第三方 webhook）；平台推送 ctx.pt.notify.email / notify.send
+        // 这里跳过的是你自己的外部副作用（如自己调第三方 webhook）；平台推送 ctx.pt.notify.send
         // 在预览里照常调用（平台拦截、进预览面板），见下面的「预览模式写法」。
         return { archive: { title: '每周报告（预览）', markdown } };
     }
@@ -450,6 +451,11 @@ CREATE TABLE IF NOT EXISTS job_runs (run_id TEXT PRIMARY KEY, sid TEXT NOT NULL)
 
 ### 推送：邮件与图表（notify:send）
 
+> **⚠️ 邮件推送暂未开放：调用会返回 `NOTIFY_UNAVAILABLE`。请用 `ctx.pt.notify.send` 发到通知渠道。**
+> API 保留、开放后不用改代码；下面的邮件说明供届时参考。本地桩（`npm run dev`）**仍会收下邮件**（写 `.ptx/outbox/`），
+> 本地跑通不代表线上能发；`npm run doctor` 发现代码里用了 `notify.email` 会给一条提醒。图表（`render.chart`）不受影响，
+> 返回的图直接作为 `notify.send` 的 `imageUrl`，见[推送：通知渠道](#推送通知渠道notifysend)。
+
 `manifest.json` 的 `scopes` 加 `"notify:send"`（写类，管理员必须显式同意）。然后在任务路由里：
 
 ```ts
@@ -458,6 +464,7 @@ const { url, width, height } = await ctx.pt.render.chart({
     series: [{ type: 'line', data: visits, label: { show: true, formatter: '{c}' } }]   // formatter 只能是字符串模板
 }, { width: 600, height: 300 });
 
+// ⚠️ 邮件暂未开放：线上这一步返回 NOTIFY_UNAVAILABLE（本地桩照收）。推送请用 ctx.pt.notify.send({ title, text, imageUrl: url })
 const r = await ctx.pt.notify.email({
     to: ['role:admin'],                             // 只能是 user:<accountId> / role:owner|admin|member，不能写邮箱
     subject: '每周报告',
@@ -573,9 +580,9 @@ Chatwork API 令牌 + 房间 / 通用 Webhook）；使用者在订阅抽屉里�
 
 用户在预览面板里点「生成预览」时，平台以 `ctx.auth.preview === true` 真的跑一次任务路由。目标：**预览里看到的就是正式运行会发出的东西，但没有副作用**。
 
-- **照常调用 `ctx.pt.notify.email`**：平台拦截不发（返回 `preview: true`、`sent: 0`、状态 `intercepted`），并把这封邮件显示在面板里。
+- **照常调用 `ctx.pt.notify.send`**：平台拦截不投递（`status: 'intercepted'`，`targets` = 将发到的数目），面板里消息只展示一次、下面每个目标一张卡片；草稿预览（还没订阅时）用表单里选的渠道。计每 run 单位，不计工作区分钟限额。
   在预览里跳过它，面板就是空的。
-- **照常调用 `ctx.pt.notify.send`**：同样被拦截不投递（`status: 'intercepted'`，`targets` = 将发到的数目），面板里消息只展示一次、下面每个目标一张卡片；草稿预览（还没订阅时）用表单里选的渠道。计每 run 单位，不计工作区分钟限额。
+- （`ctx.pt.notify.email` 暂未开放，线上返回 `NOTIFY_UNAVAILABLE`；开放后预览里同样拦截不发：`preview: true`、`sent: 0`。）
 - `ctx.pt.render.chart` 预览里**真实渲染**（计配额），面板里能看到图。
 - `ctx.pt.jobs.update / pause / resume / delete` 与资产写（`ctx.pt.asset.ensureFolder / create / update / uploadSource`）在预览里
   一律 403 `PREVIEW_READONLY` —— 用 `if (!ctx.auth.preview)` 包起来。取数、资产读、AI 照常。
@@ -595,17 +602,17 @@ Chatwork API 令牌 + 房间 / 通用 Webhook）；使用者在订阅抽屉里�
         if (claimed.meta.changes === 0) return {};                  // 重复投递：什么都不做
     }
     try {
-        // 占位之后的每一步（取数 / 渲染 / 发信）都在 try 里：任何一步失败都删占位，重投才能重做
+        // 占位之后的每一步（取数 / 渲染 / 推送）都在 try 里：任何一步失败都删占位，重投才能重做
         const data = await ctx.pt.query('traffic_insight', { /* … */ });
         const chart = await ctx.pt.render.chart(buildOption(data), { width: 600, height: 300 });
-        // 预览里照常调用：平台拦截并显示在面板里
-        await ctx.pt.notify.email({ to: ['role:admin'], subject: '每周报告', html: renderHtml(data, chart) });
+        // 预览里照常调用：平台拦截并显示在面板里；发到这个订阅选的渠道
+        await ctx.pt.notify.send({ title: '每周报告', text: renderSummary(data), imageUrl: chart.url });
         ctx.log('完成');
         return { archive: { title: '每周报告', markdown: renderMarkdown(data) } };
     } catch (e) {
         // 想让重投重做：失败时先删占位再抛错（预览没占位，不用删）。
-        // ⚠️ notify.email 回 502 NOTIFY_SEND_FAILED / 504 时邮件**可能已部分送达**：宁可漏发也不愿重复发的应用，
-        //    在 notify.email 调用之后失败就别删占位。
+        // ⚠️ notify.send 回 504、或投递错误里有 CHANNEL_TIMEOUT 时消息**可能已送达**：宁可漏发也不愿重复发的应用，
+        //    在 notify.send 调用之后失败就别删占位。
         if (!ctx.auth.preview) await ctx.db.prepare('DELETE FROM job_runs WHERE run_id = ?').bind(runId).run();
         throw e;
     }
@@ -641,7 +648,7 @@ POST 到 `http://127.0.0.1:$PTX_API_PORT/api<route>`（`PTX_API_PORT` 缺省 878
 `--preview` 时命令还会打印应用回的预览日志（`ctx.log` 与取数 / 邮件 / 图表 / 通知次数，与预览面板里的同一份），
 以及这次运行写下的邮件与通知的本地预览页（通知按「消息一次 + 将发到列表」展示） `http://localhost:8788/__ptx/outbox/<runId>`（需要 `npm run dev` 正在跑）。
 
-`npm run doctor` 会检查：`jobs:run` 是否声明、任务路由是否在 `backend/src` 的 `routes` 里、路由里有没有 `requireTrigger(`、`preview: true` 时有没有读 `ctx.auth.preview`、用了 `ctx.pt.notify.*`（邮件 / 通知）/ `render.chart` 时有没有声明 `notify:send`、代码里还有没有已移除的 `notify.channel` / `notify.listChannels`（bad）、订阅项字段（`displayName` / `description` / `defaultCron` / `defaultParams` / `subscribable`）形状对不对、订阅项有没有写 `displayName`（提示）。
+`npm run doctor` 会检查：`jobs:run` 是否声明、任务路由是否在 `backend/src` 的 `routes` 里、路由里有没有 `requireTrigger(`、`preview: true` 时有没有读 `ctx.auth.preview`、用了 `ctx.pt.notify.*`（邮件 / 通知）/ `render.chart` 时有没有声明 `notify:send`、代码里还有没有已移除的 `notify.channel` / `notify.listChannels`（bad）、代码里有没有用暂未开放的 `notify.email`（提醒，不算错误）、订阅项字段（`displayName` / `description` / `defaultCron` / `defaultParams` / `subscribable`）形状对不对、订阅项有没有写 `displayName`（提示）。
 
 ---
 
