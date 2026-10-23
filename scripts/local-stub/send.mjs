@@ -2,11 +2,13 @@
  * ptx dev 的本地「通知发送」桩逻辑（`ctx.pt.notify.send`，通知投递目标 brief §9.3）。纯函数（loadLocalTargets 读一个文件）；
  * server.mjs 包一层 HTTP 并负责写文件。取代 1c 的按名发送桩（channel.mjs）。
  *
- * 两层模型：应用只写消息内容，投递目标由使用者配置（任务的「发送到」/ 应用默认通知渠道）。本地没有订阅中心，
+ * 两层模型：应用只写消息内容，投递目标由使用者配置（任务的「发送到」/ 应用的即时通知渠道）。本地没有订阅中心，
  * 目标来自项目内 `.ptx/notify-targets.json`（`[{ "name": "alerts", "type": "slack" }]`，每次请求现读，改了即时生效）：
  *   · 文件不存在 → 一个虚拟目标 `{ name: 'local', type: 'webhook' }`（让本地默认走通 sent 分支，裁定 N30）；
  *   · 文件为 `[]` → 没有投递目标：任务 run 回 `no_targets` / `JOB_TARGETS_EMPTY`，交互回 `APP_DEFAULT_EMPTY`（用于本地测无目标分支）；
- *   · 任务 run 与交互调用用同一份目录（本地不区分「任务的渠道」与「应用默认渠道」）。
+ *   · 任务 run 与交互调用用同一份目录（本地不区分「任务的渠道」与「应用的即时通知渠道」）；
+ *   · 交互调用（非任务）且 manifest 没声明 `backend.notify.instant: true`（入参 instant = false，server 每次现读 manifest.json）→
+ *     不读目标、不投递，`no_targets` / `APP_INSTANT_NOT_DECLARED`（2026-10-22 即时通知补充 R2，与线上同口径）。
  *
  * 判定顺序与线上平台一致（brief §4.4）：消息形状（第 3 步）→ 解析目标（第 5 步）→ 本 run 单位（第 6 步：每次消耗 max(1, 目标数)，
  * 含预览、含无目标）→ 预览拦截（第 8 步）→ 无目标（第 9 步）→ 投递。被第 3 步拒掉的调用不计。
@@ -143,7 +145,7 @@ export function validateSendMessage(body, rules = RULES.notifySend) {
 
 /**
  * 读项目内 .ptx/notify-targets.json（每次现读）。没有文件 → null（= 用虚拟目标）；不合规 → 抛错（server 回 500 PTX_STUB_FAILED，消息点名文件）。
- * 上限同线上每个任务 / 应用默认渠道的目标数上限（rules.notifySend.maxTargets）。
+ * 上限同线上每个任务 / 应用即时通知渠道的目标数上限（rules.notifySend.maxTargets）。
  */
 export function loadLocalTargets(root, rules = RULES.notifySend) {
     const r = sendRules(rules);
@@ -157,7 +159,7 @@ export function loadLocalTargets(root, rules = RULES.notifySend) {
     }
     if (!Array.isArray(list)) throw new Error('.ptx/notify-targets.json 必须是数组：[{ "name": "alerts", "type": "slack" }]（[] = 没有投递目标）');
     if (list.length > r.maxTargets) {
-        throw new Error(`.ptx/notify-targets.json 最多 ${r.maxTargets} 个目标（线上每个订阅 / 应用默认渠道的上限），收到 ${list.length} 个`);
+        throw new Error(`.ptx/notify-targets.json 最多 ${r.maxTargets} 个目标（线上每个订阅 / 应用即时通知渠道的上限），收到 ${list.length} 个`);
     }
     const seen = new Set();
     return list.map((c, i) => {
@@ -181,15 +183,21 @@ export function resolveLocalTargets(targets, rules = RULES.notifySend) {
     return [{ ...DEFAULT_LOCAL_TARGET }];
 }
 
-export function handleNotifySend(state, { claims, body, appName, targets, rules = RULES.notifySend }) {
+/**
+ * `instant`：应用（当前 manifest）是否声明了即时发送（`declaresInstantNotify`）。缺省 = 未声明，与平台「当前版本没声明就不投」同口径。
+ * 只影响交互调用；任务 run / 预览照旧按任务的目标。
+ */
+export function handleNotifySend(state, { claims, body, appName, targets, instant = false, rules = RULES.notifySend }) {
     const r = sendRules(rules);
     const v = validateSendMessage(body, r);
     if (v.error) return v.error;
 
-    const list = resolveLocalTargets(targets ?? null, r);
-    const k = list.length;
     const { isJob, runId, preview } = jobRunOf(claims);
-    const noTargetsReason = k === 0 ? (isJob ? 'JOB_TARGETS_EMPTY' : 'APP_DEFAULT_EMPTY') : null;
+    const undeclared = !isJob && !instant;
+    // 未声明即时发送：不读目标（线上不读默认渠道），按无目标处理
+    const list = undeclared ? [] : resolveLocalTargets(targets ?? null, r);
+    const k = list.length;
+    const noTargetsReason = k === 0 ? (isJob ? 'JOB_TARGETS_EMPTY' : undeclared ? 'APP_INSTANT_NOT_DECLARED' : 'APP_DEFAULT_EMPTY') : null;
 
     if (runId) {
         const c = runCounters(state, runId);

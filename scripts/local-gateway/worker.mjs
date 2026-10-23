@@ -15,22 +15,6 @@ const json = (status, body) => new Response(JSON.stringify(body), { status, head
 /** 转给 ptx dev 进程里的 Node 桩服务（scripts/local-stub/server.mjs）的路径（与线上网关同名；1c 的 /notify/channel(s) 已由 /notify/send 取代）。 */
 const STUB_FORWARD = new Set(['/notify/email', '/notify/send', '/render/chart']);
 
-/**
- * 创建任务时的本地投递目标数（JobView.targetCount）：问 ptx dev 进程里的桩（它能读 .ptx/notify-targets.json）。
- * 桩不在 / 回的不是非负整数 → 按 1（= 没有目录文件时的虚拟目标）。
- */
-async function localTargetCount(env) {
-    const origin = env?.PTX_STUB_ORIGIN;
-    if (!origin) return 1;
-    try {
-        const res = await fetch(`${origin}/__ptx/notify-targets`, { method: 'GET' });
-        const n = res.ok ? (await res.json())?.count : null;
-        return Number.isInteger(n) && n >= 0 ? n : 1;
-    } catch {
-        return 1;
-    }
-}
-
 export default {
     async fetch(request, env) {
         const url = new URL(request.url);
@@ -70,8 +54,7 @@ export default {
             const r = handleJobsRequest(store, {
                 appId: request.headers.get('x-pt-app-id') ?? '',
                 authorization: request.headers.get('authorization') ?? '',
-                body,
-                ...(body?.op === 'create' ? { targetCount: await localTargetCount(env) } : {})
+                body
             });
             return r.status === 204 ? new Response(null, { status: 204 }) : json(r.status, r.body);
         }

@@ -15,7 +15,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
-import { RULES, readManifest, resolveBackend, validateManifest } from './manifest.mjs';
+import { MANIFEST_NOTIFY_STALE, RULES, declaresInstantNotify, manifestNotifyRules, readManifest, resolveBackend, validateManifest } from './manifest.mjs';
 import { parseJsonc } from './jsonc.mjs';
 
 const results = [];
@@ -667,6 +667,36 @@ export function checkNotifyScope(root, manifest) {
     return [{ level: 'ok', msg: `ctx.pt.notify.* / render.chart 已声明 notify:send（${hits.join('、')}）` }];
 }
 
+/**
+ * `notify.send` 的调用（含可选链），以及从 `….notify` 解构出 `send`。只认 send：邮件 `notify.email` 不受即时声明影响。
+ * 不识别计算属性与别名（同 NOTIFY_USE_RES 的口径）。
+ */
+const NOTIFY_SEND_USE_RES = [
+    /\bnotify\s*\??\.\s*send\b/,
+    /\{[^{}]*\bsend\b[^{}]*\}\s*=\s*[\w$.?\s]*\bnotify\b/
+];
+
+/**
+ * 即时通知声明（2026-10-22 补充 R11）：后端用了 `ctx.pt.notify.send`、scopes 有 `notify:send`，但 manifest 没声明
+ * `backend.notify.instant: true` → info。不是错：只在定时任务里发的应用本来就不需要声明；但用户请求里（`trigger === 'user'`）
+ * 的发送会被平台回 `no_targets` / `APP_INSTANT_NOT_DECLARED`，本地桩同样如此。没有 `notify:send` 的情况由 checkNotifyScope 报。
+ * 形状问题（instant 非布尔、多余键、instant 缺 notify:send）由 validateManifest 报 MANIFEST_INVALID。
+ */
+export function checkInstantNotify(root, manifest, rules = RULES.manifestNotify) {
+    const r = manifestNotifyRules(rules);
+    if (!r) return [{ level: 'warn', msg: '跳过即时发送声明检查：' + MANIFEST_NOTIFY_STALE, why: '升级 starter 的 scripts/（维护者跑 npm run sync-rules）。' }];
+    if (!(manifest?.scopes ?? []).includes(r.instantRequiresScope)) return [];
+    if (declaresInstantNotify(manifest, r)) return [];
+    const hits = backendCodeFiles(root).filter(s => NOTIFY_SEND_USE_RES.some(re => re.test(s.text))).map(s => s.rel);
+    if (hits.length === 0) return [];
+    return [{
+        level: 'info',
+        msg: `后端用了 ctx.pt.notify.send（${hits.join('、')}），但 manifest 没声明 backend.notify.instant：只能在定时任务（订阅）里投递`,
+        why: '即时发送（用户请求里调 notify.send，不属于任何订阅）需在 manifest.json 声明 backend.notify.instant: true（"backend": { …, "notify": { "instant": true } }），' +
+             '否则平台不投递、返回 status no_targets / noTargetsReason APP_INSTANT_NOT_DECLARED（本地桩同样）。只在定时任务里发送的话可以忽略这条。'
+    }];
+}
+
 /** backend/src 下要扫的源码（剥掉注释与字符串内容）：测试与 .d.ts 不算。 */
 function backendCodeFiles(root) {
     return listSourceFiles(join(root, 'backend', 'src'))
@@ -689,8 +719,45 @@ export function checkRemovedNotifyApis(root) {
         level: 'bad',
         msg: `后端还在用已移除的 ctx.pt.notify.channel / notify.listChannels（${hits.join('、')}）`,
         why: '已移除，改用 ctx.pt.notify.send({ title, text?, imageUrl?, link? })，投递目标由使用者配置：' +
-             '任务里发到订阅时选的渠道，用户请求里发到应用默认通知渠道；应用既不指定也看不到渠道名（参数里也别放渠道名）。' +
+             '任务里发到订阅时选的渠道，用户请求里发到应用的即时通知渠道（须在 manifest 声明 backend.notify.instant: true）；应用既不指定也看不到渠道名（参数里也别放渠道名）。' +
              '本地用 .ptx/notify-targets.json 模拟投递目标。'
+    }];
+}
+
+/**
+ * `notify.email` 的识别（收紧口径，宁可漏报不误报——这条只是提醒）：
+ *   · 直接访问：`pt.notify.email` / `pt?.notify?.email`（前缀不限：`ctx.pt`、`c.pt`、解构出的 `pt`；成员链可换行）；
+ *   · 从 `….pt.notify` 解构出 `email`：`{ email } = ctx.pt.notify`（右侧必须以 `pt.notify` 结尾、不跨行）；
+ *   · 同一文件里先从 `….pt` 解构出 `notify`（`{ notify } = ctx.pt` / `{ pt: { notify } } = …`），再 `notify.email` / `notify?.email`。
+ * 不识别：计算属性、别名（`const p = ctx.pt; p.notify.email`）。业务对象 `prefs.notify.email`、`{ email } = user`、
+ * `{ email } = await notify(x)` 都不算。
+ */
+const NOTIFY_EMAIL_DIRECT_RE = /\bpt\s*\??\.\s*notify\s*\??\.\s*email\b/;
+const NOTIFY_EMAIL_DESTRUCTURE_RE = /\{[^{}]*\bemail\b[^{}]*\}[ \t]*=[ \t]*(?:[\w$]+[ \t]*\??\.[ \t]*)*pt[ \t]*\??\.[ \t]*notify\b(?![ \t]*(?:\??\.|[(\[])|[\w$])/;
+const NOTIFY_FROM_PT_RES = [
+    /\{[^{}]*\bnotify\b[^{}]*\}[ \t]*=[ \t]*(?:[\w$]+[ \t]*\??\.[ \t]*)*pt\b(?![ \t]*(?:\??\.|[(\[])|[\w$])/,
+    /\bpt[ \t]*:[ \t]*\{[^{}]*\bnotify\b/
+];
+const BARE_NOTIFY_EMAIL_RE = /(?<![\w$.?])notify\s*\??\.\s*email\b/;
+
+function usesNotifyEmail(text) {
+    if (NOTIFY_EMAIL_DIRECT_RE.test(text) || NOTIFY_EMAIL_DESTRUCTURE_RE.test(text)) return true;
+    return NOTIFY_FROM_PT_RES.some(re => re.test(text)) && BARE_NOTIFY_EMAIL_RE.test(text);
+}
+
+/**
+ * 邮件推送暂未开放（平台 NOTIFY_ENABLED=false）：`ctx.pt.notify.email` 线上一律 503 `NOTIFY_UNAVAILABLE`，
+ * 本地桩却照常收下 —— 本地跑通不代表线上能发。API 仍保留，所以只给 warn（提醒，不算错误）。
+ * 注释、字符串、测试文件、`.d.ts` 里出现的不算。
+ */
+export function checkNotifyEmailUnavailable(root) {
+    const hits = backendCodeFiles(root).filter(s => usesNotifyEmail(s.text)).map(s => s.rel);
+    if (hits.length === 0) return [];
+    return [{
+        level: 'warn',
+        msg: `后端用了 ctx.pt.notify.email（${hits.join('、')}）：邮件推送暂未开放，正式运行会返回 NOTIFY_UNAVAILABLE；请改用 notify.send`,
+        why: '改用 ctx.pt.notify.send({ title, text?, imageUrl?, link? })，发到使用者配置的通知渠道（任务里 = 订阅时选的渠道；用户请求里 = 应用的即时通知渠道，' +
+             '须在 manifest 声明 backend.notify.instant: true）。本地桩仍会收下邮件（写 .ptx/outbox/），本地跑通不代表线上能发。'
     }];
 }
 
@@ -1065,6 +1132,8 @@ export async function run(args, root) {
     results.push(...checkJobs(root, manifest));
     results.push(...checkNotifyScope(root, manifest));
     results.push(...checkRemovedNotifyApis(root));
+    results.push(...checkNotifyEmailUnavailable(root));
+    results.push(...checkInstantNotify(root, manifest));
     results.push(...checkSubscriptionItems(manifest));
     checkMigrationsAdditive(root, manifest, results);
     checkGitignore(root);

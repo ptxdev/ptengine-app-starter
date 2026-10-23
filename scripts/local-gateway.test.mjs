@@ -26,7 +26,7 @@ test('create → 201 JobView（创建者 / 工作区取自令牌，title 缺省�
         { id: undefined, appId: 'local-dev', workspaceId: 'local-ws', type: 'weekly-report', title: 'weekly-report',
           cron: '0 9 * * 1', timezone: 'Asia/Tokyo', params: { range: 'last7d' }, createdBy: 'local-user', status: 'active',
           pauseReason: null, consecutiveFailures: 0, nextRunAt: null, lastRunAt: null,
-          archiveToAssets: false, targetCount: 1,
+          archiveToAssets: false, targetCount: 0,
           scheduleDescription: { zh: '（本地桩）cron 0 9 * * 1 · Asia/Tokyo', en: '(local stub) cron 0 9 * * 1 · Asia/Tokyo', ja: '（ローカルスタブ）cron 0 9 * * 1 · Asia/Tokyo' },
           createdAt: undefined, updatedAt: undefined });
 });
@@ -177,14 +177,11 @@ test('网关桩：转发保留本地桩响应的状态与头（retry-after 等�
     }
 });
 
-test('通知投递目标：create 时 targetCount = 当时的本地目标数（缺省 1 = 虚拟目标；复制语义，之后改目录不影响已有任务）；update 不变', () => {
+test('通知投递目标：应用自建任务初始不带渠道 → create 的 targetCount 恒为 0（不再按 .ptx/notify-targets.json 计）；update 不变', () => {
     const s = createJobsStore();
-    const opts = (targetCount, body) => handleJobsRequest(s, { appId: 'local-dev', authorization: USER, body, targetCount });
-    assert.equal(call(s, USER, CREATE).body.targetCount, 1);
-    const three = opts(3, CREATE).body;
-    assert.equal(three.targetCount, 3);
-    assert.equal(opts(0, CREATE).body.targetCount, 0);
-    assert.equal(opts(5, { op: 'update', jobId: three.id, title: 'x' }).body.targetCount, 3);
+    const job = call(s, USER, CREATE).body;
+    assert.equal(job.targetCount, 0);
+    assert.equal(call(s, USER, { op: 'update', jobId: job.id, title: 'x' }).body.targetCount, 0);
 });
 
 test('通知投递目标：create / update 带 channelIds → 400 JOB_OP_INVALID（与平台 gateway 链路同码）', () => {
@@ -194,16 +191,13 @@ test('通知投递目标：create / update 带 channelIds → 400 JOB_OP_INVALID
     assert.equal(call(s, USER, { op: 'update', jobId: id, channelIds: [] }).body.error.code, 'JOB_OP_INVALID');
 });
 
-test('网关桩 create 前向本地桩 GET /__ptx/notify-targets 取目标数写进 targetCount；桩连不上时按 1', async () => {
+test('网关桩 create 不再向本地桩问目标数（不发任何 fetch），targetCount = 0', async () => {
     const orig = globalThis.fetch;
-    const body = JSON.stringify(CREATE);
-    const req = () => new Request('https://gateway/jobs', { method: 'POST', headers: { authorization: USER, 'x-pt-app-id': 'gw-app', 'content-type': 'application/json' }, body });
+    const req = () => new Request('https://gateway/jobs', { method: 'POST', headers: { authorization: USER, 'x-pt-app-id': 'gw-app', 'content-type': 'application/json' }, body: JSON.stringify(CREATE) });
     const seen = [];
     try {
-        globalThis.fetch = async (url, init) => { seen.push([String(url), init?.method ?? 'GET']); return new Response('{"count":4}', { status: 200 }); };
-        assert.equal((await (await worker.fetch(req(), { PTX_STUB_ORIGIN: 'http://127.0.0.1:9999' })).json()).targetCount, 4);
-        assert.deepEqual(seen, [['http://127.0.0.1:9999/__ptx/notify-targets', 'GET']]);
-        globalThis.fetch = async () => { throw new Error('down'); };
-        assert.equal((await (await worker.fetch(req(), { PTX_STUB_ORIGIN: 'http://127.0.0.1:9999' })).json()).targetCount, 1);
+        globalThis.fetch = async url => { seen.push(String(url)); return new Response('{"count":4}', { status: 200 }); };
+        assert.equal((await (await worker.fetch(req(), { PTX_STUB_ORIGIN: 'http://127.0.0.1:9999' })).json()).targetCount, 0);
+        assert.deepEqual(seen, []);
     } finally { globalThis.fetch = orig; }
 });

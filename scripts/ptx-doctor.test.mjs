@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkMigrationsAdditive, checkTailwindContent, checkPackageFloors, PACKAGE_FLOORS, checkJobs, findRouteHandler, checkNotifyScope, checkRemovedNotifyApis, checkSubscriptionItems } from './ptx-doctor.mjs';
+import { checkMigrationsAdditive, checkTailwindContent, checkPackageFloors, PACKAGE_FLOORS, checkJobs, findRouteHandler, checkNotifyScope, checkRemovedNotifyApis, checkSubscriptionItems, checkInstantNotify, checkNotifyEmailUnavailable } from './ptx-doctor.mjs';
 import { RULES } from './manifest.mjs';
 
 function fixture(files) {
@@ -421,6 +421,47 @@ test('已移除 API 只出现在注释 / 字符串 / 测试文件里 → 不报�
     assert.deepEqual(checkRemovedNotifyApis(root), []);
 });
 
+// ─── 邮件推送暂未开放：notify.email → warn（提醒，不算错误）───────────────
+
+test('代码里用了 ctx.pt.notify.email（含可选链、解构、子文件）→ warn，点名文件，提示 NOTIFY_UNAVAILABLE 与改用 notify.send', () => {
+    for (const [file, src] of [
+        ['backend/src/index.ts', "await ctx.pt.notify.email({ to: ['role:admin'], subject: 's', html: 'h' });"],
+        ['backend/src/index.ts', 'await ctx.pt?.notify?.email(input);'],
+        ['backend/src/index.ts', 'await ctx.pt.notify\n    .email(input);'],
+        ['backend/src/jobs/ping.ts', 'const { notify } = ctx.pt;\nawait notify.email(input);'],
+        ['backend/src/jobs/ping.ts', 'const { email: sendMail } = ctx.pt.notify;\nawait sendMail(input);']
+    ]) {
+        const out = checkNotifyEmailUnavailable(jobsProject({ 'backend/src/index.ts': '', [file]: src }));
+        assert.equal(out.length, 1, src);
+        assert.equal(out[0].level, 'warn', src);
+        assert.match(out[0].msg, /邮件推送暂未开放，正式运行会返回 NOTIFY_UNAVAILABLE；请改用 notify\.send/, src);
+        assert.ok(out[0].msg.includes(file) || out[0].msg.includes(file.replace(/\//g, '\\')), src);
+        assert.match(out[0].why, /本地桩仍会收下邮件/, src);
+    }
+});
+
+test('notify.email 只出现在注释 / 字符串 / 测试文件 / .d.ts 里 → 不报；notify.send 与 ctx.auth.email 不报', () => {
+    const root = jobsProject({
+        'backend/src/index.ts': "// 以前是 ctx.pt.notify.email(x)\nconst s = 'notify.email()';\n/* notify.email */\n" +
+            'await ctx.pt.notify.send(m);\nconst { email } = ctx.auth;\nconst who = ctx.auth.email;',
+        'backend/src/index.test.ts': 'await ctx.pt.notify.email(input);',
+        'backend/src/types.d.ts': 'declare const x: { notify: { email(): void } }; type T = typeof x.notify.email;'
+    });
+    assert.deepEqual(checkNotifyEmailUnavailable(root), []);
+});
+
+test('notify.email 误报反例：不写分号的 { email } = user 后接 notify.send / { email } = await notify(x) / 业务对象 prefs.notify.email → 不报', () => {
+    for (const src of [
+        'const { email } = user\nawait ctx.pt.notify.send(m)',
+        'const { email } = await notify(x);',
+        'const to = prefs.notify.email;\nif (prefs?.notify?.email) send(to);',
+        'const { email } = prefs.notify;',
+        'const { notify } = settings;\nconst on = notify.email;'
+    ]) {
+        assert.deepEqual(checkNotifyEmailUnavailable(jobsProject({ 'backend/src/index.ts': src })), [], src);
+    }
+});
+
 const J = RULES.jobs;
 test('checkSubscriptionItems：没有 backend.jobs → 不产出；字段齐全 → 一条 ok', () => {
     assert.deepEqual(checkSubscriptionItems({ backend: {} }), []);
@@ -463,4 +504,43 @@ test('checkSubscriptionItems：项缺 type 时文案用 backend.jobs[i] 定位�
     const out = checkSubscriptionItems(mf([{ route: 'POST /x', title: 'x', subscribable: 'no' }]));
     assert.ok(out.some(r => r.level === 'bad' && r.msg.includes('backend.jobs[0]')));
     assert.ok(out.every(r => !r.msg.includes('undefined')), JSON.stringify(out));
+});
+
+// ─── 即时通知声明（backend.notify.instant，2026-10-22 补充 R11）──────────
+const SEND_SRC = "export default createApp({ routes: { 'POST /alert': async ctx => ctx.pt.notify.send({ title: 't' }) } });";
+const withInstant = (notify, scopes = ['notify:send']) => ({ ...mf(undefined, scopes), backend: { ...mf(undefined).backend, ...(notify === undefined ? {} : { notify }) } });
+
+test('checkInstantNotify：用了 notify.send、有 notify:send、没声明 instant → info（只能在定时任务里投递），点名文件', () => {
+    const out = checkInstantNotify(jobsProject({ 'backend/src/index.ts': SEND_SRC }), withInstant(undefined));
+    assert.equal(out.length, 1);
+    assert.equal(out[0].level, 'info');
+    assert.match(out[0].msg, /backend\/src\/index\.ts/);
+    assert.match(out[0].msg + out[0].why, /定时任务/);
+    assert.match(out[0].why, /backend\.notify[\s\S]*instant/);
+    assert.match(out[0].why, /APP_INSTANT_NOT_DECLARED/);
+    // 解构 / 可选链同样识别
+    const destructured = "export default createApp({ routes: { 'POST /a': async ({ pt }) => { const { send } = pt.notify; return send({ title: 't' }); } } });";
+    assert.equal(checkInstantNotify(jobsProject({ 'backend/src/index.ts': destructured }), withInstant({ instant: false }))[0]?.level, 'info');
+    assert.equal(checkInstantNotify(jobsProject({ 'backend/src/index.ts': 'ctx.pt?.notify?.send({ title: "t" })' }), withInstant({}))[0]?.level, 'info');
+});
+
+test('checkInstantNotify：已声明 instant / 没用 notify.send / 只用 notify.email / 没有 notify:send（由 checkNotifyScope 报）/ 注释里 → 不产出', () => {
+    assert.deepEqual(checkInstantNotify(jobsProject({ 'backend/src/index.ts': SEND_SRC }), withInstant({ instant: true })), []);
+    assert.deepEqual(checkInstantNotify(jobsProject({ 'backend/src/index.ts': INDEX_OK }), withInstant(undefined)), []);
+    const email = "export default createApp({ routes: { 'POST /x': async ctx => ctx.pt.notify.email({ to: ['role:admin'], subject: 's', html: 'h' }) } });";
+    assert.deepEqual(checkInstantNotify(jobsProject({ 'backend/src/index.ts': email }), withInstant(undefined)), []);
+    assert.deepEqual(checkInstantNotify(jobsProject({ 'backend/src/index.ts': SEND_SRC }), withInstant(undefined, ['jobs:run'])), []);
+    assert.deepEqual(checkInstantNotify(jobsProject({ 'backend/src/index.ts': '// ctx.pt.notify.send({ title: "t" })\nexport default 1;' }), withInstant(undefined)), []);
+});
+
+test('checkInstantNotify：读注入的 manifestNotify；缺段 → warn（提示 sync-rules），不写字面量兜底', () => {
+    const root = jobsProject({ 'backend/src/index.ts': SEND_SRC });
+    const out = checkInstantNotify(root, withInstant(undefined), null);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].level, 'warn');
+    assert.match(out[0].msg + out[0].why, /sync-rules/);
+    // 注入规则：instantRequiresScope = jobs:run → 只看 jobs:run
+    const injected = { keys: ['instant'], instantRequiresScope: 'jobs:run' };
+    assert.deepEqual(checkInstantNotify(root, withInstant(undefined, ['notify:send']), injected), []);
+    assert.equal(checkInstantNotify(root, withInstant(undefined, ['jobs:run']), injected)[0]?.level, 'info');
 });

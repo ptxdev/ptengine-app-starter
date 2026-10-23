@@ -54,10 +54,10 @@ function checkFields(b, { partial }) {
 }
 
 /**
- * `targetCount`：创建时的本地投递目标数（worker 向本地桩取 .ptx/notify-targets.json 的条数；没有文件 = 1 个虚拟目标）。
- * 与线上「创建时复制应用默认渠道」同语义：只在 create 时写入，之后改目录不影响已有任务。
+ * `targetCount`：应用自建的任务**初始不带渠道**（2026-10-22 即时通知补充 R5，与线上一致），create 时恒为 0；
+ * 线上由创建者在订阅中心补渠道，本地没有订阅中心 —— `ptx job run` 运行任务时仍按 .ptx/notify-targets.json 模拟目标。
  */
-export function handleJobsRequest(store, { appId, authorization, body, targetCount = 1, now = new Date(), uuid = () => crypto.randomUUID() }) {
+export function handleJobsRequest(store, { appId, authorization, body, now = new Date(), uuid = () => crypto.randomUUID() }) {
     const claims = decodeClaims(authorization);
     if (!claims) return err(401, 'APP_TOKEN_INVALID', '缺少或无法解析 App Token');
     const scopes = Array.isArray(claims.scopes) ? claims.scopes : [];
@@ -78,7 +78,7 @@ export function handleJobsRequest(store, { appId, authorization, body, targetCou
             pauseReason: null, consecutiveFailures: 0, nextRunAt: null, lastRunAt: null,
             // 本地只模拟本人视角，「只有创建者能改 archiveToAssets」天然满足；本地不做真实归档
             archiveToAssets: b.archiveToAssets ?? false,
-            targetCount,
+            targetCount: 0,
             scheduleDescription: stubDescription(b.cron, b.timezone), createdAt: iso, updatedAt: iso
         };
         store.jobs.set(job.id, job);
