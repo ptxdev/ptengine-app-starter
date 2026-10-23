@@ -724,6 +724,31 @@ export function checkRemovedNotifyApis(root) {
     }];
 }
 
+/**
+ * `notify.email` 的调用（含可选链；解构出的 `notify` 同样命中），以及从 `….notify` 解构出 `email`。
+ * 不识别计算属性与别名（同 NOTIFY_USE_RES 的口径）。
+ */
+const NOTIFY_EMAIL_USE_RES = [
+    /\bnotify\s*\??\.\s*email\b/,
+    /\{[^{}]*\bemail\b[^{}]*\}\s*=\s*[\w$.?\s]*\bnotify\b/
+];
+
+/**
+ * 邮件推送暂未开放（平台 NOTIFY_ENABLED=false）：`ctx.pt.notify.email` 线上一律 503 `NOTIFY_UNAVAILABLE`，
+ * 本地桩却照常收下 —— 本地跑通不代表线上能发。API 仍保留，所以只给 warn（提醒，不算错误）。
+ * 注释、字符串、测试文件、`.d.ts` 里出现的不算。
+ */
+export function checkNotifyEmailUnavailable(root) {
+    const hits = backendCodeFiles(root).filter(s => NOTIFY_EMAIL_USE_RES.some(re => re.test(s.text))).map(s => s.rel);
+    if (hits.length === 0) return [];
+    return [{
+        level: 'warn',
+        msg: `后端用了 ctx.pt.notify.email（${hits.join('、')}）：邮件推送暂未开放，正式运行会返回 NOTIFY_UNAVAILABLE；请改用 notify.send`,
+        why: '改用 ctx.pt.notify.send({ title, text?, imageUrl?, link? })，发到使用者配置的通知渠道（任务里 = 订阅时选的渠道；用户请求里 = 应用的即时通知渠道，' +
+             '须在 manifest 声明 backend.notify.instant: true）。本地桩仍会收下邮件（写 .ptx/outbox/），本地跑通不代表线上能发。'
+    }];
+}
+
 const I18N_CONTROL = /[\u0000-\u001f\u007f]/;
 const codePointLen = s => [...s].length;
 const isPlainObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -1095,6 +1120,7 @@ export async function run(args, root) {
     results.push(...checkJobs(root, manifest));
     results.push(...checkNotifyScope(root, manifest));
     results.push(...checkRemovedNotifyApis(root));
+    results.push(...checkNotifyEmailUnavailable(root));
     results.push(...checkInstantNotify(root, manifest));
     results.push(...checkSubscriptionItems(manifest));
     checkMigrationsAdditive(root, manifest, results);

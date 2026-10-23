@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkMigrationsAdditive, checkTailwindContent, checkPackageFloors, PACKAGE_FLOORS, checkJobs, findRouteHandler, checkNotifyScope, checkRemovedNotifyApis, checkSubscriptionItems, checkInstantNotify } from './ptx-doctor.mjs';
+import { checkMigrationsAdditive, checkTailwindContent, checkPackageFloors, PACKAGE_FLOORS, checkJobs, findRouteHandler, checkNotifyScope, checkRemovedNotifyApis, checkSubscriptionItems, checkInstantNotify, checkNotifyEmailUnavailable } from './ptx-doctor.mjs';
 import { RULES } from './manifest.mjs';
 
 function fixture(files) {
@@ -419,6 +419,35 @@ test('已移除 API 只出现在注释 / 字符串 / 测试文件里 → 不报�
         'backend/src/index.test.ts': 'await ctx.pt.notify.channel(a, m);'
     });
     assert.deepEqual(checkRemovedNotifyApis(root), []);
+});
+
+// ─── 邮件推送暂未开放：notify.email → warn（提醒，不算错误）───────────────
+
+test('代码里用了 ctx.pt.notify.email（含可选链、解构、子文件）→ warn，点名文件，提示 NOTIFY_UNAVAILABLE 与改用 notify.send', () => {
+    for (const [file, src] of [
+        ['backend/src/index.ts', "await ctx.pt.notify.email({ to: ['role:admin'], subject: 's', html: 'h' });"],
+        ['backend/src/index.ts', 'await ctx.pt?.notify?.email(input);'],
+        ['backend/src/index.ts', 'await ctx.pt.notify\n    .email(input);'],
+        ['backend/src/jobs/ping.ts', 'const { notify } = ctx.pt;\nawait notify.email(input);'],
+        ['backend/src/jobs/ping.ts', 'const { email: sendMail } = ctx.pt.notify;\nawait sendMail(input);']
+    ]) {
+        const out = checkNotifyEmailUnavailable(jobsProject({ 'backend/src/index.ts': '', [file]: src }));
+        assert.equal(out.length, 1, src);
+        assert.equal(out[0].level, 'warn', src);
+        assert.match(out[0].msg, /邮件推送暂未开放，正式运行会返回 NOTIFY_UNAVAILABLE；请改用 notify\.send/, src);
+        assert.ok(out[0].msg.includes(file) || out[0].msg.includes(file.replace(/\//g, '\\')), src);
+        assert.match(out[0].why, /本地桩仍会收下邮件/, src);
+    }
+});
+
+test('notify.email 只出现在注释 / 字符串 / 测试文件 / .d.ts 里 → 不报；notify.send 与 ctx.auth.email 不报', () => {
+    const root = jobsProject({
+        'backend/src/index.ts': "// 以前是 ctx.pt.notify.email(x)\nconst s = 'notify.email()';\n/* notify.email */\n" +
+            'await ctx.pt.notify.send(m);\nconst { email } = ctx.auth;\nconst who = ctx.auth.email;',
+        'backend/src/index.test.ts': 'await ctx.pt.notify.email(input);',
+        'backend/src/types.d.ts': 'declare const x: { notify: { email(): void } }; type T = typeof x.notify.email;'
+    });
+    assert.deepEqual(checkNotifyEmailUnavailable(root), []);
 });
 
 const J = RULES.jobs;
