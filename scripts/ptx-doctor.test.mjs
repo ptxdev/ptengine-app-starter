@@ -450,6 +450,18 @@ test('notify.email 只出现在注释 / 字符串 / 测试文件 / .d.ts 里 →
     assert.deepEqual(checkNotifyEmailUnavailable(root), []);
 });
 
+test('notify.email 误报反例：不写分号的 { email } = user 后接 notify.send / { email } = await notify(x) / 业务对象 prefs.notify.email → 不报', () => {
+    for (const src of [
+        'const { email } = user\nawait ctx.pt.notify.send(m)',
+        'const { email } = await notify(x);',
+        'const to = prefs.notify.email;\nif (prefs?.notify?.email) send(to);',
+        'const { email } = prefs.notify;',
+        'const { notify } = settings;\nconst on = notify.email;'
+    ]) {
+        assert.deepEqual(checkNotifyEmailUnavailable(jobsProject({ 'backend/src/index.ts': src })), [], src);
+    }
+});
+
 const J = RULES.jobs;
 test('checkSubscriptionItems：没有 backend.jobs → 不产出；字段齐全 → 一条 ok', () => {
     assert.deepEqual(checkSubscriptionItems({ backend: {} }), []);

@@ -725,13 +725,25 @@ export function checkRemovedNotifyApis(root) {
 }
 
 /**
- * `notify.email` 的调用（含可选链；解构出的 `notify` 同样命中），以及从 `….notify` 解构出 `email`。
- * 不识别计算属性与别名（同 NOTIFY_USE_RES 的口径）。
+ * `notify.email` 的识别（收紧口径，宁可漏报不误报——这条只是提醒）：
+ *   · 直接访问：`pt.notify.email` / `pt?.notify?.email`（前缀不限：`ctx.pt`、`c.pt`、解构出的 `pt`；成员链可换行）；
+ *   · 从 `….pt.notify` 解构出 `email`：`{ email } = ctx.pt.notify`（右侧必须以 `pt.notify` 结尾、不跨行）；
+ *   · 同一文件里先从 `….pt` 解构出 `notify`（`{ notify } = ctx.pt` / `{ pt: { notify } } = …`），再 `notify.email` / `notify?.email`。
+ * 不识别：计算属性、别名（`const p = ctx.pt; p.notify.email`）。业务对象 `prefs.notify.email`、`{ email } = user`、
+ * `{ email } = await notify(x)` 都不算。
  */
-const NOTIFY_EMAIL_USE_RES = [
-    /\bnotify\s*\??\.\s*email\b/,
-    /\{[^{}]*\bemail\b[^{}]*\}\s*=\s*[\w$.?\s]*\bnotify\b/
+const NOTIFY_EMAIL_DIRECT_RE = /\bpt\s*\??\.\s*notify\s*\??\.\s*email\b/;
+const NOTIFY_EMAIL_DESTRUCTURE_RE = /\{[^{}]*\bemail\b[^{}]*\}[ \t]*=[ \t]*(?:[\w$]+[ \t]*\??\.[ \t]*)*pt[ \t]*\??\.[ \t]*notify\b(?![ \t]*(?:\??\.|[(\[])|[\w$])/;
+const NOTIFY_FROM_PT_RES = [
+    /\{[^{}]*\bnotify\b[^{}]*\}[ \t]*=[ \t]*(?:[\w$]+[ \t]*\??\.[ \t]*)*pt\b(?![ \t]*(?:\??\.|[(\[])|[\w$])/,
+    /\bpt[ \t]*:[ \t]*\{[^{}]*\bnotify\b/
 ];
+const BARE_NOTIFY_EMAIL_RE = /(?<![\w$.?])notify\s*\??\.\s*email\b/;
+
+function usesNotifyEmail(text) {
+    if (NOTIFY_EMAIL_DIRECT_RE.test(text) || NOTIFY_EMAIL_DESTRUCTURE_RE.test(text)) return true;
+    return NOTIFY_FROM_PT_RES.some(re => re.test(text)) && BARE_NOTIFY_EMAIL_RE.test(text);
+}
 
 /**
  * 邮件推送暂未开放（平台 NOTIFY_ENABLED=false）：`ctx.pt.notify.email` 线上一律 503 `NOTIFY_UNAVAILABLE`，
@@ -739,7 +751,7 @@ const NOTIFY_EMAIL_USE_RES = [
  * 注释、字符串、测试文件、`.d.ts` 里出现的不算。
  */
 export function checkNotifyEmailUnavailable(root) {
-    const hits = backendCodeFiles(root).filter(s => NOTIFY_EMAIL_USE_RES.some(re => re.test(s.text))).map(s => s.rel);
+    const hits = backendCodeFiles(root).filter(s => usesNotifyEmail(s.text)).map(s => s.rel);
     if (hits.length === 0) return [];
     return [{
         level: 'warn',
