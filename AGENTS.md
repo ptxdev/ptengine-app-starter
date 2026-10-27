@@ -332,8 +332,8 @@ Worker 自己不能起定时（见[硬边界 3](#3-后端没有的能力写了�
 之后在抽屉里看 / 改 / 删自己的订阅。**应用不用写订阅界面，也不碰渠道。**
 
 > ⚠️ `ctx.auth.trigger / jobId / runId / preview`、`ctx.requireTrigger()`、`ctx.pt.jobs.*` 与 `ctx.pt.notify.send` 需要
-> **升级到含通知投递目标的 `@ptengine/app-backend` 版本**后才生效；manifest 的 `backend.jobs`（含下面的订阅项字段）与 `jobs:run`
-> 同样需要含它们的 `@ptengine/app-sdk`：旧版 SDK 只影响编辑器里的 manifest schema 提示与 TS 类型（新字段会被标红 / 类型里没有），
+> **`@ptengine/app-backend` ≥ 0.9.0**（预发期为 npm `next` 上的 `0.9.0-rc.1`）才生效；manifest 的 `backend.jobs`（含下面的订阅项字段）与 `jobs:run`
+> 同样需要 **`@ptengine/app-sdk` ≥ 2.10.0**（预发期 `2.10.0-rc.1`）：旧版 SDK 只影响编辑器里的 manifest schema 提示与 TS 类型（新字段会被标红 / 类型里没有），
 > 上传由平台按 contract 校验，不受影响。旧版 app-backend 的类型里没有这些字段（tsc 报错），运行时也拿不到。
 
 1. **`manifest.json`**：`scopes` 加 `"jobs:run"`（要发通知再加 `"notify:send"`）；`backend.jobs` 每个**订阅项**一项。
@@ -548,7 +548,7 @@ Chatwork API 令牌 + 房间 / 通用 Webhook）；使用者在订阅抽屉里�
   - `no_targets`：**没有投递目标，没发送，也不是错误**。`noTargetsReason` = `JOB_TARGETS_EMPTY`（任务没配渠道：运行照常成功，
     运行记录标「未配置投递目标」）、`APP_DEFAULT_EMPTY`（用户请求里、已声明即时发送但即时通知渠道为空：在界面上提示「请管理员在应用的『即时通知』里配置渠道」）
     或 `APP_INSTANT_NOT_DECLARED`（用户请求里、manifest 当前版本没声明 `backend.notify.instant: true`：补声明并重新发布，不是使用者能修的）。
-  - 全部目标都失败不是结果，而是 502 `NOTIFY_CHANNEL_SEND_FAILED`（见下）。
+  - 全部目标都失败不是结果，而是 5xx `NOTIFY_CHANNEL_SEND_FAILED`（按错误码判断：平台回 502，经 ptengine-x 到应用是 500）（见下）。
 - **纯文本进、各家格式出**：平台按每个目标的类型转成 Slack Block Kit / Teams Adaptive Card / Chatwork `[info]` / Webhook JSON，并转义 `<!channel>`、`[toall]`、markdown 链接之类；每条带页脚 `Ptengine · <应用名>`。
 - `link.label` 1–50 字；`link.path` 去掉开头一个 `#/` 或 `/` 后 ≤ 512 字符、只能是 URL 路径字符（不含 `#` 与空白），平台把它拼在「打开本应用」的地址后面，应用从 `PtApp.context.initialPath` 读到它。
   **不支持绝对 URL**，以下都会被拒 400 `NOTIFY_CHANNEL_MESSAGE_INVALID`：带 scheme（以字母开头、由字母 / 数字 / `+` `.` `-` 组成并紧跟冒号的前缀，如 `https:`、`javascript:`，所以 `reports:42` 也算）；
@@ -559,7 +559,7 @@ Chatwork API 令牌 + 房间 / 通用 Webhook）；使用者在订阅抽屉里�
   **工作区每 UTC 分钟 ≤ 30 条**实际投递，按目标数整次扣（429 `NOTIFY_CHANNEL_RATE_LIMITED`，整次拒绝、**不会自动重试**）；预览与无目标不计分钟窗，用户请求里的调用只计分钟窗。
 - `e.detail.retryAfterSec`：**有值时**给 —— 非网关闸的 429 或 503 带了 `retry-after` 响应头时才有，正整数秒，**只**取自这个头。只是提示，不会据它自动重试。
 - 并发：与 `notify.email` **共用**「每应用 2 个在途」那道闸（邮件与渠道合计）；网关闸的 429 由 app-backend 有界重试。按顺序 `await`，不要 `Promise.all`。
-- **不自动重试、没有死信**（每次调用对每个目标至多投递一次）：502 `NOTIFY_CHANNEL_SEND_FAILED` = **所有**目标都没收下，按目标顺序的投递错误码在
+- **不自动重试、没有死信**（每次调用对每个目标至多投递一次）：5xx `NOTIFY_CHANNEL_SEND_FAILED` = **所有**目标都没收下，按目标顺序的投递错误码在
   `e.detail.deliveryErrors`，去重后写进 message（「渠道投递全部失败：<码>」）：`CHANNEL_HTTP_<状态码>`、`CHANNEL_TIMEOUT`、`CHANNEL_NETWORK`、`CHANNEL_DNS_FAILED`、
   `CHANNEL_ADDRESS_BLOCKED`、`CHANNEL_REDIRECT_BLOCKED`、`CHANNEL_KEY_UNAVAILABLE`（某个目标的凭据解不开）。**所有**目标凭据都解不开或发送前时间预算已用完时是 503 `NOTIFY_UNAVAILABLE`。
   **`CHANNEL_TIMEOUT` / 504 可能已送达** —— 自己重试就要接受重复。

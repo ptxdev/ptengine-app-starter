@@ -203,7 +203,7 @@ Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc`
   - `message.imageUrl`：本地只收 `ctx.pt.render.chart()` 本地桩返回的 `http://localhost:8788/__ptx/media/…`（或路径形状同平台 media 地址的 https）；外链图片线上同样会被拒。
   - `message.link.path`：只接受应用内路径 —— 不能带 scheme（以字母开头、由字母 / 数字 / `+` `.` `-` 组成并紧跟冒号的前缀，如 `https:`、`javascript:`，所以 `reports:42` 也算），
     不能以 `//` 开头、去掉一个前导 `#/` / `/` 后也不能再以 `/` 开头，`?` 之前不能有 `.` / `..` 路径段（含 `%2e` 编码）。线上同口径拒。
-- **线上 `notify.send` 502 `NOTIFY_CHANNEL_SEND_FAILED`**：这次的**所有**目标都没收下，`e.detail.deliveryErrors` 按目标顺序给出投递错误码（含 `CHANNEL_KEY_UNAVAILABLE`：该目标凭据解不开）；部分成功不会报错（`status: 'partial'`）。
+- **线上 `notify.send` 5xx `NOTIFY_CHANNEL_SEND_FAILED`（按错误码判断：平台回 502，经 ptengine-x 到应用是 500）**：这次的**所有**目标都没收下，`e.detail.deliveryErrors` 按目标顺序给出投递错误码（含 `CHANNEL_KEY_UNAVAILABLE`：该目标凭据解不开）；部分成功不会报错（`status: 'partial'`）。
 - **报「notifySend 段缺 …（规则快照过旧）」**：使用者升级 starter；维护者跑 `npm run sync-rules`。
 - **订阅中心里看不到我的任务类型**：manifest 里该类型写了 `"subscribable": false`；或当前版本没有 `jobs:run`；或应用是从商店安装的（商店应用没有订阅中心）。
   **草稿应用**的订阅项照常列出，只是工具栏「订阅」按钮置灰、不能订阅 —— 发布后即可用。
