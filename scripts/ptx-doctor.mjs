@@ -979,8 +979,8 @@ export function checkVars(root, manifest) {
  *   2. node_modules 里实际安装的版本 ≥ floor 且 ≥ 区间下界（lock 落后 / 没跑 npm install）。
  */
 export const PACKAGE_FLOORS = {
-    '@ptengine/app-sdk': { min: '2.8.0', why: '新增 asset:read scope 与 PtApp.asset.list/sharedWithMe/get（2.7 以下的 manifest schema 不认 asset:read，声明了会 SCOPE_UNKNOWN）；2.7 起 ai:invoke scope（2.6 以下的 manifest schema 不认它，声明了会 SCOPE_UNKNOWN）；2.6 起 asset:write；2.5 起 openapi:read；2.4 起 context.user' },
-    '@ptengine/app-backend': { min: '0.8.0', why: 'ctx.pt.asset.list/sharedWithMe/get（读 Drive 资产）；0.7 起 ctx.pt.ai.chat/stream（调大模型）；0.6 起 ctx.pt.asset.* 与 PtAssetDoc；0.5 起 ctx.pt.openApiUrl；0.4 起 ctx.auth.email / name' }
+    '@ptengine/app-sdk': { min: '2.10.0-rc.1', why: '2.10 起 jobs:run / notify:send scope、manifest backend.jobs 订阅项字段与 backend.notify、PtApp.subscriptions.open（2.9 以下的 manifest schema 不认这两个 scope，声明了会 SCOPE_UNKNOWN）；2.8 起 asset:read scope 与 PtApp.asset.list/sharedWithMe/get（2.7 以下的 manifest schema 不认 asset:read，声明了会 SCOPE_UNKNOWN）；2.7 起 ai:invoke scope（2.6 以下的 manifest schema 不认它，声明了会 SCOPE_UNKNOWN）；2.6 起 asset:write；2.5 起 openapi:read；2.4 起 context.user' },
+    '@ptengine/app-backend': { min: '0.9.0-rc.1', why: '0.9 起 ctx.pt.jobs.* / ctx.pt.notify.send / ctx.requireTrigger / ctx.auth.trigger（定时任务与推送）；0.8 起 ctx.pt.asset.list/sharedWithMe/get（读 Drive 资产）；0.7 起 ctx.pt.ai.chat/stream（调大模型）；0.6 起 ctx.pt.asset.* 与 PtAssetDoc；0.5 起 ctx.pt.openApiUrl；0.4 起 ctx.auth.email / name' }
 };
 
 function parseVersion(v) {

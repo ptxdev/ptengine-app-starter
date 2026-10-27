@@ -10,6 +10,7 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/app-backend` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|---|
+| v3.8.0-rc.1（预发，tag `next-3.8.0-rc.1`）| `^2.10.0-rc.1` | `^0.9.0-rc.1` | `^0.5.0` | **2**（轻应用 1）| 定时任务与推送（`jobs:run` / `notify:send`、`backend.jobs`、`ctx.pt.jobs.*` / `ctx.pt.notify.send`、`PtApp.subscriptions.open`）。**预发**：依赖钉 npm `next` 上的 rc，只供 dev / staging 平台（App Builder 的 dev / staging 沙箱镜像）使用；tag 刻意不叫 `v3.*`，skill 取最新 `v3.*` 时不会选中。prod 上线时转正为 v3.8.0 |
 | v3.7.1 | `^2.8.0` | `^0.8.0` | `^0.5.0` | **2**（轻应用 1）| 本地 dev token 的 `scopes` 改为照抄 `manifest.json`（以前写死四项，声明了 `asset:read` / `asset:write` / `ai:invoke` 的应用本地 403）；`AGENTS.md` 与后端模板头注释的能力清单对齐到 app-sdk 2.8 / app-backend 0.8 的实际导出。依赖区间不变 |
 | v3.7.0 | `^2.8.0` | `^0.8.0` | `^0.5.0` | **2**（轻应用 1）| 新增 `asset:read` scope：以**当前使用者**身份读 Ptengine Drive 资产树（文件夹 / 落地页 / 页面组 / 图片 / 组件 / 字体 / Studio 知识资产 / 快捷方式），可见范围等于他在产品里能看到的。前端 `PtApp.asset.list / sharedWithMe / get`（`@ptengine/app-sdk` 2.8），后端 `ctx.pt.asset.list / sharedWithMe / get`（`@ptengine/app-backend` 0.8）。它是**读类** scope：本工作区自建应用自动视为已授权，外部 / 商店应用需管理员同意。字段与错误码见包内 `asset-read.llms.txt`。**`0.x` 的 caret 不跨 minor，旧项目要手改区间再 `npm install`** |
 | v3.6.1 | `^2.7.0` | `^0.7.0` | `^0.5.0` | **2**（轻应用 1）| 修正 `ai:invoke` 的可用模型清单：v3.6.0 带的 28 项里**只有 4 项真能调通**，其余是地域封锁 / 前缀写错 / 版本号写法不存在。依赖区间不变 |
@@ -31,10 +32,12 @@
 | v1.0.1 | `^0.3.0` | — | — | 1 | 支持在平台内加载本地 dev server 联调 |
 | v1.0.0 | `^0.2.0` | — | — | 1 | 首个版本 |
 
-## Unreleased
+## [3.8.0-rc.1] - 2026-10-27
 
-> **待办（发版时）**：依赖区间升到含 `notify:send` / 订阅项字段 / `PtApp.subscriptions.open` 的 app-sdk 与含 `ctx.pt.notify`（含 `notify.send`）/ `ctx.pt.render` /
-> 预览日志的 app-backend，`PACKAGE_FLOORS` 同步，版本号确定，兼容矩阵补一行。在那之前本段能力在现有依赖区间上类型里没有、运行时拿不到。
+> **预发 rc**：tag `next-3.8.0-rc.1`（不是 `v3.*`，外部 skill 不会拉到），依赖 `@ptengine/app-sdk ^2.10.0-rc.1` / `@ptengine/app-backend ^0.9.0-rc.1`
+> （npm dist-tag `next`），`PACKAGE_FLOORS` 同步。只给 dev / staging 平台用；prod 上线时转正为 v3.8.0（区间改回 `^2.10.0` / `^0.9.0`、打 `v3.8.0`）。
+
+> 依赖区间与 `PACKAGE_FLOORS` 已升到 app-sdk 2.10.0-rc.1 / app-backend 0.9.0-rc.1，兼容矩阵已补行（转正时改为正式版）。
 >
 > **发版前置（平台侧 chore，未完成不得发本版 starter）**——只看「npm 包已发」不够，下面两件没做时，照 `AGENTS.md` 写出的应用线上会被拒或崩：
 > 1. **ptengine-x backend 已把 `@ptengine/app-sdk` 升到含 `notify:send` 的版本并部署**：上传包由
@@ -170,7 +173,7 @@
 
 ## [3.6.0] - 2026-10-09
 
-> **待办（发版时）**：依赖区间升到含 `backend.jobs` / `jobs:run` / `ctx.pt.jobs` 的 app-sdk / app-backend 版本，
+> **（已在 3.8.0-rc.1 落实）** 待办（发版时）：依赖区间升到含 `backend.jobs` / `jobs:run` / `ctx.pt.jobs` 的 app-sdk / app-backend 版本，
 > doctor 版本下限（`PACKAGE_FLOORS`）同步，starter 版本号确定，兼容矩阵补一行、README 里 clone 的 tag 同步。
 > 在那之前，本段的定时任务能力在 `@ptengine/app-backend` ^0.6 / `@ptengine/app-sdk` ^2.6 上**类型里没有、运行时拿不到**。
 

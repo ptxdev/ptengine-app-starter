@@ -147,23 +147,28 @@ function floorFixture(deps) {
 }
 const byLevel = rs => rs.map(r => r.level).join(',');
 
+// 版本号一律从 PACKAGE_FLOORS 取：floor 每次抬升都不用改这几条（rc 形态的 floor 也照样成立：doctor 只比 x.y.z）。
+const SDK_MIN = PACKAGE_FLOORS['@ptengine/app-sdk'].min;
+const BACKEND_MIN = PACKAGE_FLOORS['@ptengine/app-backend'].min;
+const reEscape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 test('包版本 floor：区间与安装都满足 → 两条 ok', () => {
-    const root = floorFixture({ '@ptengine/app-sdk': '^2.8.0', '@ptengine/app-backend': '^0.8.0' });
-    const rs = checkPackageFloors(root, { installedVersion: n => (n.endsWith('app-sdk') ? '2.8.0' : '0.8.1') });
+    const root = floorFixture({ '@ptengine/app-sdk': `^${SDK_MIN}`, '@ptengine/app-backend': `^${BACKEND_MIN}` });
+    const rs = checkPackageFloors(root, { installedVersion: n => (n.endsWith('app-sdk') ? SDK_MIN : BACKEND_MIN) });
     assert.equal(byLevel(rs), 'ok,ok');
 });
 
 test('包版本 floor：区间下界低于 floor → bad，并给出 npm i 修法', () => {
-    const root = floorFixture({ '@ptengine/app-sdk': '^2.2.0', '@ptengine/app-backend': '^0.8.0' });
+    const root = floorFixture({ '@ptengine/app-sdk': '^2.2.0', '@ptengine/app-backend': `^${BACKEND_MIN}` });
     const rs = checkPackageFloors(root, { installedVersion: () => '9.9.9' });
     assert.equal(rs[0].level, 'bad');
     assert.match(rs[0].msg, /\^2\.2\.0/);
-    assert.match(rs[0].why, /npm i @ptengine\/app-sdk@\^2\.8\.0/);
+    assert.match(rs[0].why, new RegExp(reEscape(`npm i @ptengine/app-sdk@^${SDK_MIN}`)));
     assert.equal(rs[1].level, 'ok');
 });
 
 test('包版本 floor：区间对但 node_modules 里装的是老包 → bad（lock 落后）', () => {
-    const root = floorFixture({ '@ptengine/app-sdk': '^2.8.0' });
+    const root = floorFixture({ '@ptengine/app-sdk': `^${SDK_MIN}` });
     const rs = checkPackageFloors(root, { installedVersion: () => '2.2.1' });
     assert.equal(rs.length, 1);
     assert.equal(rs[0].level, 'bad');
@@ -171,7 +176,7 @@ test('包版本 floor：区间对但 node_modules 里装的是老包 → bad（l
 });
 
 test('包版本 floor：没装 → warn；没声明的包跳过（轻应用可以没有 app-backend）', () => {
-    const root = floorFixture({ '@ptengine/app-sdk': '^2.8.0' });
+    const root = floorFixture({ '@ptengine/app-sdk': `^${SDK_MIN}` });
     const rs = checkPackageFloors(root, { installedVersion: () => null });
     assert.equal(byLevel(rs), 'warn');
 });
