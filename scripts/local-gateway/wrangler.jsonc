@@ -1,0 +1,9 @@
+{
+    // ptx dev 专用的本地网关桩。只在本机 `wrangler dev` 里存在，从不部署，也不进上传包。
+    "name": "ptx-local-gateway",
+    "main": "worker.mjs",
+    "compatibility_date": "2026-09-01",
+    // /notify/email、/render/chart 转给 ptx dev 进程里的 Node 桩服务（scripts/local-stub/server.mjs 的 LOCAL_STUB_ORIGIN，
+    // 测试比对两处一致）。workerd 里写不了文件、跑不了 resvg，所以真正干活的是那边。
+    "vars": { "PTX_STUB_ORIGIN": "http://127.0.0.1:8788" }
+}

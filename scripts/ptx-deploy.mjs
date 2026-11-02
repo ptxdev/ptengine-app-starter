@@ -185,7 +185,7 @@ export async function run(args, root) {
     if (missing.length) {
         throw new Error(
             `缺少环境变量：${missing.join(', ')}。\n` +
-            `      本地可以先用 \`npx ptx deploy --dry-run\` 看看会做什么；\n` +
+            `      本地可以先用 \`npm run ptx -- deploy --dry-run\` 看看会做什么；\n` +
             `      CI 里把 PTENGINE_TOKEN 放进 secrets、PTENGINE_APP_ID 放进 vars。`
         );
     }
@@ -227,7 +227,7 @@ export async function run(args, root) {
 
     console.log(`
 [ok] 已发布。前端与后端是同一个版本（${manifest.version} / ${versionId}）。
-     出问题可回滚：npx ptx deploy 之后在管理页选上一个版本，
+     出问题可回滚：npm run ptx -- deploy 之后在管理页选上一个版本，
      或调 POST /api/custom-app/apps/${appId}/rollback。
 `);
 }

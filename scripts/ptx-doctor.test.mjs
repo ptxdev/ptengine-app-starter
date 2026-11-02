@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkMigrationsAdditive, checkTailwindContent, checkPackageFloors, PACKAGE_FLOORS } from './ptx-doctor.mjs';
+import { checkMigrationsAdditive, checkTailwindContent, checkPackageFloors, PACKAGE_FLOORS, checkJobs, findRouteHandler, checkNotifyScope, checkRemovedNotifyApis, checkSubscriptionItems, checkInstantNotify, checkNotifyEmailUnavailable } from './ptx-doctor.mjs';
+import { RULES } from './manifest.mjs';
 
 function fixture(files) {
     const root = mkdtempSync(join(tmpdir(), 'ptx-doctor-'));
@@ -146,23 +147,28 @@ function floorFixture(deps) {
 }
 const byLevel = rs => rs.map(r => r.level).join(',');
 
+// 版本号一律从 PACKAGE_FLOORS 取：floor 每次抬升都不用改这几条（rc 形态的 floor 也照样成立：doctor 只比 x.y.z）。
+const SDK_MIN = PACKAGE_FLOORS['@ptengine/app-sdk'].min;
+const BACKEND_MIN = PACKAGE_FLOORS['@ptengine/app-backend'].min;
+const reEscape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 test('包版本 floor：区间与安装都满足 → 两条 ok', () => {
-    const root = floorFixture({ '@ptengine/app-sdk': '^2.8.0', '@ptengine/app-backend': '^0.8.0' });
-    const rs = checkPackageFloors(root, { installedVersion: n => (n.endsWith('app-sdk') ? '2.8.0' : '0.8.1') });
+    const root = floorFixture({ '@ptengine/app-sdk': `^${SDK_MIN}`, '@ptengine/app-backend': `^${BACKEND_MIN}` });
+    const rs = checkPackageFloors(root, { installedVersion: n => (n.endsWith('app-sdk') ? SDK_MIN : BACKEND_MIN) });
     assert.equal(byLevel(rs), 'ok,ok');
 });
 
 test('包版本 floor：区间下界低于 floor → bad，并给出 npm i 修法', () => {
-    const root = floorFixture({ '@ptengine/app-sdk': '^2.2.0', '@ptengine/app-backend': '^0.8.0' });
+    const root = floorFixture({ '@ptengine/app-sdk': '^2.2.0', '@ptengine/app-backend': `^${BACKEND_MIN}` });
     const rs = checkPackageFloors(root, { installedVersion: () => '9.9.9' });
     assert.equal(rs[0].level, 'bad');
     assert.match(rs[0].msg, /\^2\.2\.0/);
-    assert.match(rs[0].why, /npm i @ptengine\/app-sdk@\^2\.8\.0/);
+    assert.match(rs[0].why, new RegExp(reEscape(`npm i @ptengine/app-sdk@^${SDK_MIN}`)));
     assert.equal(rs[1].level, 'ok');
 });
 
 test('包版本 floor：区间对但 node_modules 里装的是老包 → bad（lock 落后）', () => {
-    const root = floorFixture({ '@ptengine/app-sdk': '^2.8.0' });
+    const root = floorFixture({ '@ptengine/app-sdk': `^${SDK_MIN}` });
     const rs = checkPackageFloors(root, { installedVersion: () => '2.2.1' });
     assert.equal(rs.length, 1);
     assert.equal(rs[0].level, 'bad');
@@ -170,7 +176,7 @@ test('包版本 floor：区间对但 node_modules 里装的是老包 → bad（l
 });
 
 test('包版本 floor：没装 → warn；没声明的包跳过（轻应用可以没有 app-backend）', () => {
-    const root = floorFixture({ '@ptengine/app-sdk': '^2.8.0' });
+    const root = floorFixture({ '@ptengine/app-sdk': `^${SDK_MIN}` });
     const rs = checkPackageFloors(root, { installedVersion: () => null });
     assert.equal(byLevel(rs), 'warn');
 });
@@ -180,4 +186,366 @@ test('包版本 floor：floor 表与 package.json 模板的区间一致（改一
     for (const [name, floor] of Object.entries(PACKAGE_FLOORS)) {
         assert.equal(pkg.dependencies[name], `^${floor.min}`, `${name} 的模板区间应为 ^${floor.min}`);
     }
+});
+
+// ─── 定时任务（backend.jobs）────────────────────────────────────────────
+
+function jobsProject(files) {
+    const root = mkdtempSync(join(tmpdir(), 'ptx-jobs-'));
+    for (const [rel, text] of Object.entries(files)) {
+        mkdirSync(join(root, rel, '..'), { recursive: true });
+        writeFileSync(join(root, rel), text);
+    }
+    return root;
+}
+const JOB = { type: 'weekly-report', route: 'POST /jobs/weekly-report', title: '周报' };
+const mf = (jobs, scopes = ['jobs:run']) => ({ schemaVersion: 2, scopes, backend: { entry: '_backend/worker.js', routes: ['/api/*'], jobs } });
+const INDEX_OK = `export default createApp({ routes: {
+    'GET /orders': async ctx => [],
+    'POST /jobs/weekly-report': async ctx => {
+        ctx.requireTrigger('job');
+        return {};
+    },
+    'POST /settings': async ctx => ({})
+} });`;
+
+test('没有 backend.jobs：不产出任何结果', () => {
+    assert.deepEqual(checkJobs(jobsProject({ 'backend/src/index.ts': INDEX_OK }), { backend: {} }), []);
+});
+
+test('全部合规 → 一条 ok', () => {
+    const out = checkJobs(jobsProject({ 'backend/src/index.ts': INDEX_OK }), mf([JOB]));
+    assert.deepEqual(out.map(r => r.level), ['ok']);
+});
+
+test('声明了 jobs 却没有 jobs:run → bad', () => {
+    const out = checkJobs(jobsProject({ 'backend/src/index.ts': INDEX_OK }), mf([JOB], ['analytics:read']));
+    assert.ok(out.some(r => r.level === 'bad' && /jobs:run/.test(r.msg)));
+});
+
+test('任务路由不在 routes 里 → bad，并点名任务类型', () => {
+    const out = checkJobs(jobsProject({ 'backend/src/index.ts': INDEX_OK }), mf([{ ...JOB, type: 'gone', route: 'POST /jobs/gone' }]));
+    assert.ok(out.some(r => r.level === 'bad' && r.msg.includes('gone') && r.msg.includes('POST /jobs/gone')));
+});
+
+test('路由只出现在注释或普通字符串里不算（必须是对象键）', () => {
+    const src = `// 'POST /jobs/weekly-report': 以后再写\nconst s = 'POST /jobs/weekly-report';\nexport default createApp({ routes: {} });`;
+    const out = checkJobs(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]));
+    assert.ok(out.some(r => r.level === 'bad'));
+});
+
+test('路由只出现在块注释里也不算', () => {
+    const src = `/*\n  'POST /jobs/weekly-report': async ctx => { ctx.requireTrigger('job'); }\n*/\nexport default createApp({ routes: {} });`;
+    const out = checkJobs(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]));
+    assert.ok(out.some(r => r.level === 'bad' && r.msg.includes('POST /jobs/weekly-report')));
+});
+
+test('字符串里含 // 的 URL 不影响路由识别（剥注释不误伤字符串）', () => {
+    const src = `const API = 'https://api.example.com/v1'; const B = "http://x.test//y"; export default createApp({ routes: { 'POST /jobs/weekly-report': async ctx => { ctx.requireTrigger('job'); await fetch(\`https://hook.test/\${API}\`); } } });`;
+    const out = checkJobs(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]));
+    assert.deepEqual(out.map(r => r.level), ['ok']);
+});
+
+test('requireTrigger / ctx.auth.preview 只写在注释里不算数', () => {
+    const src = `export default createApp({ routes: {
+    'POST /jobs/weekly-report': async ctx => {
+        // TODO ctx.requireTrigger('job'); 以后读 ctx.auth.preview
+        return {};
+    }
+} });`;
+    const out = checkJobs(jobsProject({ 'backend/src/index.ts': src }), mf([{ ...JOB, preview: true }]));
+    assert.deepEqual(out.map(r => r.level), ['warn', 'warn']);
+});
+
+test('路由写在 backend/src 的子文件里（双引号 / 反引号键）也能找到', () => {
+    const sub = 'export const jobRoutes = {\n  "POST /jobs/weekly-report": async (ctx) => { ctx.requireTrigger("job"); }\n};';
+    const out = checkJobs(jobsProject({ 'backend/src/index.ts': 'export default createApp({ routes: { ...jobRoutes } });', 'backend/src/jobs/routes.ts': sub }), mf([JOB]));
+    assert.deepEqual(out.map(r => r.level), ['ok']);
+    const tick = 'export const r = {\n  `POST /jobs/weekly-report`: async ctx => { ctx.requireTrigger("job"); }\n};';
+    assert.deepEqual(checkJobs(jobsProject({ 'backend/src/index.ts': tick }), mf([JOB])).map(r => r.level), ['ok']);
+});
+
+test('任务路由片段里没有 requireTrigger( → warn；下一条路由里的 requireTrigger 不算数', () => {
+    const src = `export default createApp({ routes: {
+    'POST /jobs/weekly-report': async ctx => ({}),
+    'POST /other': async ctx => { ctx.requireTrigger('user'); }
+} });`;
+    const out = checkJobs(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]));
+    assert.ok(out.some(r => r.level === 'warn' && /requireTrigger/.test(r.msg)));
+});
+
+test('preview: true 但路由所在文件没读 ctx.auth.preview → warn；读了就不报', () => {
+    const noPreview = checkJobs(jobsProject({ 'backend/src/index.ts': INDEX_OK }), mf([{ ...JOB, preview: true }]));
+    assert.ok(noPreview.some(r => r.level === 'warn' && /ctx\.auth\.preview/.test(r.msg)));
+    const withPreview = INDEX_OK.replace("ctx.requireTrigger('job');", "ctx.requireTrigger('job'); if (ctx.auth.preview) return {};");
+    assert.deepEqual(checkJobs(jobsProject({ 'backend/src/index.ts': withPreview }), mf([{ ...JOB, preview: true }])).map(r => r.level), ['ok']);
+});
+
+test('findRouteHandler：路由里的正则元字符被转义（. 不当通配）', () => {
+    const sources = [{ rel: 'a.ts', text: "{ 'POST /jobsXweekly': 1 }" }];
+    assert.equal(findRouteHandler(sources, 'POST /jobs.weekly'), null);
+});
+
+// ─── 推送 / 图表（notify:send）──────────────────────────────────────────
+
+test('后端没用 notify / render：不产出任何结果', () => {
+    assert.deepEqual(checkNotifyScope(jobsProject({ 'backend/src/index.ts': INDEX_OK }), mf([JOB])), []);
+});
+
+test('用了 ctx.pt.notify.email 却没声明 notify:send → bad，并点名文件', () => {
+    const src = "export default createApp({ routes: { 'POST /x': async ctx => ctx.pt.notify.email({ to: ['role:admin'], subject: 's', html: 'h' }) } });";
+    const out = checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]));
+    assert.equal(out.length, 1);
+    assert.equal(out[0].level, 'bad');
+    assert.match(out[0].msg, /notify:send/);
+    assert.match(out[0].msg, /backend\/src\/index\.ts/);
+});
+
+test('只用 ctx.pt.render.chart 也要 notify:send；子文件里用到同样能找到', () => {
+    const out = checkNotifyScope(jobsProject({
+        'backend/src/index.ts': 'export default createApp({ routes: {} });',
+        'backend/src/charts.ts': 'export const c = ctx => ctx.pt.render.chart({ series: [] });'
+    }), mf([JOB]));
+    assert.equal(out[0].level, 'bad');
+    assert.match(out[0].msg, /charts\.ts/);
+});
+
+test('声明了 notify:send → ok', () => {
+    const src = 'const r = ctx => ctx.pt.notify.email(x);';
+    assert.deepEqual(checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB], ['jobs:run', 'notify:send'])).map(r => r.level), ['ok']);
+});
+
+test('只出现在注释或字符串里不算', () => {
+    const src = "// TODO ctx.pt.notify.email(...)\nconst s = 'ctx.pt.render.chart';\n/* ctx.pt.notify.email */";
+    assert.deepEqual(checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB])), []);
+});
+
+test('模板插值里的真调用 → bad', () => {
+    const src = 'export const h = async (ctx, o) => `<img src="${(await ctx.pt.render.chart(o)).url}">`;';
+    assert.equal(checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]))[0]?.level, 'bad');
+});
+
+test('插值里嵌套对象字面量与内层模板：花括号深度正确，之后的真调用照样识别', () => {
+    const src = 'const a = `x${ f({ k: `y${1}` }) }z`;\nawait ctx.pt.notify.email(x);';
+    assert.equal(checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]))[0]?.level, 'bad');
+});
+
+test('解构写法 → bad', () => {
+    for (const src of [
+        'const { notify } = ctx.pt;\nawait notify.email(x);',
+        'const { render: r } = ctx.pt;\nawait r.chart(o);',
+        'const { pt: { notify } } = ctx;\nawait notify.email(x);',
+        "export default createApp({ routes: { 'POST /x': async ({ pt }) => pt.notify.email(x) } });"
+    ]) {
+        const out = checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]));
+        assert.equal(out[0]?.level, 'bad', src);
+    }
+});
+
+test('可选链 / 换行空白 → bad', () => {
+    for (const src of ['await ctx.pt?.notify?.email(x);', 'await ctx?.pt\n    .render\n    .chart(o);']) {
+        const out = checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]));
+        assert.equal(out[0]?.level, 'bad', src);
+    }
+});
+
+test('跨行模板正文里出现 ctx.pt.notify.email 且无真调用 → 不报', () => {
+    const src = 'const doc = `\n用法：ctx.pt.notify.email({ ... })\n`;\nconst t = `x`;';
+    assert.deepEqual(checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB])), []);
+});
+
+test('跨行模板之后的真调用不被吞（反引号不错配）', () => {
+    const src = 'const a = `\nline\n`; await ctx.pt.notify.email(x); const b = `y`;';
+    assert.equal(checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]))[0]?.level, 'bad');
+});
+
+test('测试文件里的 mock 不算', () => {
+    const root = jobsProject({
+        'backend/src/index.ts': 'export default createApp({ routes: {} });',
+        'backend/src/index.test.ts': 'const ctx = { pt: { notify: { email: vi.fn() } } }; await ctx.pt.notify.email(x);',
+        'backend/src/charts.spec.mjs': 'await ctx.pt.render.chart(o);'
+    });
+    assert.deepEqual(checkNotifyScope(root, mf([JOB])), []);
+});
+
+test('插值里先有嵌套对象字面量、同一插值内再真调用 → bad（花括号深度回归，最终评审 Minor 13）', () => {
+    const src = 'const a = `x${ f({ k: 1 }) + ctx.pt.notify.email(x) }z`;';
+    assert.equal(checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]))[0]?.level, 'bad');
+});
+
+test('*.d.ts 里的类型声明不算（最终评审 Minor 13）', () => {
+    const root = jobsProject({
+        'backend/src/index.ts': 'export default createApp({ routes: {} });',
+        'backend/src/env.d.ts': 'declare const ctx: { pt: { notify: { email(x: unknown): Promise<void> } } };\ntype X = typeof ctx.pt.notify;'
+    });
+    assert.deepEqual(checkNotifyScope(root, mf([JOB])), []);
+});
+
+test('notify.send：四种写法（ctx.pt.notify.send / 可选链 / 解构 notify / 路由形参 ({ pt })）没声明 notify:send → bad，话术点名 notify.send；声明了 → ok，话术点名文件', () => {
+    for (const src of [
+        "await ctx.pt.notify.send({ title: 't' });",
+        'const r = await ctx.pt?.notify?.send(msg);',
+        'const { notify } = ctx.pt;\nawait notify.send(msg);',
+        "export default createApp({ routes: { 'POST /notify-now': async ({ pt }) => pt.notify.send(msg) } });"
+    ]) {
+        const out = checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB]));
+        assert.equal(out.length, 1, src);
+        assert.equal(out[0].level, 'bad', src);
+        assert.match(out[0].msg, /notify\.send/, src);
+        assert.match(out[0].why, /通知/, src);
+        const ok = checkNotifyScope(jobsProject({ 'backend/src/index.ts': src }), mf([JOB], ['jobs:run', 'notify:send']));
+        assert.deepEqual(ok.map(r => r.level), ['ok'], src);
+        assert.match(ok[0].msg, /已声明 notify:send（backend[\/\\]src[\/\\]index\.ts）/, src);
+    }
+});
+
+// ─── 通知投递目标：已移除的 1c API 与订阅项字段 ───────────────────────
+
+test('代码里还在用 ctx.pt.notify.channel / notify.listChannels（含可选链、解构、子文件）→ bad，点名文件与「改用 notify.send，投递目标由使用者配置」', () => {
+    for (const [file, src] of [
+        ['backend/src/index.ts', "await ctx.pt.notify.channel('alerts', { title: 't' });"],
+        ['backend/src/index.ts', 'const list = await ctx.pt.notify.listChannels();'],
+        ['backend/src/index.ts', 'await ctx.pt?.notify?.channel(name, msg);'],
+        ['backend/src/jobs/ping.ts', 'const { notify } = ctx.pt;\nawait notify.channel(name, msg);']
+    ]) {
+        const out = checkRemovedNotifyApis(jobsProject({ 'backend/src/index.ts': '', [file]: src }));
+        assert.equal(out.length, 1, src);
+        assert.equal(out[0].level, 'bad', src);
+        assert.match(out[0].msg, /已移除/, src);
+        assert.ok(out[0].msg.includes(file.replace(/\//g, '/')) || out[0].msg.includes(file.replace(/\//g, '\\')), src);
+        assert.match(out[0].why, /notify\.send/, src);
+        assert.match(out[0].why, /投递目标由使用者配置/, src);
+    }
+});
+
+test('已移除 API 只出现在注释 / 字符串 / 测试文件里 → 不报；用 notify.send 不报', () => {
+    const root = jobsProject({
+        'backend/src/index.ts': "// 以前是 ctx.pt.notify.channel('a', m)\nconst s = 'notify.listChannels()';\nawait ctx.pt.notify.send(m);",
+        'backend/src/index.test.ts': 'await ctx.pt.notify.channel(a, m);'
+    });
+    assert.deepEqual(checkRemovedNotifyApis(root), []);
+});
+
+// ─── 邮件推送暂未开放：notify.email → warn（提醒，不算错误）───────────────
+
+test('代码里用了 ctx.pt.notify.email（含可选链、解构、子文件）→ warn，点名文件，提示 NOTIFY_UNAVAILABLE 与改用 notify.send', () => {
+    for (const [file, src] of [
+        ['backend/src/index.ts', "await ctx.pt.notify.email({ to: ['role:admin'], subject: 's', html: 'h' });"],
+        ['backend/src/index.ts', 'await ctx.pt?.notify?.email(input);'],
+        ['backend/src/index.ts', 'await ctx.pt.notify\n    .email(input);'],
+        ['backend/src/jobs/ping.ts', 'const { notify } = ctx.pt;\nawait notify.email(input);'],
+        ['backend/src/jobs/ping.ts', 'const { email: sendMail } = ctx.pt.notify;\nawait sendMail(input);']
+    ]) {
+        const out = checkNotifyEmailUnavailable(jobsProject({ 'backend/src/index.ts': '', [file]: src }));
+        assert.equal(out.length, 1, src);
+        assert.equal(out[0].level, 'warn', src);
+        assert.match(out[0].msg, /邮件推送暂未开放，正式运行会返回 NOTIFY_UNAVAILABLE；请改用 notify\.send/, src);
+        assert.ok(out[0].msg.includes(file) || out[0].msg.includes(file.replace(/\//g, '\\')), src);
+        assert.match(out[0].why, /本地桩仍会收下邮件/, src);
+    }
+});
+
+test('notify.email 只出现在注释 / 字符串 / 测试文件 / .d.ts 里 → 不报；notify.send 与 ctx.auth.email 不报', () => {
+    const root = jobsProject({
+        'backend/src/index.ts': "// 以前是 ctx.pt.notify.email(x)\nconst s = 'notify.email()';\n/* notify.email */\n" +
+            'await ctx.pt.notify.send(m);\nconst { email } = ctx.auth;\nconst who = ctx.auth.email;',
+        'backend/src/index.test.ts': 'await ctx.pt.notify.email(input);',
+        'backend/src/types.d.ts': 'declare const x: { notify: { email(): void } }; type T = typeof x.notify.email;'
+    });
+    assert.deepEqual(checkNotifyEmailUnavailable(root), []);
+});
+
+test('notify.email 误报反例：不写分号的 { email } = user 后接 notify.send / { email } = await notify(x) / 业务对象 prefs.notify.email → 不报', () => {
+    for (const src of [
+        'const { email } = user\nawait ctx.pt.notify.send(m)',
+        'const { email } = await notify(x);',
+        'const to = prefs.notify.email;\nif (prefs?.notify?.email) send(to);',
+        'const { email } = prefs.notify;',
+        'const { notify } = settings;\nconst on = notify.email;'
+    ]) {
+        assert.deepEqual(checkNotifyEmailUnavailable(jobsProject({ 'backend/src/index.ts': src })), [], src);
+    }
+});
+
+const J = RULES.jobs;
+test('checkSubscriptionItems：没有 backend.jobs → 不产出；字段齐全 → 一条 ok', () => {
+    assert.deepEqual(checkSubscriptionItems({ backend: {} }), []);
+    const full = { ...JOB, displayName: { 'zh-CN': '周报', 'en-US': 'Weekly report' }, description: { 'en-US': 'x' }, defaultCron: '0 9 * * 1', defaultParams: { a: 1 } };
+    assert.deepEqual(checkSubscriptionItems(mf([full, { type: 'sync', route: 'POST /sync', title: '同步', subscribable: false }])).map(r => r.level), ['ok']);
+});
+
+test('checkSubscriptionItems：订阅项没写 displayName → info（可选）；subscribable:false 的不提示', () => {
+    const out = checkSubscriptionItems(mf([JOB, { ...JOB, type: 'sync', route: 'POST /sync', subscribable: false }]));
+    assert.deepEqual(out.map(r => r.level), ['info']);
+    assert.match(out[0].msg, /weekly-report/);
+    assert.ok(!out[0].msg.includes('sync'));
+    assert.match(out[0].why, /title/);
+});
+
+test('checkSubscriptionItems：字段形状不合规 → bad（上传会被拒 MANIFEST_JOBS_INVALID）；上限读 rules.jobs', () => {
+    const bad = [
+        { displayName: {} }, { displayName: { fr: 'x' } }, { displayName: 'x' }, { displayName: { 'zh-CN': '  ' } },
+        { displayName: { 'zh-CN': 'a\nb' } }, { displayName: { 'zh-CN': 'x'.repeat(J.displayNameMax + 1) } },
+        { description: { 'en-US': 'x'.repeat(J.descriptionMax + 1) } }, { description: { 'en-US': 1 } },
+        { defaultCron: 9 }, { defaultCron: 'x'.repeat(J.defaultCronMax + 1) },
+        { defaultParams: [] }, { defaultParams: 'x' }, { defaultParams: null },
+        { subscribable: 'false' }
+    ];
+    for (const patch of bad) {
+        const out = checkSubscriptionItems(mf([{ ...JOB, displayName: { 'zh-CN': '周报' }, ...patch }]));
+        assert.ok(out.some(r => r.level === 'bad' && r.msg.includes('weekly-report')), JSON.stringify(patch));
+    }
+    const edge = { ...JOB, displayName: { 'ja-JP': '😀'.repeat(J.displayNameMax) }, description: { 'zh-CN': '字'.repeat(J.descriptionMax) }, defaultCron: '0 9 * * 1' };
+    assert.deepEqual(checkSubscriptionItems(mf([edge])).map(r => r.level), ['ok']);
+});
+
+test('checkSubscriptionItems：defaultCron 不是 5 段 → warn（能否解析与最小间隔由平台上传时判）', () => {
+    const out = checkSubscriptionItems(mf([{ ...JOB, displayName: { 'zh-CN': '周报' }, defaultCron: '0 9 * *' }]));
+    assert.deepEqual(out.map(r => r.level), ['warn']);
+    assert.match(out[0].msg, /defaultCron/);
+});
+
+test('checkSubscriptionItems：项缺 type 时文案用 backend.jobs[i] 定位，不出现 undefined', () => {
+    const out = checkSubscriptionItems(mf([{ route: 'POST /x', title: 'x', subscribable: 'no' }]));
+    assert.ok(out.some(r => r.level === 'bad' && r.msg.includes('backend.jobs[0]')));
+    assert.ok(out.every(r => !r.msg.includes('undefined')), JSON.stringify(out));
+});
+
+// ─── 即时通知声明（backend.notify.instant，2026-10-22 补充 R11）──────────
+const SEND_SRC = "export default createApp({ routes: { 'POST /alert': async ctx => ctx.pt.notify.send({ title: 't' }) } });";
+const withInstant = (notify, scopes = ['notify:send']) => ({ ...mf(undefined, scopes), backend: { ...mf(undefined).backend, ...(notify === undefined ? {} : { notify }) } });
+
+test('checkInstantNotify：用了 notify.send、有 notify:send、没声明 instant → info（只能在定时任务里投递），点名文件', () => {
+    const out = checkInstantNotify(jobsProject({ 'backend/src/index.ts': SEND_SRC }), withInstant(undefined));
+    assert.equal(out.length, 1);
+    assert.equal(out[0].level, 'info');
+    assert.match(out[0].msg, /backend\/src\/index\.ts/);
+    assert.match(out[0].msg + out[0].why, /定时任务/);
+    assert.match(out[0].why, /backend\.notify[\s\S]*instant/);
+    assert.match(out[0].why, /APP_INSTANT_NOT_DECLARED/);
+    // 解构 / 可选链同样识别
+    const destructured = "export default createApp({ routes: { 'POST /a': async ({ pt }) => { const { send } = pt.notify; return send({ title: 't' }); } } });";
+    assert.equal(checkInstantNotify(jobsProject({ 'backend/src/index.ts': destructured }), withInstant({ instant: false }))[0]?.level, 'info');
+    assert.equal(checkInstantNotify(jobsProject({ 'backend/src/index.ts': 'ctx.pt?.notify?.send({ title: "t" })' }), withInstant({}))[0]?.level, 'info');
+});
+
+test('checkInstantNotify：已声明 instant / 没用 notify.send / 只用 notify.email / 没有 notify:send（由 checkNotifyScope 报）/ 注释里 → 不产出', () => {
+    assert.deepEqual(checkInstantNotify(jobsProject({ 'backend/src/index.ts': SEND_SRC }), withInstant({ instant: true })), []);
+    assert.deepEqual(checkInstantNotify(jobsProject({ 'backend/src/index.ts': INDEX_OK }), withInstant(undefined)), []);
+    const email = "export default createApp({ routes: { 'POST /x': async ctx => ctx.pt.notify.email({ to: ['role:admin'], subject: 's', html: 'h' }) } });";
+    assert.deepEqual(checkInstantNotify(jobsProject({ 'backend/src/index.ts': email }), withInstant(undefined)), []);
+    assert.deepEqual(checkInstantNotify(jobsProject({ 'backend/src/index.ts': SEND_SRC }), withInstant(undefined, ['jobs:run'])), []);
+    assert.deepEqual(checkInstantNotify(jobsProject({ 'backend/src/index.ts': '// ctx.pt.notify.send({ title: "t" })\nexport default 1;' }), withInstant(undefined)), []);
+});
+
+test('checkInstantNotify：读注入的 manifestNotify；缺段 → warn（提示 sync-rules），不写字面量兜底', () => {
+    const root = jobsProject({ 'backend/src/index.ts': SEND_SRC });
+    const out = checkInstantNotify(root, withInstant(undefined), null);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].level, 'warn');
+    assert.match(out[0].msg + out[0].why, /sync-rules/);
+    // 注入规则：instantRequiresScope = jobs:run → 只看 jobs:run
+    const injected = { keys: ['instant'], instantRequiresScope: 'jobs:run' };
+    assert.deepEqual(checkInstantNotify(root, withInstant(undefined, ['notify:send']), injected), []);
+    assert.equal(checkInstantNotify(root, withInstant(undefined, ['jobs:run']), injected)[0]?.level, 'info');
 });

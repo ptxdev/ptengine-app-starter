@@ -8,6 +8,7 @@
  *   ptx build      类型检查 + 构建前端 + 打包后端（单文件 bundle）
  *   ptx package    组装可上传的 zip，并做结构自检
  *   ptx deploy     上传到平台（CI 用 PTENGINE_TOKEN）
+ *   ptx job run    以定时任务身份在本地调一次任务路由（需先 ptx dev）
  *   ptx doctor     体检：约定是否被改坏、manifest 是否自洽
  */
 import { fileURLToPath } from 'node:url';
@@ -23,6 +24,7 @@ const COMMANDS = {
     build: './ptx-build.mjs',
     package: './ptx-package.mjs',
     deploy: './ptx-deploy.mjs',
+    job: './ptx-job.mjs',
     doctor: './ptx-doctor.mjs'
 };
 
@@ -39,6 +41,9 @@ ptx <command>
                --publish  上传后立即发布
                --stream   仅与 --publish 同用，流式打印九步进度
                --dry-run  只打印将要做什么，不实际发请求
+  job run <type> [--params '<json>'] [--preview]
+             以定时任务身份调一次本地任务路由（先在另一个终端跑 npm run dev），
+             打印状态码、响应体，以及平台会把返回结果判成 stored / none / invalid / too_large
   doctor     体检（改完代码、尤其是 AI 改完之后跑一次）
 `);
 }

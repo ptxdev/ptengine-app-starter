@@ -28,6 +28,12 @@
         { "binding": "KV", "id": "local" }
     ],
 
+    // 本地的 PT_GATEWAY：指向同一个 wrangler dev 会话里的桩 worker（scripts/local-gateway/），
+    // 让 ctx.pt.jobs.* 在本地可用（内存存储）。线上的 PT_GATEWAY 由平台按 manifest.scopes 烘入，与这里无关。
+    "services": [
+        { "binding": "PT_GATEWAY", "service": "ptx-local-gateway" }
+    ],
+
     // 线上由平台以 json binding 注入；本地用 vars 模拟同样的形状。
     "vars": {
         "PT_APP": {

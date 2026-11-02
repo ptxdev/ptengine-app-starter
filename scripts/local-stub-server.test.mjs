@@ -1,0 +1,490 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { request as httpRequest } from 'node:http';
+import { createLocalStub } from './local-stub/server.mjs';
+import { maybeStartLocalStub } from './ptx-dev.mjs';
+
+const tok = claims => `Bearer h.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.s`;
+const PREVIEW = tok({ sub: 'local-user', scopes: ['notify:send'], trg: 'job', job: 'local', run: 'run-1', mode: 'preview' });
+const NO_SCOPE = tok({ sub: 'local-user', scopes: ['jobs:run'] });
+const RUN = tok({ sub: 'local-user', scopes: ['notify:send'], trg: 'job', job: 'local', run: 'run-2', mode: 'run' });
+const fakeRenderer = async () => ({
+    echarts: { init: () => ({ setOption() {}, getZr: () => ({ painter: { renderToString: () => '<svg/>' } }), dispose() {} }) },
+    Resvg: class { render() { return { asPng: () => Buffer.from([0x89, 0x50, 0x4e, 0x47]) }; } }
+});
+
+/** 本地桩按项目根的 manifest.json 判断是否声明了即时发送；默认声明（instant: true + notify:send），未声明的分支单独测。 */
+const INSTANT_MANIFEST = { schemaVersion: 2, version: '1.0.0', entry: 'index.html', scopes: ['notify:send'],
+    backend: { entry: '_backend/worker.js', routes: ['/api/*'], notify: { instant: true } } };
+async function withStub(fn, { manifest = INSTANT_MANIFEST } = {}) {
+    const root = mkdtempSync(join(tmpdir(), 'ptx-stub-'));
+    if (manifest) writeFileSync(join(root, 'manifest.json'), JSON.stringify(manifest));
+    const logs = [];
+    const server = createLocalStub({ root, appName: '我的应用', loadRenderer: fakeRenderer, log: m => logs.push(m) });
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    try { return await fn({ root, base, logs, port: server.address().port }); } finally { await new Promise(r => server.close(r)); }
+}
+const post = (base, path, auth, body) =>
+    fetch(`${base}${path}`, { method: 'POST', headers: { authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+const MAIL = { to: ['role:admin'], subject: '周报', html: '<p>本周</p><style>p{}</style>' };
+
+test('POST /notify/email：写 .ptx/outbox/<runId>/<seq>.json + .html，seq 递增；打印一行带本地预览地址与清洗提示', () => withStub(async ({ root, base, logs, port }) => {
+    const r1 = await post(base, '/notify/email', PREVIEW, MAIL);
+    assert.equal(r1.status, 200);
+    assert.equal((await r1.json()).preview, true);
+    await post(base, '/notify/email', PREVIEW, MAIL);
+    for (const f of ['1.json', '1.html', '2.json', '2.html']) assert.ok(existsSync(join(root, '.ptx', 'outbox', 'run-1', f)), f);
+    const payload = JSON.parse(readFileSync(join(root, '.ptx', 'outbox', 'run-1', '1.json'), 'utf8'));
+    assert.equal(payload.subject, '周报');
+    assert.ok(!readFileSync(join(root, '.ptx', 'outbox', 'run-1', '1.html'), 'utf8').includes('%%'));
+    assert.ok(logs.some(l => l.includes(`http://localhost:${port}/__ptx/outbox/run-1/1.html`) && l.includes('预览')));
+    assert.ok(logs.some(l => l.includes('<style>')));
+}));
+
+test('GET /__ptx/outbox/<runId> 列出这次运行的邮件；GET …/<seq>.html 返回单封', () => withStub(async ({ base }) => {
+    await post(base, '/notify/email', PREVIEW, MAIL);
+    const list = await fetch(`${base}/__ptx/outbox/run-1`);
+    assert.equal(list.status, 200);
+    assert.match(list.headers.get('content-type'), /text\/html/);
+    const html = await list.text();
+    assert.ok(html.includes('/__ptx/outbox/run-1/1.html') && html.includes('周报'));
+    const one = await fetch(`${base}/__ptx/outbox/run-1/1.html`);
+    assert.equal(one.status, 200);
+    assert.ok((await one.text()).includes('<!--pt-body-start-->'));
+    assert.equal((await fetch(`${base}/__ptx/outbox/nope`)).status, 404);
+    assert.equal((await fetch(`${base}/__ptx/outbox/..%2F..%2Fetc/1.html`)).status, 404);
+}));
+
+test('POST /render/chart：写 .ptx/media/<hex>.png，返回 http://localhost:<port>/__ptx/media/<hex>.png，GET 能取回字节', () => withStub(async ({ base, port }) => {
+    const r = await post(base, '/render/chart', PREVIEW, { option: { series: [] }, width: 300, height: 200 });
+    assert.equal(r.status, 200);
+    const out = await r.json();
+    assert.match(out.url, new RegExp(`^http://localhost:${port}/__ptx/media/[0-9a-f]{32}\\.png$`));
+    assert.deepEqual([out.width, out.height], [300, 200]);
+    const img = await fetch(out.url.replace('localhost', '127.0.0.1'));
+    assert.equal(img.status, 200);
+    assert.equal(img.headers.get('content-type'), 'image/png');
+    assert.deepEqual([...new Uint8Array(await img.arrayBuffer())], [0x89, 0x50, 0x4e, 0x47]);
+}));
+
+test('令牌没有 notify:send → 403 SCOPE_DENIED；令牌缺失 → 401；未知路径 → 404', () => withStub(async ({ base }) => {
+    const denied = await post(base, '/notify/email', NO_SCOPE, MAIL);
+    assert.equal(denied.status, 403);
+    assert.equal((await denied.json()).error.code, 'SCOPE_DENIED');
+    assert.equal((await post(base, '/render/chart', '', { option: {} })).status, 401);
+    assert.equal((await post(base, '/notify/sms', PREVIEW, {})).status, 404);
+}));
+
+test('预览页禁脚本：列表页与单封邮件都带 CSP（sandbox 只放 popups + script-src \'none\'）与 nosniff；javascript: 无引号写法也执行不了', () => withStub(async ({ base }) => {
+    await post(base, '/notify/email', PREVIEW, { ...MAIL, html: '<a href=javascript:alert(1)>x</a><img src=x onerror=alert(1)>' });
+    for (const p of ['/__ptx/outbox/run-1', '/__ptx/outbox/run-1/1.html']) {
+        const res = await fetch(`${base}${p}`);
+        assert.equal(res.status, 200, p);
+        const csp = res.headers.get('content-security-policy') ?? '';
+        assert.match(csp, /script-src 'none'/, p);
+        assert.match(csp, /(^|;\s*)sandbox allow-popups allow-popups-to-escape-sandbox(;|$)/, p);
+        assert.doesNotMatch(csp, /allow-scripts|allow-same-origin/, p);
+        assert.equal(res.headers.get('x-content-type-options'), 'nosniff', p);
+    }
+}));
+
+test('job 令牌的 run 不合法（含路径穿越）→ 打一条警告，邮件写进 .ptx/outbox/interactive/，.ptx 外不落任何文件', () => withStub(async ({ root, base, logs }) => {
+    const BAD = tok({ sub: 'local-user', scopes: ['notify:send'], trg: 'job', job: 'local', run: '../../escape', mode: 'preview' });
+    const r = await post(base, '/notify/email', BAD, MAIL);
+    assert.equal(r.status, 200);
+    assert.ok(existsSync(join(root, '.ptx', 'outbox', 'interactive', '1.json')));
+    assert.deepEqual(readdirSync(root).sort(), ['.ptx', 'manifest.json']);
+    assert.deepEqual(readdirSync(join(root, '.ptx', 'outbox')), ['interactive']);
+    assert.equal(logs.filter(l => l.includes('run') && l.includes('不合法')).length, 1);
+    // 合法 run / 非 job 令牌不报警
+    await post(base, '/notify/email', PREVIEW, MAIL);
+    await post(base, '/notify/email', tok({ sub: 'u', scopes: ['notify:send'] }), MAIL);
+    assert.equal(logs.filter(l => l.includes('不合法')).length, 1);
+}));
+
+test('请求体超过 1 MiB → 413（不断连，读完再回），.ptx 下不落文件', () => withStub(async ({ root, base }) => {
+    const big = { ...MAIL, html: 'x'.repeat(1_100_000) };
+    const r = await post(base, '/notify/email', PREVIEW, big);
+    assert.equal(r.status, 413);
+    assert.equal((await r.json()).error.code, 'GATEWAY_BAD_REQUEST');
+    assert.ok(!existsSync(join(root, '.ptx')));
+}));
+
+const rawGet = (port, path, host) => new Promise((resolve, reject) => {
+    const req = httpRequest({ host: '127.0.0.1', port, path, headers: { host } }, res => { res.resume(); res.on('end', () => resolve(res.statusCode)); });
+    req.on('error', reject);
+    req.end();
+});
+
+test('Host 只认 127.0.0.1:<port> / localhost:<port>，其余 421（防 DNS rebinding）', () => withStub(async ({ base, port }) => {
+    await post(base, '/notify/email', PREVIEW, MAIL);
+    assert.equal(await rawGet(port, '/__ptx/outbox/run-1', `127.0.0.1:${port}`), 200);
+    assert.equal(await rawGet(port, '/__ptx/outbox/run-1', `localhost:${port}`), 200);
+    for (const h of ['evil.example', `evil.example:${port}`, 'localhost', `127.0.0.1:${port + 1}`]) {
+        assert.equal(await rawGet(port, '/__ptx/outbox/run-1', h), 421, h);
+    }
+}));
+
+test('maybeStartLocalStub：没有后端不起；起不来（端口被占）只返回提示，不抛', async () => {
+    let called = 0;
+    assert.equal(await maybeStartLocalStub({}, '/tmp', { hasBackend: false }, async () => { called++; }), '');
+    assert.equal(called, 0);
+    const ok = await maybeStartLocalStub({ id: 'my-app' }, '/tmp', { hasBackend: true }, async opts => { called++; assert.equal(opts.appName, 'my-app'); });
+    assert.match(ok, /8788/);
+    const busy = await maybeStartLocalStub({}, '/tmp', { hasBackend: true }, async () => { throw Object.assign(new Error('listen EADDRINUSE'), { code: 'EADDRINUSE' }); });
+    assert.match(busy, /EADDRINUSE/);
+    assert.match(busy, /8788 被占（可能是另一个 ptx dev）：notify \/ render 可能写到别处或 503/);
+});
+
+// ── 最终评审 I1：每应用并发闸（与线上网关同口径，上限读 rules.json 的 notify / render 段 maxConcurrentPerApp） ──
+import { RULES as STUB_RULES } from './manifest.mjs';
+
+/**
+ * 数桩收到的请求：arrived(n) 在第 n 个请求进到桩里后 resolve。桩的 handler 先于这里注册，且从入口到闸占位（inflight++）
+ * 之间没有 await，所以 'request' 事件触发时这个请求已经占住了闸 —— 用它代替 setTimeout 的时序猜测（ST-04）。
+ */
+function countArrivals(server) {
+    let seen = 0;
+    const waiters = [];
+    server.on('request', () => {
+        seen++;
+        for (const w of waiters) if (seen >= w.n) w.resolve();
+    });
+    return n => (seen >= n ? Promise.resolve() : new Promise(resolve => waiters.push({ n, resolve })));
+}
+
+async function withGatedStub(rules, loadRenderer, fn) {
+    const root = mkdtempSync(join(tmpdir(), 'ptx-stub-'));
+    const logs = [];
+    const server = createLocalStub({ root, appName: 'a', loadRenderer, log: m => logs.push(m), rules });
+    const arrived = countArrivals(server);
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    try { return await fn({ base, logs, arrived }); } finally { await new Promise(r => server.close(r)); }
+}
+
+test('并发闸：render 在途数达到 rules.render.maxConcurrentPerApp → 429 TOO_MANY_CONCURRENT_QUERIES；完成后释放', async () => {
+    let release;
+    const gate = new Promise(r => { release = r; });
+    const slowRenderer = async () => { await gate; return fakeRenderer(); };
+    const rules = { ...STUB_RULES, render: { ...STUB_RULES.render, maxConcurrentPerApp: 1 } };
+    await withGatedStub(rules, slowRenderer, async ({ base, arrived }) => {
+        const first = post(base, '/render/chart', PREVIEW, { option: { series: [] } });
+        await arrived(1);
+        const second = await Promise.race([post(base, '/render/chart', PREVIEW, { option: { series: [] } }), new Promise(r => setTimeout(() => r(null), 2000))]);
+        release();   // 先放行：断言失败时也不让第一个请求挂住服务器
+        assert.ok(second, '第二个渲染应被闸立即拒绝，而不是排队等待');
+        assert.equal(second.status, 429);
+        assert.equal((await second.json()).error.code, 'TOO_MANY_CONCURRENT_QUERIES');
+        assert.equal((await first).status, 200);
+        assert.equal((await post(base, '/render/chart', PREVIEW, { option: { series: [] } })).status, 200);
+    });
+});
+
+test('并发闸：notify 与 render 各走各的闸（render 打满不挡邮件）', async () => {
+    let release;
+    const gate = new Promise(r => { release = r; });
+    const slowRenderer = async () => { await gate; return fakeRenderer(); };
+    const rules = { ...STUB_RULES, notify: { ...STUB_RULES.notify, maxConcurrentPerApp: 1 }, render: { ...STUB_RULES.render, maxConcurrentPerApp: 1 } };
+    await withGatedStub(rules, slowRenderer, async ({ base, arrived }) => {
+        const first = post(base, '/render/chart', PREVIEW, { option: { series: [] } });
+        await arrived(1);
+        assert.equal((await post(base, '/notify/email', PREVIEW, MAIL)).status, 200);
+        release();
+        await first;
+    });
+});
+
+test('并发闸：rules.json 缺 maxConcurrentPerApp → 不模拟闸（不写字面量兜底），启动时打一行提示', async () => {
+    const strip = ({ maxConcurrentPerApp, ...rest }) => rest;
+    const rules = { ...STUB_RULES, notify: strip(STUB_RULES.notify), render: strip(STUB_RULES.render) };
+    let release;
+    const gate = new Promise(r => { release = r; });
+    const slowRenderer = async () => { await gate; return fakeRenderer(); };
+    await withGatedStub(rules, slowRenderer, async ({ base, logs, arrived }) => {
+        assert.equal(logs.filter(l => l.includes('maxConcurrentPerApp')).length, 1);
+        const a = post(base, '/render/chart', PREVIEW, { option: { series: [] } });
+        const b = post(base, '/render/chart', PREVIEW, { option: { series: [] } });
+        const c = post(base, '/render/chart', PREVIEW, { option: { series: [] } });
+        await arrived(3);
+        release();
+        for (const r of await Promise.all([a, b, c])) assert.equal(r.status, 200);
+    });
+});
+
+test('并发闸：真实 rules.json 快照（platform 2da3983 导出）已带 notify / render 的 maxConcurrentPerApp 与 render.timeoutMs，默认即生效、不打缺键提示', async () => {
+    for (const k of ['notify', 'render']) {
+        assert.ok(Number.isInteger(STUB_RULES[k].maxConcurrentPerApp) && STUB_RULES[k].maxConcurrentPerApp > 0, `${k}.maxConcurrentPerApp`);
+    }
+    assert.ok(Number.isInteger(STUB_RULES.render.timeoutMs) && STUB_RULES.render.timeoutMs > 0, 'render.timeoutMs');
+    let release;
+    const gate = new Promise(r => { release = r; });
+    const slowRenderer = async () => { await gate; return fakeRenderer(); };
+    const max = STUB_RULES.render.maxConcurrentPerApp;
+    await withGatedStub(STUB_RULES, slowRenderer, async ({ base, logs, arrived }) => {
+        assert.equal(logs.filter(l => l.includes('maxConcurrentPerApp')).length, 0);
+        const held = Array.from({ length: max }, () => post(base, '/render/chart', PREVIEW, { option: { series: [] } }));
+        await arrived(max);
+        const over = await Promise.race([post(base, '/render/chart', PREVIEW, { option: { series: [] } }), new Promise(r => setTimeout(() => r(null), 2000))]);
+        release();
+        assert.ok(over, `第 ${max + 1} 个渲染应被闸立即拒绝`);
+        assert.equal(over.status, 429);
+        assert.equal((await over.json()).error.code, 'TOO_MANY_CONCURRENT_QUERIES');
+        for (const r of await Promise.all(held)) assert.equal(r.status, 200);
+    });
+});
+
+test('并发闸的 429 带 x-pt-gate: concurrency（与线上网关同口径：app-backend 只对带这个头的 429 退避重试）；其它错误不带', async () => {
+    let release;
+    const gate = new Promise(r => { release = r; });
+    const slowRenderer = async () => { await gate; return fakeRenderer(); };
+    const rules = { ...STUB_RULES, render: { ...STUB_RULES.render, maxConcurrentPerApp: 1 } };
+    await withGatedStub(rules, slowRenderer, async ({ base, arrived }) => {
+        const first = post(base, '/render/chart', PREVIEW, { option: { series: [] } });
+        await arrived(1);
+        const over = await post(base, '/render/chart', PREVIEW, { option: { series: [] } });
+        release();
+        assert.equal(over.status, 429);
+        assert.equal(over.headers.get('x-pt-gate'), 'concurrency');
+        assert.equal((await first).status, 200);
+        const bad = await post(base, '/render/chart', PREVIEW, { option: 'not-an-object' });
+        assert.equal(bad.status, 400);
+        assert.equal(bad.headers.get('x-pt-gate'), null);
+    });
+});
+
+test('闸头读 rules.json 的 gateway.gateHeader（真实快照 = x-pt-gate: concurrency；换值即跟着换，证明不是字面量）', async () => {
+    assert.deepEqual(STUB_RULES.gateway?.gateHeader, { name: 'x-pt-gate', concurrencyValue: 'concurrency' });
+    let release;
+    const gate = new Promise(r => { release = r; });
+    const slowRenderer = async () => { await gate; return fakeRenderer(); };
+    const rules = { ...STUB_RULES, render: { ...STUB_RULES.render, maxConcurrentPerApp: 1 },
+        gateway: { gateHeader: { name: 'x-test-gate', concurrencyValue: 'probe' } } };
+    await withGatedStub(rules, slowRenderer, async ({ base, arrived }) => {
+        const first = post(base, '/render/chart', PREVIEW, { option: { series: [] } });
+        await arrived(1);
+        const over = await post(base, '/render/chart', PREVIEW, { option: { series: [] } });
+        release();
+        assert.equal(over.status, 429);
+        assert.equal(over.headers.get('x-test-gate'), 'probe');
+        assert.equal(over.headers.get('x-pt-gate'), null);
+        assert.equal((await first).status, 200);
+    });
+});
+
+test('快照有并发上限却缺 gateway.gateHeader → 启动即报「规则快照过旧」，不写字面量兜底', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ptx-stub-gate-'));
+    const { gateway: _drop, ...stale } = STUB_RULES;
+    assert.throws(() => createLocalStub({ root, rules: stale, log: () => {} }), /gateway\.gateHeader[\s\S]*规则快照过旧/);
+    const halfStale = { ...STUB_RULES, gateway: { gateHeader: { name: 'x-pt-gate' } } };
+    assert.throws(() => createLocalStub({ root, rules: halfStale, log: () => {} }), /规则快照过旧/);
+    // 快照旧到连并发上限都没有：本来就不模拟闸，也就用不到闸头，不报错（与既有「缺键不模拟」口径一致）
+    const ancient = { ...stale, notify: { ...STUB_RULES.notify, maxConcurrentPerApp: undefined }, render: { ...STUB_RULES.render, maxConcurrentPerApp: undefined } };
+    assert.doesNotThrow(() => createLocalStub({ root, rules: ancient, log: () => {} }));
+});
+
+test('rules.json 缺 notifySend 段或段内缺键 → 启动即报「规则快照过旧」，不拖到第一次 /notify/send 请求才 500（ST-05）', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ptx-stub-send-rules-'));
+    const { notifySend: _drop, ...noSection } = STUB_RULES;
+    assert.throws(() => createLocalStub({ root, rules: noSection, log: () => {} }), /notifySend[\s\S]*规则快照过旧/);
+    const { maxBodyBytes: _m, ...staleSection } = STUB_RULES.notifySend;
+    assert.throws(() => createLocalStub({ root, rules: { ...STUB_RULES, notifySend: staleSection }, log: () => {} }), /maxBodyBytes[\s\S]*规则快照过旧/);
+});
+
+// ── 通知投递目标：notify.send 本地桩 ───────────────────────────────────
+const SEND = { message: { title: '首页 CVR 异常', text: '比上周同期下降 23%' } };
+const targetsFile = (root, list) => {
+    mkdirSync(join(root, '.ptx'), { recursive: true });
+    writeFileSync(join(root, '.ptx', 'notify-targets.json'), typeof list === 'string' ? list : JSON.stringify(list));
+};
+
+test('POST /notify/send：写 .ptx/outbox/<runId>/<seq>.send.json（与邮件共用序号）；打印一行带本地预览地址；预览 → intercepted', () => withStub(async ({ root, base, logs, port }) => {
+    await post(base, '/notify/email', PREVIEW, MAIL);
+    const r = await post(base, '/notify/send', PREVIEW, SEND);
+    assert.equal(r.status, 200);
+    assert.deepEqual(await r.json(), { preview: true, status: 'intercepted', targets: 1, sent: 0, failed: 0, noTargetsReason: null });
+    const dir = join(root, '.ptx', 'outbox', 'run-1');
+    assert.deepEqual(readdirSync(dir).sort(), ['1.html', '1.json', '2.send.json']);
+    const payload = JSON.parse(readFileSync(join(dir, '2.send.json'), 'utf8'));
+    assert.deepEqual(payload.targets, [{ name: 'local', type: 'webhook' }]);
+    assert.equal(payload.status, 'intercepted');
+    assert.equal(payload.message.title, '首页 CVR 异常');
+    await post(base, '/notify/email', PREVIEW, MAIL);
+    assert.ok(existsSync(join(dir, '3.json')), '邮件接着用下一个序号');
+    assert.ok(logs.some(l => l.includes('通知') && l.includes('local（webhook）') && l.includes(`http://localhost:${port}/__ptx/outbox/run-1`) && l.includes('预览')));
+}));
+
+test('POST /notify/send 非预览：status sent，终端写明「本地桩，未真实投递」；交互调用落 interactive/', () => withStub(async ({ root, base, logs }) => {
+    const r = await post(base, '/notify/send', tok({ sub: 'u', scopes: ['notify:send'] }), SEND);
+    assert.equal((await r.json()).status, 'sent');
+    assert.ok(existsSync(join(root, '.ptx', 'outbox', 'interactive', '1.send.json')));
+    assert.ok(logs.some(l => l.includes('未真实投递')));
+}));
+
+test('.ptx/notify-targets.json：扇出到列出的目标；[] → no_targets（任务 JOB_TARGETS_EMPTY / 交互 APP_DEFAULT_EMPTY）并打印提示；改文件即时生效；坏文件 → 500 点名文件', () => withStub(async ({ root, base, logs }) => {
+    targetsFile(root, [{ name: 'alerts', type: 'slack' }, { name: 'ops', type: 'teams' }]);
+    assert.deepEqual(await (await post(base, '/notify/send', RUN, SEND)).json(), { preview: false, status: 'sent', targets: 2, sent: 2, failed: 0, noTargetsReason: null });
+    assert.ok(logs.some(l => l.includes('alerts（slack）') && l.includes('ops（teams）')));
+    targetsFile(root, []);
+    assert.deepEqual(await (await post(base, '/notify/send', RUN, SEND)).json(),
+        { preview: false, status: 'no_targets', targets: 0, sent: 0, failed: 0, noTargetsReason: 'JOB_TARGETS_EMPTY' });
+    assert.equal((await (await post(base, '/notify/send', tok({ sub: 'u', scopes: ['notify:send'] }), SEND)).json()).noTargetsReason, 'APP_DEFAULT_EMPTY');
+    assert.ok(logs.some(l => l.includes('没有投递目标')));
+    targetsFile(root, '{');
+    const bad = await post(base, '/notify/send', PREVIEW, SEND);
+    assert.equal(bad.status, 500);
+    const e = (await bad.json()).error;
+    assert.equal(e.code, 'PTX_STUB_FAILED');
+    assert.match(e.message, /\.ptx\/notify-targets\.json/);
+}));
+
+test('GET /__ptx/notify-targets 已移除（应用自建任务初始不带渠道，网关桩不再问目标数）→ 404', () => withStub(async ({ base }) => {
+    assert.equal((await fetch(`${base}/__ptx/notify-targets`)).status, 404);
+}));
+
+test('manifest 未声明 backend.notify.instant：交互 /notify/send → no_targets / APP_INSTANT_NOT_DECLARED 并打印提示；改 manifest 即时生效；任务 run 照常', () => withStub(async ({ root, base, logs }) => {
+    const USER_TOK = tok({ sub: 'u', scopes: ['notify:send'] });
+    const { notify: _n, ...backend } = INSTANT_MANIFEST.backend;
+    writeFileSync(join(root, 'manifest.json'), JSON.stringify({ ...INSTANT_MANIFEST, backend }));
+    assert.deepEqual(await (await post(base, '/notify/send', USER_TOK, SEND)).json(),
+        { preview: false, status: 'no_targets', targets: 0, sent: 0, failed: 0, noTargetsReason: 'APP_INSTANT_NOT_DECLARED' });
+    assert.ok(logs.some(l => l.includes('APP_INSTANT_NOT_DECLARED') && l.includes('backend.notify.instant')));
+    assert.equal((await (await post(base, '/notify/send', RUN, SEND)).json()).status, 'sent');
+    writeFileSync(join(root, 'manifest.json'), JSON.stringify(INSTANT_MANIFEST));
+    assert.equal((await (await post(base, '/notify/send', USER_TOK, SEND)).json()).status, 'sent');
+}, { manifest: null }));
+
+test('项目根没有 manifest.json / 不是合法 JSON：交互发送按未声明处理（不 500）', () => withStub(async ({ root, base }) => {
+    const USER_TOK = tok({ sub: 'u', scopes: ['notify:send'] });
+    assert.equal((await (await post(base, '/notify/send', USER_TOK, SEND)).json()).noTargetsReason, 'APP_INSTANT_NOT_DECLARED');
+    writeFileSync(join(root, 'manifest.json'), '{');
+    assert.equal((await (await post(base, '/notify/send', USER_TOK, SEND)).json()).noTargetsReason, 'APP_INSTANT_NOT_DECLARED');
+}, { manifest: null }));
+
+test('/notify/send：无 notify:send → 403 SCOPE_DENIED（requiredScope）；无令牌 → 401；坏 JSON → 400 NOTIFY_CHANNEL_MESSAGE_INVALID；1c 的 /notify/channel(s) → 404', () => withStub(async ({ base }) => {
+    const denied = await post(base, '/notify/send', NO_SCOPE, SEND);
+    assert.equal(denied.status, 403);
+    assert.deepEqual((await denied.json()).error.requiredScope, 'notify:send');
+    assert.equal((await post(base, '/notify/send', '', SEND)).status, 401);
+    const bad = await fetch(`${base}/notify/send`, { method: 'POST', headers: { authorization: PREVIEW, 'content-type': 'application/json' }, body: '{' });
+    assert.equal(bad.status, 400);
+    assert.equal((await bad.json()).error.code, 'NOTIFY_CHANNEL_MESSAGE_INVALID');
+    for (const p of ['/notify/channel', '/notify/channels']) assert.equal((await post(base, p, PREVIEW, { channel: 'a', ...SEND })).status, 404, p);
+}));
+
+test(`通知消息体超过 rules.notifySend.maxBodyBytes → 413 GATEWAY_BAD_REQUEST（与线上网关同上限），不写文件`, () => withStub(async ({ root, base }) => {
+    const big = { message: { title: 't', text: 'x'.repeat(STUB_RULES.notifySend.maxBodyBytes) } };
+    const r = await post(base, '/notify/send', PREVIEW, big);
+    assert.equal(r.status, 413);
+    assert.equal((await r.json()).error.code, 'GATEWAY_BAD_REQUEST');
+    assert.ok(!existsSync(join(root, '.ptx')));
+}));
+
+test('通知消息体积边界：恰好 = rules.notifySend.maxBodyBytes 不回 413，多 1 字节回 413', () => withStub(async ({ base }) => {
+    const max = STUB_RULES.notifySend.maxBodyBytes;
+    // 多余的顶层键只占体积（本地桩只取 message），让体积恰好卡在上限上而消息本身合法
+    const sized = n => {
+        const shell = { message: { title: 't' }, pad: '' };
+        const body = { ...shell, pad: 'x'.repeat(n - Buffer.byteLength(JSON.stringify(shell))) };
+        assert.equal(Buffer.byteLength(JSON.stringify(body)), n);
+        return body;
+    };
+    const atMax = await post(base, '/notify/send', PREVIEW, sized(max));
+    assert.equal(atMax.status, 200);
+    const over = await post(base, '/notify/send', PREVIEW, sized(max + 1));
+    assert.equal(over.status, 413);
+    assert.equal((await over.json()).error.code, 'GATEWAY_BAD_REQUEST');
+}));
+
+test('job 令牌的 run 不合法 → 通知落 .ptx/outbox/interactive/，.ptx 外不落文件；目标名不进任何路径', () => withStub(async ({ root, base }) => {
+    const BAD = tok({ sub: 'u', scopes: ['notify:send'], trg: 'job', job: 'local', run: '../../escape', mode: 'preview' });
+    targetsFile(root, [{ name: '../../alerts', type: 'slack' }]);
+    assert.equal((await post(base, '/notify/send', BAD, SEND)).status, 200);
+    assert.deepEqual(readdirSync(root).sort(), ['.ptx', 'manifest.json']);
+    assert.deepEqual(readdirSync(join(root, '.ptx', 'outbox')), ['interactive']);
+    assert.deepEqual(readdirSync(join(root, '.ptx', 'outbox', 'interactive')), ['1.send.json']);
+}));
+
+test('本地推送预览页：邮件与通知同列；通知按「消息一次 + 将发到列表」展示（转义）；无目标写明「没有投递目标」；页面仍带 CSP', () => withStub(async ({ root, base }) => {
+    await post(base, '/notify/email', PREVIEW, MAIL);
+    targetsFile(root, [{ name: '<b>alerts</b>', type: 'slack' }, { name: 'ops', type: 'teams' }]);
+    await post(base, '/notify/send', PREVIEW, { message: { title: '<script>alert(1)</script>', text: 'a&b' } });
+    targetsFile(root, []);
+    await post(base, '/notify/send', PREVIEW, SEND);
+    const res = await fetch(`${base}/__ptx/outbox/run-1`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-security-policy') ?? '', /script-src 'none'/);
+    const html = await res.text();
+    assert.ok(html.includes('/__ptx/outbox/run-1/1.html') && html.includes('周报'));
+    const items = html.match(/<li>通知 [\s\S]*?<\/li>/g) ?? [];
+    assert.equal(items.length, 2);
+    assert.match(items[0], /— 预览拦截/);
+    assert.match(items[0], /将发到：&lt;b&gt;alerts&lt;\/b&gt;（slack）、ops（teams）/);
+    assert.equal((items[0].match(/&lt;script&gt;alert\(1\)&lt;\/script&gt;/g) ?? []).length, 1, '消息内容只展示一次');
+    assert.match(items[1], /没有投递目标（JOB_TARGETS_EMPTY）/);
+    assert.ok(!html.includes('<script>alert(1)</script>'));
+    assert.match(html, /3 条/);
+}));
+
+/** 发出请求头与半截请求体后挂住（闸在读体之前占位，这个请求一直在途）；finish(rest) 发完剩余部分并取状态码。 */
+function holdOpen(port, path, auth, head) {
+    const req = httpRequest({ host: '127.0.0.1', port, path, method: 'POST',
+        headers: { host: `127.0.0.1:${port}`, authorization: auth, 'content-type': 'application/json' } });
+    const status = new Promise((resolve, reject) => {
+        req.on('response', res => { res.resume(); res.on('end', () => resolve(res.statusCode)); });
+        req.on('error', reject);
+    });
+    req.write(head);
+    return { finish: rest => { req.end(rest); return status; } };
+}
+
+test('并发闸：通知与邮件共用 notify 闸（线上 notifyInflight；429 话术「邮件与渠道合计」、带闸头）', async () => {
+    const rules = { ...STUB_RULES, notify: { ...STUB_RULES.notify, maxConcurrentPerApp: 1 } };
+    const root = mkdtempSync(join(tmpdir(), 'ptx-stub-'));
+    const server = createLocalStub({ root, appName: 'a', log: () => {}, rules });
+    const arrived = countArrivals(server);
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    const port = server.address().port;
+    const base = `http://127.0.0.1:${port}`;
+    try {
+        const held = holdOpen(port, '/notify/send', PREVIEW, '{"message":');
+        await arrived(1);
+        const mail = await post(base, '/notify/email', PREVIEW, MAIL);
+        assert.equal(mail.status, 429);
+        assert.equal(mail.headers.get('x-pt-gate'), 'concurrency');
+        assert.match((await mail.json()).error.message, /邮件与渠道合计/);
+        assert.equal(await held.finish('{"title":"t"}}'), 200);
+        assert.equal((await post(base, '/notify/email', PREVIEW, MAIL)).status, 200);
+    } finally {
+        await new Promise(r => server.close(r));
+    }
+});
+
+test('未声明即时发送的交互调用不读 .ptx/notify-targets.json：文件损坏时仍回 no_targets / APP_INSTANT_NOT_DECLARED（任务 run 照旧 500 点名文件）', () => withStub(async ({ root, base }) => {
+    const { notify: _n, ...backend } = INSTANT_MANIFEST.backend;
+    writeFileSync(join(root, 'manifest.json'), JSON.stringify({ ...INSTANT_MANIFEST, backend }));
+    targetsFile(root, '{');
+    const r = await post(base, '/notify/send', tok({ sub: 'u', scopes: ['notify:send'] }), SEND);
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).noTargetsReason, 'APP_INSTANT_NOT_DECLARED');
+    assert.equal((await post(base, '/notify/send', RUN, SEND)).status, 500);
+}, { manifest: null }));
+
+test('rules.json 缺 manifestNotify 段 / 形状不对 → 启动即抛「规则快照过旧」并提示 sync-rules；注入的 manifestNotify 生效', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ptx-stub-mn-'));
+    const { manifestNotify: _drop, ...noSection } = STUB_RULES;
+    assert.throws(() => createLocalStub({ root, rules: noSection, log: () => {} }), /manifestNotify[\s\S]*规则快照过旧[\s\S]*sync-rules/);
+    assert.throws(() => createLocalStub({ root, rules: { ...STUB_RULES, manifestNotify: { keys: ['instant'] } }, log: () => {} }), /规则快照过旧/);
+    // 注入的规则：instantRequiresScope 换成 jobs:run → 只有 notify:send 的 manifest 不算声明
+    writeFileSync(join(root, 'manifest.json'), JSON.stringify(INSTANT_MANIFEST));
+    const server = createLocalStub({ root, rules: { ...STUB_RULES, manifestNotify: { keys: ['instant'], instantRequiresScope: 'jobs:run' } }, log: () => {} });
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    try {
+        const base = `http://127.0.0.1:${server.address().port}`;
+        assert.equal((await (await post(base, '/notify/send', tok({ sub: 'u', scopes: ['notify:send'] }), SEND)).json()).noTargetsReason, 'APP_INSTANT_NOT_DECLARED');
+    } finally { await new Promise(r => server.close(r)); }
+});

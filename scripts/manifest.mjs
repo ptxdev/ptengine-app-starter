@@ -99,12 +99,57 @@ export function requireBackendResolution(manifest, root) {
     return res;
 }
 
+const isPlainObject = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/** rules.json 缺 / 坏 manifestNotify 段时的统一话术（本地桩启动抛、manifest 校验报 bad、doctor warn 都用它）。 */
+export const MANIFEST_NOTIFY_STALE = 'scripts/rules.json 缺 manifestNotify 段（keys / instantRequiresScope），规则快照过旧。维护者请跑 npm run sync-rules。';
+
+/**
+ * manifest `backend.notify` 的本地规则（2026-10-22 即时通知补充 R1）：rules.json 的 `manifestNotify` 段
+ * （`keys` = 允许的键，`instantRequiresScope` = `instant: true` 时必须声明的 scope）。**不写字面量兜底**：
+ * 缺段 / 形状不对 → null（调用方按各自口径报「规则快照过旧」）。
+ */
+export function manifestNotifyRules(rules) {
+    return isPlainObject(rules) && Array.isArray(rules.keys) && rules.keys.length > 0 && rules.keys.every(k => typeof k === 'string') &&
+        typeof rules.instantRequiresScope === 'string' && rules.instantRequiresScope !== '' ? rules : null;
+}
+
+/**
+ * `backend.notify` 的问题（合规或未声明 → null）。与平台 contract `validateManifest` 同口径、同话术：
+ * 可选对象、只认 `keys` 里的键、`instant` 为布尔、`instant: true` 时 scopes 必须含 `instantRequiresScope`。平台上传时报 `MANIFEST_INVALID`。
+ * `r` 是已校验过的 manifestNotify 规则（见 manifestNotifyRules）。
+ */
+export function manifestNotifyProblem(manifest, r) {
+    if (!manifest?.backend || !Object.hasOwn(manifest.backend, 'notify')) return null;
+    const n = manifest.backend.notify;
+    if (!isPlainObject(n)) return `backend.notify 必须是对象（形如 { "instant": true }），收到 ${JSON.stringify(n)}`;
+    for (const k of Object.keys(n)) {
+        if (!r.keys.includes(k)) return `backend.notify.${k} 不认识，backend.notify 目前只有 ${r.keys.join(' / ')}`;
+    }
+    if (n.instant !== undefined && typeof n.instant !== 'boolean') return `backend.notify.instant 必须是布尔值，收到 ${JSON.stringify(n.instant)}`;
+    if (n.instant === true && !(Array.isArray(manifest.scopes) && manifest.scopes.includes(r.instantRequiresScope))) {
+        return `backend.notify.instant 为 true 时 scopes 必须包含 "${r.instantRequiresScope}"（即时发送要用 ctx.pt.notify.send）`;
+    }
+    return null;
+}
+
+/**
+ * 应用是否声明了即时发送：`backend.notify.instant === true` 且 scopes 含 `instantRequiresScope`（= 平台 `declaresInstantNotify`）。
+ * 没声明时，用户请求里的 `ctx.pt.notify.send` 不投递，回 `no_targets` / `APP_INSTANT_NOT_DECLARED`。规则缺段 → 抛「规则快照过旧」。
+ */
+export function declaresInstantNotify(manifest, rules = RULES.manifestNotify) {
+    const r = manifestNotifyRules(rules);
+    if (!r) throw new Error(MANIFEST_NOTIFY_STALE);
+    return manifest?.backend?.notify?.instant === true &&
+        Array.isArray(manifest.scopes) && manifest.scopes.includes(r.instantRequiresScope);
+}
+
 /**
  * 校验 manifest 自身的自洽性（不依赖构建产物）。
  *
  * @returns {{ errors: string[], warnings: string[] }}
  */
-export function validateManifest(manifest, root) {
+export function validateManifest(manifest, root, rules = RULES) {
     const errors = [];
     const warnings = [];
     const fail = (code, msg) => errors.push(`${code}  ${msg}`);
@@ -250,6 +295,16 @@ export function validateManifest(manifest, root) {
                         `egress 不允许包含平台自身或本机地址："${host}"`);
                 }
             }
+        }
+    }
+
+    // backend.notify：只在声明了这一段时才需要规则；规则快照缺段 → bad 提示 sync-rules（不写字面量兜底）
+    if (Object.hasOwn(be, 'notify')) {
+        const nr = manifestNotifyRules(rules.manifestNotify);
+        if (!nr) fail('RULES_STALE', MANIFEST_NOTIFY_STALE);
+        else {
+            const notifyProblem = manifestNotifyProblem(manifest, nr);
+            if (notifyProblem) fail('MANIFEST_INVALID', notifyProblem);
         }
     }
 

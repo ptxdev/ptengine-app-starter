@@ -8,14 +8,14 @@
  * 收录标准：只查那些**违反后不报错、现象不直观**的东西（白屏、没样式、
  * 上传被拒、线上 401）。能靠 tsc 或 vite 报出来的，这里不重复查。
  *
- *   npx ptx doctor            本地检查
- *   npx ptx doctor --deps     额外检查 @ptengine/* 依赖是否落后于 npm 最新版（需要网络）
+ *   npm run ptx -- doctor            本地检查
+ *   npm run ptx -- doctor --deps     额外检查 @ptengine/* 依赖是否落后于 npm 最新版（需要网络）
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
-import { RULES, readManifest, resolveBackend, validateManifest } from './manifest.mjs';
+import { MANIFEST_NOTIFY_STALE, RULES, declaresInstantNotify, manifestNotifyRules, readManifest, resolveBackend, validateManifest } from './manifest.mjs';
 import { parseJsonc } from './jsonc.mjs';
 
 const results = [];
@@ -497,6 +497,371 @@ function checkScopeConsistency(root, manifest) {
     );
 }
 
+// ─── 定时任务（backend.jobs）────────────────────────────────────────────
+//
+// 收录理由：这四条在本地都「能跑」，问题只在平台按时调用时才出现 ——
+//   · 没声明 jobs:run：上传第 1 步 MANIFEST_JOBS_SCOPE_MISSING；
+//   · 路由不存在：上传照样成功（平台不读你的代码），之后**每一次**运行都是 404 → JOB_ROUTE_NOT_FOUND；
+//   · 没有 requireTrigger('job')：任何拿到用户令牌的人都能手动触发任务路由；
+//   · 声明了 preview 却从不读 ctx.auth.preview：预览会真的写状态 / 推外部系统。
+
+function listSourceFiles(dir) {
+    if (!existsSync(dir)) return [];
+    const out = [];
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, e.name);
+        if (e.isDirectory()) { if (e.name !== 'node_modules') out.push(...listSourceFiles(p)); }
+        else if (/\.(ts|mts|js|mjs)$/.test(e.name)) out.push(p);
+    }
+    return out;
+}
+
+/**
+ * 把 JS/TS 源码里的 `//` 行注释与块注释换成空格（换行保留），字符串 / 模板字面量原样保留。
+ * 逐字符扫描而不是正则：`'https://…'` 里的 `//` 不是注释，正则一刀切会把后半行一起吃掉。
+ * 已知不处理：正则字面量里未转义的 `//`、模板字面量 `${}` 里再嵌套反引号 —— 静态检查够用。
+ */
+function stripJsComments(src) {
+    let out = '';
+    let i = 0;
+    const n = src.length;
+    while (i < n) {
+        const c = src[i];
+        const d = src[i + 1];
+        if (c === '/' && d === '/') {
+            while (i < n && src[i] !== '\n') { out += ' '; i++; }
+        } else if (c === '/' && d === '*') {
+            const end = src.indexOf('*/', i + 2);
+            const stop = end === -1 ? n : end + 2;
+            for (; i < stop; i++) out += src[i] === '\n' ? '\n' : ' ';
+        } else if (c === '\'' || c === '"' || c === '`') {
+            out += c; i++;
+            while (i < n && src[i] !== c) {
+                if (src[i] === '\\' && i + 1 < n) { out += src[i] + src[i + 1]; i += 2; continue; }
+                if (src[i] === '\n' && c !== '`') break; // 未闭合的单行字符串：到行尾为止
+                out += src[i]; i++;
+            }
+            if (i < n && src[i] === c) { out += c; i++; }
+        } else {
+            out += c; i++;
+        }
+    }
+    return out;
+}
+
+/**
+ * 在源码里找 `'<route>':`（单 / 双 / 反引号的对象键），返回从键之后到**下一个路由键**之前的片段。
+ * 只认对象键：注释或普通字符串里出现同一串字符不算「声明了路由」。
+ * 匹配前先剥注释，所以返回的 segment / fileText 都是**去掉注释后**的文本 ——
+ * 注释里写的 requireTrigger( / ctx.auth.preview 同样不算数。
+ */
+export function findRouteHandler(sources, route) {
+    const esc = route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const keyRe = new RegExp(`(['"\`])${esc}\\1\\s*:`);
+    const nextKeyRe = /(['"`])(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) \/[^'"`]*\1\s*:/;
+    for (const s of sources) {
+        const text = stripJsComments(s.text);
+        const m = keyRe.exec(text);
+        if (!m) continue;
+        const rest = text.slice(m.index + m[0].length);
+        const next = nextKeyRe.exec(rest);
+        return { file: s.rel, segment: next ? rest.slice(0, next.index) : rest, fileText: text };
+    }
+    return null;
+}
+
+export function checkJobs(root, manifest) {
+    const jobs = manifest?.backend?.jobs;
+    if (!Array.isArray(jobs) || jobs.length === 0) return [];
+    const out = [];
+    if (!(manifest.scopes ?? []).includes('jobs:run')) {
+        out.push({
+            level: 'bad', msg: 'manifest 声明了 backend.jobs，但 scopes 里没有 jobs:run',
+            why: '平台上传第 1 步会以 MANIFEST_JOBS_SCOPE_MISSING 拒收。把 "jobs:run" 加进 manifest.json 的 scopes。'
+        });
+    }
+    const sources = listSourceFiles(join(root, 'backend', 'src'))
+        .map(p => ({ rel: relative(root, p), text: readFileSync(p, 'utf8') }));
+    for (const job of jobs) {
+        if (!job || typeof job.route !== 'string') continue;
+        const hit = findRouteHandler(sources, job.route);
+        if (!hit) {
+            out.push({
+                level: 'bad', msg: `任务 ${job.type} 的路由 "${job.route}" 不在 backend/src 的 routes 里`,
+                why: '上传不会报错（平台不读代码），但之后每一次运行都是 404，运行记录里是 JOB_ROUTE_NOT_FOUND。' +
+                     '在 createApp 的 routes 里加上这个键（不带 /api 前缀），或改 manifest 里的 route。'
+            });
+            continue;
+        }
+        if (!/requireTrigger\s*\(/.test(hit.segment)) {
+            out.push({
+                level: 'warn', msg: `任务路由 "${job.route}"（${hit.file}）没有调用 requireTrigger(`,
+                why: "第一行写 ctx.requireTrigger('job')。否则任何拿到用户 App Token 的人都能手动调这条路由。"
+            });
+        }
+        if (job.preview === true && !/ctx\.auth\.preview/.test(hit.fileText)) {
+            out.push({
+                level: 'warn', msg: `任务 ${job.type} 声明了 preview: true，但 ${hit.file} 里没有读 ctx.auth.preview`,
+                why: '声明 preview 即承诺预览模式下不写会影响正式运行的状态、不向外部系统写数据。用 ctx.auth.preview 分支跳过这些副作用。'
+            });
+        }
+    }
+    if (out.length === 0) out.push({ level: 'ok', msg: `定时任务声明与代码对得上（${jobs.length} 个任务类型）` });
+    return out;
+}
+
+/**
+ * 剥注释 + 清空字符串内容，只留「真代码」：注释换成空格（换行保留）；单 / 双引号字符串与模板正文的
+ * 内容换成空格（引号、反引号保留，跨行模板正文里的换行保留）；模板插值 `${…}` 按代码保留，
+ * 逐层跟踪花括号深度（插值里的对象字面量、内层模板都对得上）。
+ * 逐字符扫描而不是正则：正则按行配对反引号，跨行模板会让闭合反引号与下一个模板的开头错配，吞掉中间的真代码。
+ * 已知不处理：正则字面量（其中的引号 / 反引号 / `//` 会被当成字符串或注释的起点）—— 静态检查够用。
+ */
+function maskJsCode(src) {
+    let out = '';
+    let i = 0;
+    const n = src.length;
+    const depth = [];   // 每层模板插值内未闭合的 `{` 个数
+    const blank = ch => (ch === '\n' ? '\n' : ' ');
+    // 扫模板正文：遇闭合反引号回到代码；遇 `${` 进入插值（按代码扫）
+    const templateBody = () => {
+        while (i < n) {
+            const ch = src[i];
+            if (ch === '\\' && i + 1 < n) { out += ' ' + blank(src[i + 1]); i += 2; continue; }
+            if (ch === '`') { out += '`'; i++; return; }
+            if (ch === '$' && src[i + 1] === '{') { out += '${'; i += 2; depth.push(0); return; }
+            out += blank(ch); i++;
+        }
+    };
+    while (i < n) {
+        const c = src[i];
+        const d = src[i + 1];
+        if (c === '/' && d === '/') {
+            while (i < n && src[i] !== '\n') { out += ' '; i++; }
+        } else if (c === '/' && d === '*') {
+            const e = src.indexOf('*/', i + 2);
+            const stop = e === -1 ? n : e + 2;
+            for (; i < stop; i++) out += blank(src[i]);
+        } else if (c === '\'' || c === '"') {
+            out += c; i++;
+            while (i < n && src[i] !== c) {
+                if (src[i] === '\\' && i + 1 < n) { out += ' ' + blank(src[i + 1]); i += 2; continue; }
+                if (src[i] === '\n') break; // 未闭合的单行字符串：到行尾为止
+                out += ' '; i++;
+            }
+            if (i < n && src[i] === c) { out += c; i++; }
+        } else if (c === '`') {
+            out += c; i++;
+            templateBody();
+        } else if (c === '{' && depth.length > 0) {
+            depth[depth.length - 1]++; out += c; i++;
+        } else if (c === '}' && depth.length > 0) {
+            out += c; i++;
+            if (depth[depth.length - 1] === 0) { depth.pop(); templateBody(); }
+            else depth[depth.length - 1]--;
+        } else {
+            out += c; i++;
+        }
+    }
+    return out;
+}
+
+/**
+ * 「用到了 notify / render」的识别范围（偏保守：宁可要求声明，不漏报）：
+ *   · `pt.notify` / `pt.render`，允许可选链 `?.` 与换行空白，前缀不限（`ctx.pt`、`c.pt`、解构出的 `pt` 都算）；
+ *   · 解构：`{ notify } = ….pt`、`{ render: r } = ….pt`、`{ pt: { notify } } = …`；
+ *   · 形参 `({ pt })` 之后的 `pt.notify` 由第一条覆盖。
+ * 不识别：`pt['notify']` 之类计算属性、把 `ctx.pt` 赋给别名后再取（`const p = ctx.pt; p.notify`）。
+ */
+const NOTIFY_USE_RES = [
+    /\bpt\s*\??\.\s*(?:notify|render)\b/,
+    /\{[^{}]*\b(?:notify|render)\b[^{}]*\}\s*=\s*[\w$.?\s]*\bpt\b/,
+    /\bpt\s*:\s*\{[^{}]*\b(?:notify|render)\b/
+];
+
+/**
+ * 用了 `ctx.pt.notify.*`（email / send）/ `ctx.pt.render.*` 就必须声明 `notify:send`（定时任务 1b §13.3、通知投递目标 §9.3）。
+ * 不声明：平台不把这个 scope 放进令牌 → 线上恒 403 SCOPE_DENIED；而本地令牌照抄 manifest，同样 403，
+ * 但报错落在运行时某一次发信上，不如在 doctor 里一次说清楚。注释与字符串里出现的不算（模板插值里的算），
+ * `*.test.*` / `*.spec.*` 与 `*.d.ts` 不扫；识别范围见 NOTIFY_USE_RES。
+ */
+export function checkNotifyScope(root, manifest) {
+    const hits = backendCodeFiles(root)
+        .filter(s => NOTIFY_USE_RES.some(re => re.test(s.text)))
+        .map(s => s.rel);
+    if (hits.length === 0) return [];
+    if (!(manifest.scopes ?? []).includes('notify:send')) {
+        return [{
+            level: 'bad',
+            msg: `后端用了 ctx.pt.notify.email / notify.send / render.chart（${hits.join('、')}），但 manifest.scopes 里没有 notify:send`,
+            why: '把 "notify:send" 加进 manifest.json 的 scopes 并重新发布，再由工作区管理员同意授权（写类 scope，没有自建应用豁免）。' +
+                 '不声明的话发信、发通知与渲染一律 403 SCOPE_DENIED。'
+        }];
+    }
+    return [{ level: 'ok', msg: `ctx.pt.notify.* / render.chart 已声明 notify:send（${hits.join('、')}）` }];
+}
+
+/**
+ * `notify.send` 的调用（含可选链），以及从 `….notify` 解构出 `send`。只认 send：邮件 `notify.email` 不受即时声明影响。
+ * 不识别计算属性与别名（同 NOTIFY_USE_RES 的口径）。
+ */
+const NOTIFY_SEND_USE_RES = [
+    /\bnotify\s*\??\.\s*send\b/,
+    /\{[^{}]*\bsend\b[^{}]*\}\s*=\s*[\w$.?\s]*\bnotify\b/
+];
+
+/**
+ * 即时通知声明（2026-10-22 补充 R11）：后端用了 `ctx.pt.notify.send`、scopes 有 `notify:send`，但 manifest 没声明
+ * `backend.notify.instant: true` → info。不是错：只在定时任务里发的应用本来就不需要声明；但用户请求里（`trigger === 'user'`）
+ * 的发送会被平台回 `no_targets` / `APP_INSTANT_NOT_DECLARED`，本地桩同样如此。没有 `notify:send` 的情况由 checkNotifyScope 报。
+ * 形状问题（instant 非布尔、多余键、instant 缺 notify:send）由 validateManifest 报 MANIFEST_INVALID。
+ */
+export function checkInstantNotify(root, manifest, rules = RULES.manifestNotify) {
+    const r = manifestNotifyRules(rules);
+    if (!r) return [{ level: 'warn', msg: '跳过即时发送声明检查：' + MANIFEST_NOTIFY_STALE, why: '升级 starter 的 scripts/（维护者跑 npm run sync-rules）。' }];
+    if (!(manifest?.scopes ?? []).includes(r.instantRequiresScope)) return [];
+    if (declaresInstantNotify(manifest, r)) return [];
+    const hits = backendCodeFiles(root).filter(s => NOTIFY_SEND_USE_RES.some(re => re.test(s.text))).map(s => s.rel);
+    if (hits.length === 0) return [];
+    return [{
+        level: 'info',
+        msg: `后端用了 ctx.pt.notify.send（${hits.join('、')}），但 manifest 没声明 backend.notify.instant：只能在定时任务（订阅）里投递`,
+        why: '即时发送（用户请求里调 notify.send，不属于任何订阅）需在 manifest.json 声明 backend.notify.instant: true（"backend": { …, "notify": { "instant": true } }），' +
+             '否则平台不投递、返回 status no_targets / noTargetsReason APP_INSTANT_NOT_DECLARED（本地桩同样）。只在定时任务里发送的话可以忽略这条。'
+    }];
+}
+
+/** backend/src 下要扫的源码（剥掉注释与字符串内容）：测试与 .d.ts 不算。 */
+function backendCodeFiles(root) {
+    return listSourceFiles(join(root, 'backend', 'src'))
+        .filter(p => !/\.(?:test|spec)\.[^.\/\\]+$/.test(p))   // 测试里的 mock 不算
+        .filter(p => !/\.d\.[cm]?ts$/.test(p))                    // 类型声明文件里只有类型，不是调用
+        .map(p => ({ rel: relative(root, p), text: maskJsCode(readFileSync(p, 'utf8')) }));
+}
+
+/** 1c 的按名发送 / 列渠道（`notify.channel` / `notify.listChannels`），含可选链；解构出的 `notify` 同样命中。 */
+const REMOVED_NOTIFY_RE = /\bnotify\s*\??\.\s*(?:channel|listChannels)\b/;
+
+/**
+ * 通知投递目标（brief §9.3）：1c 的 `ctx.pt.notify.channel` / `notify.listChannels` 已从 `@ptengine/app-backend` 移除 ——
+ * 新版包里它们是 undefined，调用即 TypeError；线上网关也已删掉那两条路径。注释、字符串、测试文件里出现的不算。
+ */
+export function checkRemovedNotifyApis(root) {
+    const hits = backendCodeFiles(root).filter(s => REMOVED_NOTIFY_RE.test(s.text)).map(s => s.rel);
+    if (hits.length === 0) return [];
+    return [{
+        level: 'bad',
+        msg: `后端还在用已移除的 ctx.pt.notify.channel / notify.listChannels（${hits.join('、')}）`,
+        why: '已移除，改用 ctx.pt.notify.send({ title, text?, imageUrl?, link? })，投递目标由使用者配置：' +
+             '任务里发到订阅时选的渠道，用户请求里发到应用的即时通知渠道（须在 manifest 声明 backend.notify.instant: true）；应用既不指定也看不到渠道名（参数里也别放渠道名）。' +
+             '本地用 .ptx/notify-targets.json 模拟投递目标。'
+    }];
+}
+
+/**
+ * `notify.email` 的识别（收紧口径，宁可漏报不误报——这条只是提醒）：
+ *   · 直接访问：`pt.notify.email` / `pt?.notify?.email`（前缀不限：`ctx.pt`、`c.pt`、解构出的 `pt`；成员链可换行）；
+ *   · 从 `….pt.notify` 解构出 `email`：`{ email } = ctx.pt.notify`（右侧必须以 `pt.notify` 结尾、不跨行）；
+ *   · 同一文件里先从 `….pt` 解构出 `notify`（`{ notify } = ctx.pt` / `{ pt: { notify } } = …`），再 `notify.email` / `notify?.email`。
+ * 不识别：计算属性、别名（`const p = ctx.pt; p.notify.email`）。业务对象 `prefs.notify.email`、`{ email } = user`、
+ * `{ email } = await notify(x)` 都不算。
+ */
+const NOTIFY_EMAIL_DIRECT_RE = /\bpt\s*\??\.\s*notify\s*\??\.\s*email\b/;
+const NOTIFY_EMAIL_DESTRUCTURE_RE = /\{[^{}]*\bemail\b[^{}]*\}[ \t]*=[ \t]*(?:[\w$]+[ \t]*\??\.[ \t]*)*pt[ \t]*\??\.[ \t]*notify\b(?![ \t]*(?:\??\.|[(\[])|[\w$])/;
+const NOTIFY_FROM_PT_RES = [
+    /\{[^{}]*\bnotify\b[^{}]*\}[ \t]*=[ \t]*(?:[\w$]+[ \t]*\??\.[ \t]*)*pt\b(?![ \t]*(?:\??\.|[(\[])|[\w$])/,
+    /\bpt[ \t]*:[ \t]*\{[^{}]*\bnotify\b/
+];
+const BARE_NOTIFY_EMAIL_RE = /(?<![\w$.?])notify\s*\??\.\s*email\b/;
+
+function usesNotifyEmail(text) {
+    if (NOTIFY_EMAIL_DIRECT_RE.test(text) || NOTIFY_EMAIL_DESTRUCTURE_RE.test(text)) return true;
+    return NOTIFY_FROM_PT_RES.some(re => re.test(text)) && BARE_NOTIFY_EMAIL_RE.test(text);
+}
+
+/**
+ * 邮件推送暂未开放（平台 NOTIFY_ENABLED=false）：`ctx.pt.notify.email` 线上一律 503 `NOTIFY_UNAVAILABLE`，
+ * 本地桩却照常收下 —— 本地跑通不代表线上能发。API 仍保留，所以只给 warn（提醒，不算错误）。
+ * 注释、字符串、测试文件、`.d.ts` 里出现的不算。
+ */
+export function checkNotifyEmailUnavailable(root) {
+    const hits = backendCodeFiles(root).filter(s => usesNotifyEmail(s.text)).map(s => s.rel);
+    if (hits.length === 0) return [];
+    return [{
+        level: 'warn',
+        msg: `后端用了 ctx.pt.notify.email（${hits.join('、')}）：邮件推送暂未开放，正式运行会返回 NOTIFY_UNAVAILABLE；请改用 notify.send`,
+        why: '改用 ctx.pt.notify.send({ title, text?, imageUrl?, link? })，发到使用者配置的通知渠道（任务里 = 订阅时选的渠道；用户请求里 = 应用的即时通知渠道，' +
+             '须在 manifest 声明 backend.notify.instant: true）。本地桩仍会收下邮件（写 .ptx/outbox/），本地跑通不代表线上能发。'
+    }];
+}
+
+const I18N_CONTROL = /[\u0000-\u001f\u007f]/;
+const codePointLen = s => [...s].length;
+const isPlainObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/** 订阅项三语文本的问题（合规 → null）：与 contract validateManifestJobs 同口径。 */
+function i18nTextProblem(v, max, locales) {
+    if (!isPlainObj(v)) return '必须是对象（键为语言）';
+    const keys = Object.keys(v);
+    if (keys.length === 0) return '至少要有一个语言';
+    for (const k of keys) {
+        if (!locales.includes(k)) return `的键只能是 ${locales.join(' / ')}，收到 ${JSON.stringify(k)}`;
+        const t = v[k];
+        if (typeof t !== 'string' || t.trim().length === 0) return `["${k}"] 必须是非空字符串`;
+        if (I18N_CONTROL.test(t)) return `["${k}"] 不能含换行或控制字符`;
+        if (codePointLen(t) > max) return `["${k}"] 不能超过 ${max} 个字符`;
+    }
+    return null;
+}
+
+/**
+ * manifest `backend.jobs[]` 的订阅项字段（通知投递目标 brief §2）：displayName / description / defaultCron / defaultParams / subscribable。
+ * 形状不合规 → bad（平台上传 MANIFEST_JOBS_INVALID，上限读 rules.jobs）；defaultCron 不是 5 段 → warn（解析与最小间隔由平台判）；
+ * 订阅项没写 displayName → info（可选：订阅中心会退回显示 title）。
+ */
+export function checkSubscriptionItems(manifest, rules = RULES.jobs) {
+    const jobs = manifest?.backend?.jobs;
+    if (!Array.isArray(jobs) || jobs.length === 0) return [];
+    if (!rules || ['displayNameMax', 'descriptionMax', 'defaultCronMax', 'i18nLocales'].some(k => rules[k] == null)) {
+        return [{ level: 'warn', msg: 'scripts/rules.json 没有完整的 jobs 段（规则快照过旧），跳过订阅项字段检查', why: '升级 starter 的 scripts/（维护者跑 npm run sync-rules）。' }];
+    }
+    const out = [];
+    const noName = [];
+    for (const [i, job] of jobs.entries()) {
+        if (!isPlainObj(job)) continue;
+        // 缺 type / type 不是字符串时按位置点名（类型本身的问题由 manifest 校验报）
+        const name = typeof job.type === 'string' && job.type ? job.type : `backend.jobs[${i}]`;
+        const at = typeof job.type === 'string' && job.type ? `任务 ${name}` : name;
+        const bad = (field, why) => out.push({ level: 'bad', msg: `${at} 的 ${field} ${why}`, why: '平台上传会以 MANIFEST_JOBS_INVALID 拒收。' });
+        for (const [field, max] of [['displayName', rules.displayNameMax], ['description', rules.descriptionMax]]) {
+            if (job[field] === undefined) continue;
+            const why = i18nTextProblem(job[field], max, rules.i18nLocales);
+            if (why) bad(field, why);
+        }
+        if (job.defaultCron !== undefined) {
+            if (typeof job.defaultCron !== 'string' || job.defaultCron.length > rules.defaultCronMax) {
+                bad('defaultCron', `必须是至多 ${rules.defaultCronMax} 个字符的字符串`);
+            } else if (job.defaultCron.trim().split(/\s+/).length !== 5) {
+                out.push({
+                    level: 'warn', msg: `${at} 的 defaultCron ${JSON.stringify(job.defaultCron)} 不是 5 段 cron`,
+                    why: '平台上传时会解析它并检查最小间隔，解析不了即 MANIFEST_JOBS_INVALID。只支持 5 段标准 cron（不支持秒与 L / W / #）。'
+                });
+            }
+        }
+        if (job.defaultParams !== undefined && !isPlainObj(job.defaultParams)) bad('defaultParams', '必须是 JSON 对象');
+        if (job.subscribable !== undefined && typeof job.subscribable !== 'boolean') bad('subscribable', '必须是布尔值');
+        if (job.subscribable !== false && job.displayName === undefined) noName.push(name);
+    }
+    if (noName.length) {
+        out.push({
+            level: 'info', msg: `订阅项 ${noName.join(' / ')} 没写 displayName（可选）`,
+            why: '订阅中心会显示 title。想按语言显示名称与说明，加 displayName / description（zh-CN / en-US / ja-JP）与建议调度 defaultCron。'
+        });
+    }
+    if (out.length === 0) out.push({ level: 'ok', msg: `订阅项字段合规（${jobs.length} 个任务类型）` });
+    return out;
+}
+
 /**
  * 迁移必须**可加**（只增不减）。
  *
@@ -614,8 +979,8 @@ export function checkVars(root, manifest) {
  *   2. node_modules 里实际安装的版本 ≥ floor 且 ≥ 区间下界（lock 落后 / 没跑 npm install）。
  */
 export const PACKAGE_FLOORS = {
-    '@ptengine/app-sdk': { min: '2.8.0', why: '新增 asset:read scope 与 PtApp.asset.list/sharedWithMe/get（2.7 以下的 manifest schema 不认 asset:read，声明了会 SCOPE_UNKNOWN）；2.7 起 ai:invoke scope（2.6 以下的 manifest schema 不认它，声明了会 SCOPE_UNKNOWN）；2.6 起 asset:write；2.5 起 openapi:read；2.4 起 context.user' },
-    '@ptengine/app-backend': { min: '0.8.0', why: 'ctx.pt.asset.list/sharedWithMe/get（读 Drive 资产）；0.7 起 ctx.pt.ai.chat/stream（调大模型）；0.6 起 ctx.pt.asset.* 与 PtAssetDoc；0.5 起 ctx.pt.openApiUrl；0.4 起 ctx.auth.email / name' }
+    '@ptengine/app-sdk': { min: '2.10.0', why: '2.10 起 jobs:run / notify:send scope、manifest backend.jobs 订阅项字段与 backend.notify、PtApp.subscriptions.open（2.9 以下的 manifest schema 不认这两个 scope，声明了会 SCOPE_UNKNOWN）；2.8 起 asset:read scope 与 PtApp.asset.list/sharedWithMe/get（2.7 以下的 manifest schema 不认 asset:read，声明了会 SCOPE_UNKNOWN）；2.7 起 ai:invoke scope（2.6 以下的 manifest schema 不认它，声明了会 SCOPE_UNKNOWN）；2.6 起 asset:write；2.5 起 openapi:read；2.4 起 context.user' },
+    '@ptengine/app-backend': { min: '0.9.0', why: '0.9 起 ctx.pt.jobs.* / ctx.pt.notify.send / ctx.requireTrigger / ctx.auth.trigger（定时任务与推送）；0.8 起 ctx.pt.asset.list/sharedWithMe/get（读 Drive 资产）；0.7 起 ctx.pt.ai.chat/stream（调大模型）；0.6 起 ctx.pt.asset.* 与 PtAssetDoc；0.5 起 ctx.pt.openApiUrl；0.4 起 ctx.auth.email / name' }
 };
 
 function parseVersion(v) {
@@ -798,13 +1163,19 @@ export async function run(args, root) {
     results.push(...checkPackageFloors(root));
     results.push(checkVars(root, manifest));
     checkScopeConsistency(root, manifest);
+    results.push(...checkJobs(root, manifest));
+    results.push(...checkNotifyScope(root, manifest));
+    results.push(...checkRemovedNotifyApis(root));
+    results.push(...checkNotifyEmailUnavailable(root));
+    results.push(...checkInstantNotify(root, manifest));
+    results.push(...checkSubscriptionItems(manifest));
     checkMigrationsAdditive(root, manifest, results);
     checkGitignore(root);
     checkTokenLeak(root);
 
     if (args.includes('--deps')) await checkDeps(root);
 
-    const icon = { ok: '[ok]', warn: '[!] ', bad: '[x] ' };
+    const icon = { ok: '[ok]', info: '[i] ', warn: '[!] ', bad: '[x] ' };
     for (const r of results) {
         console.log(`  ${icon[r.level]} ${r.msg}`);
         if (r.why) console.log(`         ${r.why}`);
@@ -812,8 +1183,9 @@ export async function run(args, root) {
 
     const bads = results.filter(r => r.level === 'bad').length;
     const warns = results.filter(r => r.level === 'warn').length;
+    const infos = results.filter(r => r.level === 'info').length;
     console.log(
-        `\n  ${results.length - bads - warns} 项通过` +
+        `\n  ${results.length - bads - warns - infos} 项通过` +
         `${warns ? `，${warns} 项提醒` : ''}` +
         `${bads ? `，${bads} 项需要修` : ''}\n`
     );

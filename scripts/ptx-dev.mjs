@@ -16,14 +16,17 @@
  *
  * 本地配置怎么注入的：**这里不做任何注入**。`wrangler dev` 原生读配置文件同目录下的
  * `.dev.vars`，把每一行 `KEY=VALUE` 当成一个 env 变量绑上去（启动日志里那句
- * "Using secrets defined in .dev.vars"）。下面 start('worker', …) 的 cwd 是 `backend/`，
- * 而且**不传 `--var` 也不传 `--config`**，所以 `backend/.dev.vars` 一定会被读到 ——
+ * "Using secrets defined in .dev.vars"）。下面 start('worker', …) 的 cwd 是 `backend/`，不传 `--var`；
+ * `-c wrangler.jsonc` 指的就是 backend/ 下同一份配置（第一份 = 主 worker，.dev.vars 跟它走），
+ * 第二个 `-c` 只是把本地网关桩一起拉起来；所以 `backend/.dev.vars` 仍会被读到 ——
  * 密钥与普通配置共用这一个文件。已实测（wrangler 4.128.0）。
- * 若哪天加了 `--config` 指到别处，就要在这里显式读 `.dev.vars` 并逐条 `--var NAME:VALUE` 补回来。
+ * 若哪天第一份 `-c` 指到别处，就要在这里显式读 `.dev.vars` 并逐条 `--var NAME:VALUE` 补回来。
  */
 import { spawn } from 'node:child_process';
 import { generateDevKeys } from './dev-keys.mjs';
 import { readManifest, requireBackendResolution } from './manifest.mjs';
+import { LOCAL_STUB_PORT, startLocalStub } from './local-stub/server.mjs';
+import { localAppName } from './local-stub/notify.mjs';
 
 /**
  * 端口可通过环境变量覆盖 —— 5173 被别的项目占着是很常见的情况，
@@ -112,7 +115,10 @@ export function planDev(manifest, root, { webPort = WEB_PORT, apiPort = API_PORT
         procs.push({
             name: 'worker',
             command: npx,
-            args: ['wrangler', 'dev', '--port', apiPort, '--local', ...extraArgs],
+            // 两份配置一个会话：第一份是你的后端（端口、.dev.vars 都跟它走），第二份是本地网关桩，
+            // backend/wrangler.jsonc 的 services[PT_GATEWAY] 按名字绑到它。
+            args: ['wrangler', 'dev', '-c', 'wrangler.jsonc', '-c', '../scripts/local-gateway/wrangler.jsonc',
+                   '--port', apiPort, '--local', ...extraArgs],
             cwd: `${root}/backend`
         });
     } else if (extraArgs.length > 0) {
@@ -127,6 +133,24 @@ export function planDev(manifest, root, { webPort = WEB_PORT, apiPort = API_PORT
     });
 
     return { hasBackend, procs };
+}
+
+/**
+ * 起本地推送 / 图表桩（定时任务 1b）。只在有后端时起；起不来（多半是 8788 被占）**不中断 ptx dev** ——
+ * 只有 ctx.pt.notify / render 本地不可用（网关桩会回 503 PTX_STUB_UNAVAILABLE），其它照常。
+ * 返回横幅里的一行说明。
+ */
+export async function maybeStartLocalStub(manifest, root, { hasBackend }, start = startLocalStub) {
+    if (!hasBackend) return '';
+    try {
+        await start({ root, appName: localAppName(manifest) });
+        return `推送 / 图表本地桩 http://localhost:${LOCAL_STUB_PORT}（邮件写 .ptx/outbox/，图片写 .ptx/media/，不真实发信）`;
+    } catch (e) {
+        const why = e?.code ?? e?.message ?? e;
+        return e?.code === 'EADDRINUSE'
+            ? `[!] 推送 / 图表本地桩没起来（${why}）：${LOCAL_STUB_PORT} 被占（可能是另一个 ptx dev）：notify / render 可能写到别处或 503，其它不受影响`
+            : `[!] 推送 / 图表本地桩没起来（127.0.0.1:${LOCAL_STUB_PORT}：${why}）—— ctx.pt.notify / render 本地会 503，其它不受影响`;
+    }
 }
 
 export async function run(args, root) {
@@ -145,6 +169,7 @@ export async function run(args, root) {
 `);
     } else {
         const { kid, aud, iss, scopes } = generateDevKeys(root);
+        const stubLine = await maybeStartLocalStub(manifest, root, { hasBackend });
         console.log(`
   本地开发已就绪（鉴权是真的，不是绕过的）
 
@@ -157,6 +182,8 @@ export async function run(args, root) {
 
   令牌的 scopes 照抄 manifest.json：要改权限就改 manifest 再重启。
   临时模拟别的站点 / 缺某个权限：直接改 web/.ptx-dev-key.json 的 sid / scopes，不用重启（下次 ptx dev 会重写它）。
+  ctx.pt.jobs.* 走本地内存桩（重启即清空）；运行任务路由：npm run ptx -- job run <type> [--params '{…}'] [--preview]
+  ${stubLine}
   密钥与普通配置都写在 backend/.dev.vars（一个文件，一行一个 KEY=VALUE），ptx 不会覆盖它们。
   线上只注入 manifest.backend.secrets / backend.vars 声明过的名字。
 `);

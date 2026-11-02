@@ -1,7 +1,7 @@
 {
     "name": "ptengine-app-starter",
     "private": true,
-    "version": "3.7.1",
+    "version": "3.8.0",
     "type": "module",
     "scripts": {
         "dev": "node scripts/ptx.mjs dev",
@@ -14,8 +14,8 @@
         "ptx": "node scripts/ptx.mjs"
     },
     "dependencies": {
-        "@ptengine/app-backend": "^0.8.0",
-        "@ptengine/app-sdk": "^2.8.0",
+        "@ptengine/app-backend": "^0.9.0",
+        "@ptengine/app-sdk": "^2.10.0",
         "@ptengine/design-components": "^0.5.0",
         "react": "^19.1.1",
         "react-dom": "^19.1.1"
@@ -32,5 +32,9 @@
         "typescript": "~5.9.3",
         "vite": "^7.0.0",
         "wrangler": "^4.128.0"
+    },
+    "optionalDependencies": {
+        "@resvg/resvg-js": "^2.6.2",
+        "echarts": "^5.6.0"
     }
 }
