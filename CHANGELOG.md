@@ -10,7 +10,7 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/app-backend` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|---|
-| v3.8.0-rc.1（预发，tag `next-3.8.0-rc.1`）| `^2.10.0-rc.1` | `^0.9.0-rc.1` | `^0.5.0` | **2**（轻应用 1）| 定时任务与推送（`jobs:run` / `notify:send`、`backend.jobs`、`ctx.pt.jobs.*` / `ctx.pt.notify.send`、`PtApp.subscriptions.open`）。**预发**：依赖钉 npm `next` 上的 rc，只供 dev / staging 平台（App Builder 的 dev / staging 沙箱镜像）使用；tag 刻意不叫 `v3.*`，skill 取最新 `v3.*` 时不会选中。prod 上线时转正为 v3.8.0 |
+| v3.8.0 | `^2.10.0` | `^0.9.0` | `^0.5.0` | **2**（轻应用 1）| 定时任务与推送（`jobs:run` / `notify:send`、`backend.jobs`、`ctx.pt.jobs.*` / `ctx.pt.notify.send`、`PtApp.subscriptions.open`）。另含即时通知声明 `backend.notify.instant`（app-sdk 2.10.0 起）。邮件推送在平台侧暂未开放 |
 | v3.7.1 | `^2.8.0` | `^0.8.0` | `^0.5.0` | **2**（轻应用 1）| 本地 dev token 的 `scopes` 改为照抄 `manifest.json`（以前写死四项，声明了 `asset:read` / `asset:write` / `ai:invoke` 的应用本地 403）；`AGENTS.md` 与后端模板头注释的能力清单对齐到 app-sdk 2.8 / app-backend 0.8 的实际导出。依赖区间不变 |
 | v3.7.0 | `^2.8.0` | `^0.8.0` | `^0.5.0` | **2**（轻应用 1）| 新增 `asset:read` scope：以**当前使用者**身份读 Ptengine Drive 资产树（文件夹 / 落地页 / 页面组 / 图片 / 组件 / 字体 / Studio 知识资产 / 快捷方式），可见范围等于他在产品里能看到的。前端 `PtApp.asset.list / sharedWithMe / get`（`@ptengine/app-sdk` 2.8），后端 `ctx.pt.asset.list / sharedWithMe / get`（`@ptengine/app-backend` 0.8）。它是**读类** scope：本工作区自建应用自动视为已授权，外部 / 商店应用需管理员同意。字段与错误码见包内 `asset-read.llms.txt`。**`0.x` 的 caret 不跨 minor，旧项目要手改区间再 `npm install`** |
 | v3.6.1 | `^2.7.0` | `^0.7.0` | `^0.5.0` | **2**（轻应用 1）| 修正 `ai:invoke` 的可用模型清单：v3.6.0 带的 28 项里**只有 4 项真能调通**，其余是地域封锁 / 前缀写错 / 版本号写法不存在。依赖区间不变 |
@@ -32,26 +32,19 @@
 | v1.0.1 | `^0.3.0` | — | — | 1 | 支持在平台内加载本地 dev server 联调 |
 | v1.0.0 | `^0.2.0` | — | — | 1 | 首个版本 |
 
-## [3.8.0-rc.1] - 2026-10-27
+## [3.8.0] - 2026-11-02
 
-> **预发 rc**：tag `next-3.8.0-rc.1`（不是 `v3.*`，外部 skill 不会拉到），依赖 `@ptengine/app-sdk ^2.10.0-rc.1` / `@ptengine/app-backend ^0.9.0-rc.1`
-> （npm dist-tag `next`），`PACKAGE_FLOORS` 同步。只给 dev / staging 平台用；prod 上线时转正为 v3.8.0（区间改回 `^2.10.0` / `^0.9.0`、打 `v3.8.0`）。
+> 定时任务与推送随 prod 平台上线转正：依赖 `@ptengine/app-sdk ^2.10.0` / `@ptengine/app-backend ^0.9.0`，`PACKAGE_FLOORS` 同步。
+> 预发期曾以 tag `next-3.8.0-rc.1`（依赖 rc 版）供 dev / staging 使用，内容与本版相同。
 
-> 依赖区间与 `PACKAGE_FLOORS` 已升到 app-sdk 2.10.0-rc.1 / app-backend 0.9.0-rc.1，兼容矩阵已补行（转正时改为正式版）。
->
-> **发版前置（平台侧 chore，未完成不得发本版 starter）**——只看「npm 包已发」不够，下面两件没做时，照 `AGENTS.md` 写出的应用线上会被拒或崩：
-> 1. **ptengine-x backend 已把 `@ptengine/app-sdk` 升到含 `notify:send` 的版本并部署**：上传包由
->    `backend/src/components/custom-app/helpers/bundle-validator.ts` 用 app-sdk 的 manifest schema 校验，旧 schema 没有
->    `notify:send`，声明了它的包上传即被拒（本地 doctor 读 `rules.json` 会放行，本地发现不了）。
->    订阅项字段（`displayName` 等）**不受这条影响**：`backend.jobs` 只出现在有后端（`schemaVersion: 2`）的应用里，这类包的上传走 platform 轨道、
->    由 contract `validateManifestJobs` 校验，与 backend pin 的 app-sdk 版本无关（bundle-validator 只用于旧的轻量应用路径）。
-> 2. **workers 已重新生成 edge 的 SDK 资产并部署**（`workers/package.json` 的 app-sdk 升到含 `PtApp.subscriptions` 的 minor、跑 `build:sdk-asset`、
->    改 `EXPECTED_APP_SDK_MINOR`，见 workers/README「Edge 自持的运行时 SDK」）：应用运行时的 `window.PtApp` 来自 edge `/__pt/app-sdk.js`，
->    旧资产上 `PtApp.subscriptions` 为 `undefined`（AGENTS.md 的标准写法会退回提示「点右上角『订阅』」，不会崩，但加速入口不可用）。
-> 3. **上线顺序**：**workers gateway 须先于或同批于新版 app-backend**——新版 app-backend 只对「429 + `TOO_MANY_CONCURRENT_QUERIES` +
->    `x-pt-gate: concurrency`」退避重试，旧 gateway 的闸 429 不带这个头，新包跑在旧 gateway 上打满并发闸时直接失败、不重试；
->    **ptengine-x backend 须与带 `identity.appId` 的 platform 同批或之后**——新 backend 缺这个字段时任务 run 启动一律 502。
+> **上线前置（与平台同批）**：
+> 1. **workers 的 edge 运行时 SDK** 升到 app-sdk 2.10 并部署（`workers/package.json`、`build:sdk-asset`、`EXPECTED_APP_SDK_MINOR`，见 workers/README「Edge 自持的运行时 SDK」）：
+>    应用运行时的 `window.PtApp` 来自 edge `/__pt/app-sdk.js`，旧资产上 `PtApp.subscriptions` 为 `undefined`（标准写法会退回提示「点右上角『订阅』」，不会崩）。
+> 2. **workers gateway 须先于或同批于新版 app-backend**：app-backend 0.9 只对「429 + `TOO_MANY_CONCURRENT_QUERIES` + `x-pt-gate: concurrency`」退避重试，
+>    旧 gateway 的闸 429 不带这个头，打满并发闸时直接失败、不重试。
+> 3. **ptengine-x backend 须与带 `identity.appId` 的 platform 同批或之后**：新 backend 缺这个字段时任务 run 启动一律 502。
 >    详见 custom-app-platform `docs/PHASE0-INFRA.md`「上线顺序（跨仓）」。
+> 4. ptengine-x backend 用 app-sdk 的 manifest schema 校验**轻应用**（schemaVersion 1）上传；有后端的应用（`backend.jobs` / `notify:send` 只出现在这类应用里）走 platform 轨道、由 contract 校验，不受 backend pin 的 app-sdk 版本影响。
 
 ### 新增
 

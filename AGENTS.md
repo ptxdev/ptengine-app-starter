@@ -332,8 +332,8 @@ Worker 自己不能起定时（见[硬边界 3](#3-后端没有的能力写了�
 之后在抽屉里看 / 改 / 删自己的订阅。**应用不用写订阅界面，也不碰渠道。**
 
 > ⚠️ `ctx.auth.trigger / jobId / runId / preview`、`ctx.requireTrigger()`、`ctx.pt.jobs.*` 与 `ctx.pt.notify.send` 需要
-> **`@ptengine/app-backend` ≥ 0.9.0**（预发期为 npm `next` 上的 `0.9.0-rc.1`）才生效；manifest 的 `backend.jobs`（含下面的订阅项字段）与 `jobs:run`
-> 同样需要 **`@ptengine/app-sdk` ≥ 2.10.0**（预发期 `2.10.0-rc.1`）：旧版 SDK 只影响编辑器里的 manifest schema 提示与 TS 类型（新字段会被标红 / 类型里没有），
+> **`@ptengine/app-backend` ≥ 0.9.0** 才生效；manifest 的 `backend.jobs`（含下面的订阅项字段）与 `jobs:run`
+> 同样需要 **`@ptengine/app-sdk` ≥ 2.10.0**：旧版 SDK 只影响编辑器里的 manifest schema 提示与 TS 类型（新字段会被标红 / 类型里没有），
 > 上传由平台按 contract 校验，不受影响。旧版 app-backend 的类型里没有这些字段（tsc 报错），运行时也拿不到。
 
 1. **`manifest.json`**：`scopes` 加 `"jobs:run"`（要发通知再加 `"notify:send"`）；`backend.jobs` 每个**订阅项**一项。
