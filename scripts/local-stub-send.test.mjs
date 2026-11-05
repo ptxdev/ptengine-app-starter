@@ -264,3 +264,32 @@ test('本地桩可能产出的 noTargetsReason 全部在 RULES.notifySend.noTarg
     assert.deepEqual([...produced].sort(), ['APP_DEFAULT_EMPTY', 'APP_INSTANT_NOT_DECLARED', 'JOB_TARGETS_EMPTY']);
     for (const reason of produced) assert.ok(known.includes(reason), reason);
 });
+
+test('validateSendMessage：热图截图 jpg（rules.notifySend.mediaPathPatterns）同样放行；形状不对的拒', () => {
+    const base = `https://media.app.ptengine.ai/media/ws-1/my-app/hm/${HEX}`;
+    for (const ok of [`${base}/clickMap/full.jpg`, `${base}/attentionMap/part-01.jpg`, `${base}/conversionBlockMap/part-123.jpg`]) {
+        const v = validateSendMessage({ message: { title: 't', imageUrl: ok } });
+        assert.equal(v.message?.imageUrl, ok, ok);
+        assert.equal(v.warnings.length, 1, ok);
+    }
+    for (const bad of [
+        `${base}/clickMap/full.png`, `${base}/clickMap/part-1.jpg`, `${base}/clickMap/part-1234.jpg`, `${base}/scrollMap/full.jpg`,
+        `${base}/clickMap/thumb.jpg`, `${base}/full.jpg`, `https://m.x/media/ws-1/my-app/hm/${'a'.repeat(31)}/clickMap/full.jpg`,
+        `https://m.x/media/ws-1/my-app/hm/${'A'.repeat(32)}/clickMap/full.jpg`, `https://m.x/media/ws-1/my-app/${HEX}.jpg`,
+        `${base}/clickMap/full.jpg?x=1`, `https://m.x:443/media/ws-1/my-app/hm/${HEX}/clickMap/full.jpg`,
+        `http://m.x/media/ws-1/my-app/hm/${HEX}/clickMap/full.jpg`
+    ]) {
+        assert.equal(codeOf(validateSendMessage({ message: { title: 't', imageUrl: bad } }).error), 'NOTIFY_CHANNEL_MESSAGE_INVALID', bad);
+    }
+});
+
+test('validateSendMessage：旧快照没有 mediaPathPatterns → 退回 mediaPathPattern（只收图表 png）；有但形状不对 → 规则快照过旧', () => {
+    const { mediaPathPatterns, ...old } = C;
+    assert.ok(Array.isArray(mediaPathPatterns), '当前快照应有 mediaPathPatterns（跑 npm run sync-rules）');
+    const hm = `https://m.x/media/ws-1/my-app/hm/${HEX}/clickMap/full.jpg`;
+    assert.ok(validateSendMessage({ message: { title: 't', imageUrl: `https://m.x/media/ws-1/my-app/${HEX}.png` } }, old).message);
+    assert.equal(codeOf(validateSendMessage({ message: { title: 't', imageUrl: hm } }, old).error), 'NOTIFY_CHANNEL_MESSAGE_INVALID');
+    for (const bad of [[], 'x', [1], {}]) {
+        assert.throws(() => sendRules({ ...C, mediaPathPatterns: bad }), /mediaPathPatterns[\s\S]*规则快照过旧/, JSON.stringify(bad));
+    }
+});

@@ -209,6 +209,10 @@
         "linkPathMax": 512,
         "linkPathPattern": "^[A-Za-z0-9\\-._~!$&'()*+,;=:@\\/?%]*$",
         "mediaPathPattern": "^\\/media\\/[A-Za-z0-9_-]{1,64}\\/[a-z0-9-]{1,63}\\/[0-9a-f]{32}\\.png$",
+        "mediaPathPatterns": [
+            "^\\/media\\/[A-Za-z0-9_-]{1,64}\\/[a-z0-9-]{1,63}\\/[0-9a-f]{32}\\.png$",
+            "^\\/media\\/[A-Za-z0-9_-]{1,64}\\/[a-z0-9-]{1,63}\\/hm\\/[0-9a-f]{32}\\/(?:clickMap|attentionMap|clickElementMap|conversionElementMap|dropOff|attentionBlockMap|conversionBlockMap)\\/(?:full|part-\\d{2,3})\\.jpg$"
+        ],
         "maxUnitsPerRun": 10,
         "maxPerWorkspacePerMinute": 30,
         "maxTargets": 5,
