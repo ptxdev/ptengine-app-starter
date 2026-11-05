@@ -200,7 +200,7 @@ Workers for Platforms 的 user worker 不支持 Cron Triggers，`wrangler.jsonc`
   `message.link` 是原始 `{ label, path }`（不展开；线上存展开后的 `{ label, url }`）、`targets` 只有 name / type（线上每个目标还有渲染出的请求体与投递结果）。属预期，不是 bug。
   另外，线上存档里的渲染结果与实际发出的体只是语义相等（键序可能不同），不能用来重算 webhook 签名。
 - **本地 400 `NOTIFY_CHANNEL_MESSAGE_INVALID`**：看 `e.detail.field` 是哪个字段（线上同样带）。
-  - `message.imageUrl`：本地只收 `ctx.pt.render.chart()` 本地桩返回的 `http://localhost:8788/__ptx/media/…`（或路径形状同平台 media 地址的 https）；外链图片线上同样会被拒。
+  - `message.imageUrl`：本地只收 `ctx.pt.render.chart()` 本地桩返回的 `http://localhost:8788/__ptx/media/…`（或路径形状同平台 media 地址的 https：图表 png，或 `ctx.pt.heatmap.getCapture()` 返回的热图截图 jpg）；外链图片线上同样会被拒。
   - `message.link.path`：只接受应用内路径 —— 不能带 scheme（以字母开头、由字母 / 数字 / `+` `.` `-` 组成并紧跟冒号的前缀，如 `https:`、`javascript:`，所以 `reports:42` 也算），
     不能以 `//` 开头、去掉一个前导 `#/` / `/` 后也不能再以 `/` 开头，`?` 之前不能有 `.` / `..` 路径段（含 `%2e` 编码）。线上同口径拒。
 - **线上 `notify.send` 5xx `NOTIFY_CHANNEL_SEND_FAILED`（按错误码判断：平台回 502，经 ptengine-x 到应用是 500）**：这次的**所有**目标都没收下，`e.detail.deliveryErrors` 按目标顺序给出投递错误码（含 `CHANNEL_KEY_UNAVAILABLE`：该目标凭据解不开）；部分成功不会报错（`status: 'partial'`）。

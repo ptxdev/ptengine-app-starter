@@ -61,6 +61,14 @@ test('notifySend 段（通知投递目标 brief §1.5）：取代 1c 的 notifyC
     const media = new RegExp(c.mediaPathPattern);
     assert.ok(media.test(`/media/ws-1/my-app/${'a'.repeat(32)}.png`));
     assert.ok(!media.test(`/media/ws-1/my-app/${'a'.repeat(31)}.png`));
+    // 热图截图起（heatmap.capture）：mediaPathPatterns = 图表 png + 热图 jpg，第一项就是 mediaPathPattern
+    assert.ok(Array.isArray(c.mediaPathPatterns) && c.mediaPathPatterns.length === 2, '缺 mediaPathPatterns（跑 npm run sync-rules）');
+    assert.equal(c.mediaPathPatterns[0], c.mediaPathPattern);
+    const hm = new RegExp(c.mediaPathPatterns[1]);
+    assert.ok(hm.test(`/media/ws-1/my-app/hm/${'a'.repeat(32)}/clickMap/full.jpg`));
+    assert.ok(hm.test(`/media/ws-1/my-app/hm/${'a'.repeat(32)}/dropOff/part-01.jpg`));
+    assert.ok(!hm.test(`/media/ws-1/my-app/hm/${'a'.repeat(32)}/scrollMap/full.jpg`));
+    assert.ok(!hm.test(`/media/ws-1/my-app/${'a'.repeat(32)}.png`));
     assert.equal(c.testTitlePrefix, '[TEST] ');
     assert.deepEqual(Object.keys(c.webhookHeaders).sort(), ['id', 'signature', 'timestamp']);
     assert.ok(Object.values(c.webhookHeaders).every(v => typeof v === 'string' && v.startsWith('x-pt-webhook-')));

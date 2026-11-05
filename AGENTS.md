@@ -525,7 +525,7 @@ Chatwork API 令牌 + 房间 / 通用 Webhook）；使用者在订阅抽屉里�
     const r = await ctx.pt.notify.send({
         title: '首页 CVR 异常',                                               // 1–150 字，不能换行
         text: `比上周同期下降 ${Math.round(drop * 100)}%`,                    // 可省略；≤ 3000 字纯文本，可换行
-        imageUrl: chart.url,                                                  // 只收本应用 render.chart 返回的图
+        imageUrl: chart.url,                                                  // 只收本应用 render.chart 返回的图与本应用 heatmap.capture 的截图
         link: { label: '查看报告', path: '#/reports/cvr' }                    // 应用内路径；平台展开成「在 Ptengine 里打开本应用」的链接
     });
     ctx.log('notify.send', { status: r.status, targets: r.targets, sent: r.sent, failed: r.failed, noTargetsReason: r.noTargetsReason });

@@ -35,16 +35,25 @@ const REQUIRED_SEND_KEYS = ['types', 'titleMax', 'textMax', 'linkLabelMax', 'lin
 /** rules.json 里以 { source, flags } 存的正则键：形状不对（不是两个字符串）同样视为快照过旧，不还原成意外的正则。 */
 const REGEX_SEND_KEYS = ['linkPathSchemePattern', 'linkPathDotSegmentPattern'];
 const isRegexShape = v => typeof v?.source === 'string' && typeof v?.flags === 'string';
+/** mediaPathPatterns（可选键，热图截图起才有）：有就必须是非空字符串数组，否则同样视为快照过旧。 */
+const isPatternList = v => Array.isArray(v) && v.length > 0 && v.every(p => typeof p === 'string');
 
 export function sendRules(rules) {
     const missing = rules
         ? REQUIRED_SEND_KEYS.filter(k => rules[k] == null || (REGEX_SEND_KEYS.includes(k) && !isRegexShape(rules[k])))
         : ['notifySend'];
+    if (rules && rules.mediaPathPatterns != null && !isPatternList(rules.mediaPathPatterns)) missing.push('mediaPathPatterns');
     if (missing.length) {
         throw new Error(`scripts/rules.json 的 notifySend 段缺 ${missing.join(' / ')}（规则快照过旧）。维护者请跑 npm run sync-rules。`);
     }
     return rules;
 }
+
+/**
+ * imageUrl 路径可接受的 media 形状：优先 mediaPathPatterns（图表 png + 热图截图 jpg，平台同口径），
+ * 旧快照只有单个 mediaPathPattern（只收图表 png）时退回它。
+ */
+const mediaPatternsOf = r => (r.mediaPathPatterns ?? [r.mediaPathPattern]).map(p => new RegExp(p));
 
 /** rules.json 里以 { source, flags } 存的正则还原成 RegExp（contract buildRules().notifySend 的序列化形状）。 */
 const regexOf = ({ source, flags }) => new RegExp(source, flags);
@@ -75,7 +84,8 @@ const LOCAL_TARGET_NAME_MAX = 64;
 /**
  * 校验并规范化 `{ message }`（brief §4.4 第 3 步，规则同 1c §4.3）。返回 `{ message, warnings }` 或 `{ error }`。
  * 请求体里 message 以外的键（应用塞的 channel / channelIds 之类）一律忽略 —— 线上 backend 也只取 message。
- * imageUrl 本地只收两种：本地图表桩的地址；或 https 且路径匹配平台 media 形状（rules.notifySend.mediaPathPattern）——
+ * imageUrl 本地只收两种：本地图表桩的地址；或 https 且路径匹配平台 media 形状（rules.notifySend.mediaPathPatterns：
+ * 图表 png 与 heatmap.capture 的热图截图 jpg；旧快照退回单个 mediaPathPattern）——
  * 后者本地核不了主机与工作区 / 应用段，放行并给一条提示。
  */
 export function validateSendMessage(body, rules = RULES.notifySend) {
@@ -105,8 +115,8 @@ export function validateSendMessage(body, rules = RULES.notifySend) {
         if (typeof m.imageUrl !== 'string') return invalid('message.imageUrl', 'message.imageUrl 必须是字符串');
         if (!LOCAL_MEDIA_SRC.test(m.imageUrl)) {
             const path = HTTPS_RAW.exec(m.imageUrl)?.[1] ?? null;
-            if (path === null || !new RegExp(r.mediaPathPattern).test(path)) {
-                return invalid('message.imageUrl', 'message.imageUrl 只收 ctx.pt.render.chart() 返回的图片地址（本地是 http://localhost:8788/__ptx/media/…，线上是平台 media 地址），不收外链');
+            if (path === null || !mediaPatternsOf(r).some(re => re.test(path))) {
+                return invalid('message.imageUrl', 'message.imageUrl 只收 ctx.pt.render.chart() 返回的图、或 ctx.pt.heatmap.getCapture() 结果里的热图截图地址（本地图表桩是 http://localhost:8788/__ptx/media/…，线上是平台 media 地址），不收外链');
             }
             warnings.push('message.imageUrl 不是本地图表桩的地址：本地只核对了路径形状，线上还会核对主机，并要求是本工作区本应用渲染的图');
         }
