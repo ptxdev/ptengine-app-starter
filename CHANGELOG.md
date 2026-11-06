@@ -10,6 +10,7 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/app-backend` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|---|
+| v3.9.0 | `^2.11.0` | `^0.10.0` | `^0.5.0` | **2**（轻应用 1）| 热图截图：前端 `PtApp.heatmap.capture / getCapture`（app-sdk 2.11），后端 `ctx.pt.heatmap.capture / getCapture`（app-backend 0.10），需 `analytics:read`；推送 `imageUrl` 也收本应用的热图截图。**`0.x` 的 caret 不跨 minor，旧项目要手改区间再 `npm install`** |
 | v3.8.0 | `^2.10.0` | `^0.9.0` | `^0.5.0` | **2**（轻应用 1）| 定时任务与推送（`jobs:run` / `notify:send`、`backend.jobs`、`ctx.pt.jobs.*` / `ctx.pt.notify.send`、`PtApp.subscriptions.open`）。另含即时通知声明 `backend.notify.instant`（app-sdk 2.10.0 起）。邮件推送在平台侧暂未开放 |
 | v3.7.1 | `^2.8.0` | `^0.8.0` | `^0.5.0` | **2**（轻应用 1）| 本地 dev token 的 `scopes` 改为照抄 `manifest.json`（以前写死四项，声明了 `asset:read` / `asset:write` / `ai:invoke` 的应用本地 403）；`AGENTS.md` 与后端模板头注释的能力清单对齐到 app-sdk 2.8 / app-backend 0.8 的实际导出。依赖区间不变 |
 | v3.7.0 | `^2.8.0` | `^0.8.0` | `^0.5.0` | **2**（轻应用 1）| 新增 `asset:read` scope：以**当前使用者**身份读 Ptengine Drive 资产树（文件夹 / 落地页 / 页面组 / 图片 / 组件 / 字体 / Studio 知识资产 / 快捷方式），可见范围等于他在产品里能看到的。前端 `PtApp.asset.list / sharedWithMe / get`（`@ptengine/app-sdk` 2.8），后端 `ctx.pt.asset.list / sharedWithMe / get`（`@ptengine/app-backend` 0.8）。它是**读类** scope：本工作区自建应用自动视为已授权，外部 / 商店应用需管理员同意。字段与错误码见包内 `asset-read.llms.txt`。**`0.x` 的 caret 不跨 minor，旧项目要手改区间再 `npm install`** |
@@ -31,6 +32,28 @@
 | v1.1.0 | `^0.3.0` | — | `^0.3.0` | 1 | 预装 UI 组件库 + Tailwind，暗色跟随平台主题 |
 | v1.0.1 | `^0.3.0` | — | — | 1 | 支持在平台内加载本地 dev server 联调 |
 | v1.0.0 | `^0.2.0` | — | — | 1 | 首个版本 |
+
+## [3.9.0] - 2026-11-06
+
+> 热图截图随 prod 平台上线：依赖 `@ptengine/app-sdk ^2.11.0` / `@ptengine/app-backend ^0.10.0`（均已发到 npm latest），`PACKAGE_FLOORS` 同步。
+>
+> **上线前置（与平台同批）**：workers 的 edge 运行时 SDK 升到 app-sdk 2.11 并部署（`deploy:workers:prod`）；
+> 宿主（frontend-base）的桥认 `heatmap.capture` / `getCapture`，ptengine-x backend 的截图端点已上线。
+> 旧宿主 / 旧运行时 SDK 上调用会 reject `PT_METHOD_NOT_ALLOWED`，应用侧按能力探测退回提示。
+
+### 新增
+
+- **热图截图**（需 manifest 声明 `analytics:read`）：前端 `PtApp.heatmap.capture(input)` / `getCapture(captureId)`（app-sdk 2.11），
+  后端 `ctx.pt.heatmap.capture(input)` / `getCapture(captureId)`（app-backend 0.10，定时任务里以订阅者身份执行）。
+  异步两段式：`capture` 立即返回任务（通常 `queued`，命中缓存直接 `succeeded`），SDK 不代为轮询，建议 10 s 首查、之后每 5 s。
+  每类一张整页长图 `full` + 分段 `parts`，图片为公开不可猜链接，约 90 天后失效。字段与错误码见 app-sdk README「Heatmap screenshots」与两个包的 CHANGELOG。
+- `AGENTS.md`：`notify.send` 的 `imageUrl` 注明也收本应用 `heatmap.capture` 的截图。
+- 规则快照同步（platform contract）：新增 `notifySend.mediaPathPatterns`；本地桩的 `imageUrl` 路径按任一模式匹配（旧快照退回 `mediaPathPattern`），热图截图 jpg 本地放行。
+
+### 变更
+
+- **依赖区间**：`@ptengine/app-sdk` `^2.10.0` → `^2.11.0`，`@ptengine/app-backend` `^0.9.0` → `^0.10.0`；
+  `package-lock.json` 锁到 2.11.0 / 0.10.0，`ptx doctor` 的 `PACKAGE_FLOORS` 抬到 2.11.0 / 0.10.0。
 
 ## [3.8.0] - 2026-11-02
 
