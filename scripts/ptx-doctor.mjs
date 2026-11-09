@@ -554,6 +554,7 @@ function stripJsComments(src) {
  * 只认对象键：注释或普通字符串里出现同一串字符不算「声明了路由」。
  * 匹配前先剥注释，所以返回的 segment / fileText 都是**去掉注释后**的文本 ——
  * 注释里写的 requireTrigger( / ctx.auth.preview 同样不算数。
+ * index 是路由键在 fileText 里的偏移（剥注释保留换行，所以可以直接数换行得到行号，给 ptx audit 用）。
  */
 export function findRouteHandler(sources, route) {
     const esc = route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -565,7 +566,7 @@ export function findRouteHandler(sources, route) {
         if (!m) continue;
         const rest = text.slice(m.index + m[0].length);
         const next = nextKeyRe.exec(rest);
-        return { file: s.rel, segment: next ? rest.slice(0, next.index) : rest, fileText: text };
+        return { file: s.rel, segment: next ? rest.slice(0, next.index) : rest, fileText: text, index: m.index };
     }
     return null;
 }
