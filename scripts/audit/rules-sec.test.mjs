@@ -202,3 +202,38 @@ test('SEC-006：user_* 查询结果进 .bind 实参（D1 最常见写法）命�
     });
     assert.deepEqual(h.map(f => f.line), [3]);
 });
+
+test('SEC-006：属性名 / 对象键 / 回调参数遮蔽的同名标识符不算引用', async () => {
+    const h = await hits('SEC-006', V2(), {
+        'backend/src/a.ts': [
+            'async function a(ctx, db, stats, list, n) {',
+            "  const { rows } = await ctx.pt.query('user_list', {});",
+            '  console.log(stats.rows);',
+            "  await db.prepare('INSERT INTO t (v) VALUES (?)').bind(JSON.stringify({ rows: n })).run();",
+            '  list.map(rows => console.log(rows));',
+            '  console.log({ rows });',
+            '}'
+        ].join('\n')
+    });
+    // 只有第 6 行的简写属性 { rows } 是真引用
+    assert.deepEqual(h.map(f => f.line), [6]);
+});
+
+test('SEC-007：处理函数在别处定义（标识符 / 成员引用）不报；requireTrigger 与括号间有空白也算调过', async () => {
+    const h = await hits('SEC-007', V2({ jobs: [
+        { type: 'a', route: 'POST /jobs/a', schedule: '0 0 * * *' },
+        { type: 'b', route: 'POST /jobs/b', schedule: '0 0 * * *' },
+        { type: 'c', route: 'POST /jobs/c', schedule: '0 0 * * *' }
+    ] }), {
+        'backend/src/index.ts': [
+            'export default createApp({',
+            '  routes: {',
+            "    'POST /jobs/a': dailyJob,",
+            "    'POST /jobs/b': async (ctx) => { requireTrigger (ctx, 'job'); return {}; },",
+            "    'POST /jobs/c': jobs.weekly",
+            '  }',
+            '});'
+        ].join('\n')
+    });
+    assert.deepEqual(h, []);
+});

@@ -72,6 +72,27 @@ function bindingNames(ts, name, out = []) {
     return out;
 }
 
+/**
+ * ident 是不是在「读一个变量」：`x.rows` 的 rows、`{ rows: n }` 的键只是名字，不是对变量 rows 的引用。
+ * 简写属性 `{ rows }` 读的就是变量，算引用。
+ */
+function isReference(ts, ident) {
+    const p = ident.parent;
+    if ((ts.isPropertyAccessExpression(p) || ts.isPropertyAssignment(p)) && p.name === ident) return false;
+    return true;
+}
+
+/**
+ * 从 node 往上到 fn（不含）之间，有没有哪个函数的参数也叫 name：`list.map(rows => log(rows))` 里的
+ * rows 是回调参数，不是外层的查询结果。已知盲区：内层块里 `const rows = …` 的遮蔽不处理（少见，且只会多报 normal）。
+ */
+function shadowedByParam(ts, node, fn, name) {
+    for (let p = node.parent; p && p !== fn; p = p.parent) {
+        if (ts.isFunctionLike(p) && p.parameters?.some(prm => bindingNames(ts, prm.name).includes(name))) return true;
+    }
+    return false;
+}
+
 function enclosingFunction(ts, node) {
     for (let p = node.parent; p; p = p.parent) if (ts.isFunctionLike(p)) return p;
     return null;
@@ -244,10 +265,10 @@ function sec006(ctx) {
                 const name = callee(ts, n);
                 // .bind：D1 的 `db.prepare(sql).bind(x)` 是最常见的写法，结果出现在 bind 的实参里而不是 prepare 的
                 if (!(/\.(prepare|bind|put)$/.test(name) || name === 'console.log' || name.endsWith('.console.log'))) return;
-                const refs = new Set();
-                for (const a of n.arguments) walk(ts, a, m => { if (ts.isIdentifier(m)) refs.add(m.text); });
+                const refs = [];
+                for (const a of n.arguments) walk(ts, a, m => { if (ts.isIdentifier(m) && isReference(ts, m)) refs.push(m); });
                 // 只算赋值之后的调用：前面的同名引用不可能是这次查询的结果
-                if (vars.some(v => refs.has(v.name) && n.pos >= v.pos)) {
+                if (vars.some(v => n.pos >= v.pos && refs.some(r => r.text === v.name && !shadowedByParam(ts, r, fn, v.name)))) {
                     out.push({ rule: 'SEC-006', file: file.rel, line: lineOf(file.sf, n) });
                 }
             });
@@ -257,6 +278,9 @@ function sec006(ctx) {
 }
 
 // ─── SEC-007 任务路由没 requireTrigger ───
+/** 路由值只是一个名字：`dailyJob,` / `jobs.weekly }`（最后一个路由后面跟着收尾的括号）。 */
+const HANDLER_REF = /^\s*[A-Za-z_$][\w$]*(\s*\.\s*[A-Za-z_$][\w$]*)*\s*(,|\}|$)/;
+
 function sec007(ctx) {
     const jobs = ctx.manifest?.backend?.jobs;
     if (!Array.isArray(jobs) || jobs.length === 0) return [];
@@ -267,7 +291,9 @@ function sec007(ctx) {
         if (!job || typeof job.route !== 'string') continue;
         const hit = findRouteHandler(sources, job.route);
         // 找不到路由是 doctor 的事（JOB_ROUTE_NOT_FOUND），这里不重复报
-        if (!hit || hit.segment.includes('requireTrigger(')) continue;
+        // 与 doctor 同一个正则（允许 `requireTrigger (`）。处理函数写成别处定义的标识符 / 成员引用
+        // （`'POST /jobs/x': dailyJob`）时这一段里看不到函数体，按「拿不准就不报」放过
+        if (!hit || /requireTrigger\s*\(/.test(hit.segment) || HANDLER_REF.test(hit.segment)) continue;
         const line = hit.fileText.slice(0, hit.index).split('\n').length;
         out.push({ rule: 'SEC-007', file: hit.file, line });
     }
