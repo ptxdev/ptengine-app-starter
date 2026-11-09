@@ -292,6 +292,22 @@ export function enclosingFunction(ts, node) {
     return null;
 }
 
+/** 由近到远（所在函数 → 外层函数 → 文件顶层）找 `const name = 初值` 的初值；找不到 → null。 */
+export function constInitializer(ts, ident) {
+    const scopes = [];
+    for (let f = enclosingFunction(ts, ident); f; f = enclosingFunction(ts, f)) scopes.push(f);
+    scopes.push(ident.getSourceFile());
+    for (const scope of scopes) {
+        let found = null;
+        walk(ts, scope, n => {
+            if (!found && ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === ident.text && n.initializer
+                && ts.isVariableDeclarationList(n.parent) && (n.parent.flags & ts.NodeFlags.Const)) found = n.initializer;
+        });
+        if (found) return found;
+    }
+    return null;
+}
+
 /**
  * fn 里的两个节点（如两处调用 / 两个 await）是否不可能在同一次执行里都发生：分在同一个 if 的两支 / 三元的两支 / switch 的不同 case，
  * try 块与 catch 块（失败兜底：`try { r = await ai.chat(a) } catch { r = await ai.chat(b) }`），

@@ -7,7 +7,8 @@
  */
 import { findRouteHandler } from '../ptx-doctor.mjs';
 import {
-    bindingNames, callee, eachCall, enclosingFunction, filesIn, isReference, lineOf, shadowedByParam, stringLiteralsIn, walk
+    bindingNames, callee, constInitializer, eachCall, enclosingFunction, filesIn, isReference, lineOf, shadowedByParam, stringLiteralsIn,
+    unwrapParens, walk
 } from './scan.mjs';
 
 const KNOWN_SECRET = /^(sk-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|ghp_[A-Za-z0-9]{36})$/;
@@ -114,13 +115,51 @@ function sec002(ctx) {
 }
 
 // ─── SEC-003 D1 SQL 拼接 ───
-/** `a + b + c` 里有不是字面量的操作数。 */
+const PLACEHOLDERS = /^[?,\s]+$/;
+const isPlaceholderString = (ts, n) => !!n && isPlainString(ts, unwrapParens(ts, n)) && PLACEHOLDERS.test(unwrapParens(ts, n).text);
+
+/** 箭头 / 函数表达式只返回一个 ? 字符串：`() => '?'`、`_ => "?"`、`function () { return '?'; }`。 */
+function returnsPlaceholder(ts, fn) {
+    if (!fn || !(ts.isArrowFunction(fn) || ts.isFunctionExpression(fn))) return false;
+    if (!ts.isBlock(fn.body)) return isPlaceholderString(ts, fn.body);
+    const [only] = fn.body.statements;
+    return fn.body.statements.length === 1 && ts.isReturnStatement(only) && isPlaceholderString(ts, only.expression);
+}
+
+/**
+ * 只生成 `?` 占位的表达式（D1 IN 查询的标准安全写法，值走 .bind）：
+ * `xs.map(() => '?').join(',')`、`Array(n).fill('?').join(',')`、`'?,'.repeat(n)`。
+ */
+function isPlaceholderGen(ts, n) {
+    n = unwrapParens(ts, n);
+    if (!ts.isCallExpression(n) || !ts.isPropertyAccessExpression(n.expression)) return false;
+    const method = n.expression.name.text;
+    const recv = unwrapParens(ts, n.expression.expression);
+    if (method === 'repeat') return isPlaceholderString(ts, recv);
+    if (method !== 'join' || (n.arguments[0] && !isPlaceholderString(ts, n.arguments[0]))) return false;
+    if (!ts.isCallExpression(recv) || !ts.isPropertyAccessExpression(recv.expression)) return false;
+    const inner = recv.expression.name.text;
+    if (inner === 'map') return recv.arguments.length === 1 && returnsPlaceholder(ts, recv.arguments[0]);
+    if (inner === 'fill') return recv.arguments.length === 1 && isPlaceholderString(ts, recv.arguments[0]);
+    return false;
+}
+
+/** 插进 SQL 的表达式是安全的：字面量、`?` 占位生成器、同文件内以字面量初始化的 const（表名常量）。 */
+function isSafeSqlPart(ts, n) {
+    n = unwrapParens(ts, n);
+    if (isPlainString(ts, n) || ts.isNumericLiteral(n) || isPlaceholderGen(ts, n)) return true;
+    if (!ts.isIdentifier(n)) return false;
+    const init = constInitializer(ts, n);
+    return !!init && (isPlainString(ts, unwrapParens(ts, init)) || ts.isNumericLiteral(unwrapParens(ts, init)));
+}
+
+/** `a + b + c` 里有不安全的操作数。 */
 function concatHasVariable(ts, n) {
     if (ts.isParenthesizedExpression(n)) return concatHasVariable(ts, n.expression);
     if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.PlusToken) {
         return concatHasVariable(ts, n.left) || concatHasVariable(ts, n.right);
     }
-    return !(isPlainString(ts, n) || ts.isNumericLiteral(n));
+    return !isSafeSqlPart(ts, n);
 }
 
 function sec003(ctx) {
@@ -132,7 +171,8 @@ function sec003(ctx) {
             const arg = call.arguments[0];
             if (!arg) return;
             const isConcat = ts.isBinaryExpression(arg) && arg.operatorToken.kind === ts.SyntaxKind.PlusToken;
-            if (ts.isTemplateExpression(arg) || (isConcat && concatHasVariable(ts, arg))) {
+            const unsafeTemplate = ts.isTemplateExpression(arg) && arg.templateSpans.some(sp => !isSafeSqlPart(ts, sp.expression));
+            if (unsafeTemplate || (isConcat && concatHasVariable(ts, arg))) {
                 out.push({ rule: 'SEC-003', file: file.rel, line: lineOf(file.sf, call) });
             }
         });

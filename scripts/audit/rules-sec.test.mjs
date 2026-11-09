@@ -99,6 +99,45 @@ test('SEC-003：prepare 的 SQL 带插值 / 拼接变量命中', async () => {
     assert.deepEqual(h.map(f => f.line), [1, 2]);
 });
 
+test('SEC-003：不命中 —— IN 查询只插 ? 占位（map(() => \'?\').join / \'?\'.repeat / fill(\'?\')）', async () => {
+    const h = await hits('SEC-003', V2(), {
+        'backend/src/a.ts': [
+            "db.prepare(`SELECT * FROM t WHERE id IN (${ids.map(() => '?').join(',')})`).bind(...ids);",
+            "db.prepare(`SELECT * FROM t WHERE id IN (${ids.map(_ => \"?\").join(', ')})`).bind(...ids);",
+            "db.prepare(`DELETE FROM t WHERE id IN (${'?,'.repeat(ids.length - 1)}?)`).bind(...ids);",
+            "db.prepare('SELECT * FROM t WHERE id IN (' + Array(n).fill('?').join(',') + ')').bind(...ids);"
+        ].join('\n')
+    });
+    assert.deepEqual(h, []);
+});
+
+test('SEC-003：不命中 —— 插值是同文件内以字面量初始化的 const（表名常量）', async () => {
+    const h = await hits('SEC-003', V2(), {
+        'backend/src/a.ts': [
+            "const TABLE = 'reports';",
+            'const LIMIT = 50;',
+            'export function f(db) {',
+            '  db.prepare(`SELECT * FROM ${TABLE} LIMIT ${LIMIT}`);',
+            "  return db.prepare('DELETE FROM ' + TABLE);",
+            '}'
+        ].join('\n')
+    });
+    assert.deepEqual(h, []);
+});
+
+test('SEC-003：照报 —— 占位生成器里混了值、const 不是字面量初始化、let 变量', async () => {
+    const h = await hits('SEC-003', V2(), {
+        'backend/src/a.ts': [
+            "const T = req.query.table;",
+            "let U = 'users';",
+            "db.prepare(`SELECT * FROM t WHERE id IN (${ids.map(i => `'${i}'`).join(',')})`);",
+            'db.prepare(`SELECT * FROM ${T}`);',
+            'db.prepare(`SELECT * FROM ${U}`);'
+        ].join('\n')
+    });
+    assert.deepEqual(h.map(f => f.line), [3, 4, 5]);
+});
+
 // ─── SEC-004 ───
 test('SEC-004：dangerouslySetInnerHTML / eval / new Function / postMessage(*) 命中，限定 origin 不报', async () => {
     const h = await hits('SEC-004', V1, {
