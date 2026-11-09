@@ -4,17 +4,26 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { runAudit } from './run.mjs';
+import { validateManifest } from '../manifest.mjs';
 
 const roots = [];
 after(() => { for (const r of roots) rmSync(r, { recursive: true, force: true }); });
 
-const V2 = (backend = {}) => ({ schemaVersion: 2, backend: { egress: [], ...backend } });
-const JOBS = V2({ jobs: [{ name: 'daily', schedule: '0 1 * * *', route: '/jobs/daily' }] });
+// manifest 用真实形状（与 AGENTS.md 的 backend.jobs 示例一致：route 带方法），fixture() 里先过一遍 validateManifest，防止以后漂
+const V2 = (backend = {}, extra = {}) => ({
+    schemaVersion: 2, version: '1.0.0', entry: 'index.html', ...extra,
+    backend: { entry: '_backend/worker.js', routes: ['/api/*'], egress: [], ...backend }
+});
+const JOBS = V2({ jobs: [{ type: 'daily', route: 'POST /jobs/daily', title: '日报', defaultCron: '0 1 * * *' }] }, { scopes: ['jobs:run'] });
+/** 兼容：route 没写方法的旧写法，按路径比。 */
+const JOBS_PATH_ONLY = V2({ jobs: [{ type: 'daily', route: '/jobs/daily', title: '日报' }] }, { scopes: ['jobs:run'] });
 
 /** 临时项目：files 是 { 相对路径: 内容 }，manifest 写进 manifest.json。 */
 function fixture(manifest, files) {
     const root = mkdtempSync(join(tmpdir(), 'ptx-audit-ai-'));
     roots.push(root);
+    const { errors } = validateManifest(manifest, root);
+    assert.deepEqual(errors, [], 'fixture 的 manifest 必须是平台认的形状');
     writeFileSync(join(root, 'manifest.json'), JSON.stringify(manifest));
     for (const [rel, text] of Object.entries(files)) {
         mkdirSync(dirname(join(root, rel)), { recursive: true });
@@ -67,6 +76,35 @@ test('AI-001：不命中 —— 循环外调用、rows.map(r => r.id) 之后再�
     assert.deepEqual(h, []);
 });
 
+test('AI-001：不命中 —— 循环对象先用 .slice(0, 数字 / MAX_ 常量) 截断过（fix 推荐的写法）', async () => {
+    const h = await lines('AI-001', V2(), {
+        'backend/src/a.ts': [
+            'const MAX_ITEMS = 20;',
+            'async function f(ctx, rows) {',
+            '  for (const r of rows.slice(0, MAX_ITEMS)) await ctx.pt.ai.chat({ messages: [] });',
+            '  await Promise.all(rows.slice(0, 5).map(r => ctx.pt.ai.chat({ messages: [] })));',
+            '  rows.slice(0, DAILY_LIMIT).filter(r => r.ok).forEach(r => ctx.pt.ai.chat({ messages: [] }));',
+            '  const top = rows.slice(0, 10);',
+            '  for (const r of top) await ctx.pt.ai.chat({ messages: [] });',
+            '}'
+        ].join('\n')
+    });
+    assert.deepEqual(h, []);
+});
+
+test('AI-001：截断不算数时照报 —— slice 上限是变量、外层还有一层没截断的循环、while', async () => {
+    const h = await lines('AI-001', V2(), {
+        'backend/src/a.ts': [
+            'async function f(ctx, rows, sites, n) {',
+            '  for (const r of rows.slice(0, n)) await ctx.pt.ai.chat({ messages: [] });',
+            '  for (const s of sites) for (const r of s.rows.slice(0, 5)) await ctx.pt.ai.chat({ messages: [] });',
+            '  while (more()) await ctx.pt.ai.chat({ messages: [] });',
+            '}'
+        ].join('\n')
+    });
+    assert.deepEqual(h, [['backend/src/a.ts', 2], ['backend/src/a.ts', 3], ['backend/src/a.ts', 4]]);
+});
+
 // ─── AI-002 ───
 test('AI-002：任务路由里调 AI 且没有上限 → 命中', async () => {
     const h = await lines('AI-002', JOBS, {
@@ -75,6 +113,24 @@ test('AI-002：任务路由里调 AI 且没有上限 → 命中', async () => {
         })
     });
     assert.deepEqual(h, [['backend/src/index.ts', 6]]);
+});
+
+test('AI-002：manifest 的 route 没写方法（旧写法）也按路径认出任务路由', async () => {
+    const h = await lines('AI-002', JOBS_PATH_ONLY, {
+        'backend/src/index.ts': app({
+            'POST /jobs/daily': 'async (req, ctx) => ctx.pt.ai.chat({ messages: [], max_tokens: 100 })'
+        })
+    });
+    assert.deepEqual(h, [['backend/src/index.ts', 4]]);
+});
+
+test('AI-002：方法不同的同路径路由不是任务路由（manifest 写的是 POST）', async () => {
+    const h = await lines('AI-002', JOBS, {
+        'backend/src/index.ts': app({
+            'GET /jobs/daily': 'async (req, ctx) => ctx.pt.ai.chat({ messages: [], max_tokens: 100 })'
+        })
+    });
+    assert.deepEqual(h, []);
 });
 
 test('AI-002：不命中 —— .slice / MAX_ 常量 / if (n < 10) 任一存在，或不是任务路由', async () => {
@@ -221,12 +277,12 @@ test('AI-005：不命中 —— 第二次用了第一次的结果（含转手变
 });
 
 // ─── AI-006 ───
-test('AI-006：useEffect 无依赖 / 依赖含标识符且里面 fetch；onChange 里直接 api.call → 命中', async () => {
+test('AI-006：useEffect 没有依赖数组且里面请求（含嵌套的 load）；onChange 里直接 api.call → 命中', async () => {
     const h = await lines('AI-006', V2(), {
         'web/src/App.tsx': [
             'export function App({ q }) {',
             '  useEffect(() => { fetch("/api/ask"); });',
-            '  useEffect(() => { const load = async () => { await PtApp.api.call("/ask"); }; load(); }, [q]);',
+            '  useEffect(() => { const load = async () => { await PtApp.api.call("/ask"); }; load(); });',
             '  return <input onChange={e => callApi("/ask", e.target.value)} />;',
             '}'
         ].join('\n')
@@ -234,13 +290,14 @@ test('AI-006：useEffect 无依赖 / 依赖含标识符且里面 fetch；onChang
     assert.deepEqual(h, [['web/src/App.tsx', 2], ['web/src/App.tsx', 3], ['web/src/App.tsx', 4]]);
 });
 
-test('AI-006：不命中 —— 依赖 []、onChange 走 debounce、后端文件、effect 里只 setState', async () => {
+test('AI-006：不命中 —— 有依赖数组（[] / [page] / [q]）、onChange 走 debounce、后端文件、effect 里只 setState', async () => {
     const h = await lines('AI-006', V2(), {
         'web/src/App.tsx': [
-            'export function App({ q }) {',
+            'export function App({ q, page }) {',
             '  useEffect(() => { fetch("/api/ask"); }, []);',
-            '  useEffect(() => { setX(q); }, [q]);',
-            '  useEffect(() => { const t = setTimeout(() => fetch("/api/ask"), 300); return () => clearTimeout(t); }, [q]);',
+            '  useEffect(() => { fetch(`/api/list?page=${page}`); }, [page]);',
+            '  useEffect(() => { const load = async () => { await PtApp.api.call("/ask"); }; load(); }, [q]);',
+            '  useEffect(() => { setX(q); });',
             '  return <input onChange={e => debounced(() => fetch("/api/ask"))} />;',
             '}'
         ].join('\n'),
@@ -249,14 +306,30 @@ test('AI-006：不命中 —— 依赖 []、onChange 走 debounce、后端文件
     assert.deepEqual(h, []);
 });
 
+test('AI-006：不命中 —— 无依赖 effect 里只有 setTimeout 回调、return 的清理函数、addEventListener 回调里请求', async () => {
+    const h = await lines('AI-006', V2(), {
+        'web/src/App.tsx': [
+            'export function App() {',
+            '  useEffect(() => { const t = setTimeout(() => fetch("/api/ask"), 300); return () => clearTimeout(t); });',
+            '  useEffect(() => { return () => { fetch("/api/leave"); }; });',
+            '  useEffect(() => { const on = () => fetch("/api/ping"); window.addEventListener("focus", on); el.addEventListener("click", () => fetch("/api/x")); return () => window.removeEventListener("focus", on); });',
+            '  return null;',
+            '}'
+        ].join('\n')
+    });
+    assert.deepEqual(h, []);
+});
+
 // ─── AI-007 ───
-test('AI-007：用户路由里的 AI 调用没 signal 也没 AbortSignal.timeout → 命中', async () => {
+// AI-007 暂停：app-backend 0.10.0 的 ctx.pt.ai.chat 不支持 signal（会被序列化透传给网关），规则 check 恒返回空。
+// SDK 支持超时参数后恢复检测，届时把下面这条改回「命中」。
+test('AI-007（暂停）：用户路由里的 AI 调用没 signal 也不报', async () => {
     const h = await lines('AI-007', JOBS, {
         'backend/src/index.ts': app({
             'POST /api/ask': 'async (req, ctx) => ctx.pt.ai.chat({ messages: [], max_tokens: 1 })'
         })
     });
-    assert.deepEqual(h, [['backend/src/index.ts', 4]]);
+    assert.deepEqual(h, []);
 });
 
 test('AI-007：不命中 —— 有 signal、有 AbortSignal.timeout、任务路由、不在路由里', async () => {

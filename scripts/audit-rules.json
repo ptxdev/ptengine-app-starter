@@ -136,19 +136,19 @@
         "dimension": "ai-cost",
         "severity": "severe",
         "title": {
-            "zh-CN": "在循环或递归里调用了 AI",
-            "en-US": "AI is called inside a loop or recursive function",
-            "ja-JP": "ループや再帰関数の中で AI を呼び出しています"
+            "zh-CN": "在循环里调用了 AI",
+            "en-US": "AI is called inside a loop",
+            "ja-JP": "ループの中で AI を呼び出しています"
         },
         "detail": {
-            "zh-CN": "ctx.pt.ai.chat / stream 放在 for、while、map、forEach、reduce 或递归里，调用次数随数据量线性增长，费用和耗时都不可控。",
-            "en-US": "Putting ctx.pt.ai.chat / stream inside for, while, map, forEach, reduce, or recursion makes the number of calls grow with the data, so cost and latency are unbounded.",
-            "ja-JP": "ctx.pt.ai.chat / stream を for・while・map・forEach・reduce や再帰の中に置くと、呼び出し回数がデータ量に比例して増え、費用も処理時間も読めなくなります。"
+            "zh-CN": "ctx.pt.ai.chat / stream 放在 for、while、map、forEach、reduce 里，调用次数随数据量线性增长，费用和耗时都不可控。",
+            "en-US": "Putting ctx.pt.ai.chat / stream inside for, while, map, forEach, or reduce makes the number of calls grow with the data, so cost and latency are unbounded.",
+            "ja-JP": "ctx.pt.ai.chat / stream を for・while・map・forEach・reduce の中に置くと、呼び出し回数がデータ量に比例して増え、費用も処理時間も読めなくなります。"
         },
         "fix": {
-            "zh-CN": "把多条数据合并进一次调用（在 prompt 里列出、要求结构化输出）；确实要逐条处理时，先用常量上限截断。",
-            "en-US": "Batch the items into one call (list them in the prompt and ask for structured output). If you must go item by item, cap the list with a constant first.",
-            "ja-JP": "複数件を 1 回の呼び出しにまとめてください（プロンプトに並べ、構造化された出力を求める）。1 件ずつ処理する必要があるなら、先に定数の上限で件数を絞ってください。"
+            "zh-CN": "把多条数据合并进一次调用（在 prompt 里列出、要求结构化输出）；确实要逐条处理时，先用常量上限截断，如 rows.slice(0, MAX_ITEMS)。",
+            "en-US": "Batch the items into one call (list them in the prompt and ask for structured output). If you must go item by item, cap the list with a constant first, e.g. rows.slice(0, MAX_ITEMS).",
+            "ja-JP": "複数件を 1 回の呼び出しにまとめてください（プロンプトに並べ、構造化された出力を求める）。1 件ずつ処理する必要があるなら、先に rows.slice(0, MAX_ITEMS) のように定数の上限で件数を絞ってください。"
         }
     },
     "AI-002": {
@@ -250,9 +250,9 @@
         "dimension": "ai-cost",
         "severity": "normal",
         "title": {
-            "zh-CN": "面向用户的 AI 调用没有超时或 AbortSignal",
-            "en-US": "A user-facing AI call has no timeout or AbortSignal",
-            "ja-JP": "ユーザー操作から呼ばれる AI 呼び出しにタイムアウトも AbortSignal もありません"
+            "zh-CN": "面向用户的 AI 调用没有超时",
+            "en-US": "A user-facing AI call has no timeout",
+            "ja-JP": "ユーザー操作から呼ばれる AI 呼び出しにタイムアウトがありません"
         },
         "detail": {
             "zh-CN": "用户已经离开或请求卡住时，没有超时的调用会一直跑完，挂死的请求照样计费，还占着连接。",
@@ -260,9 +260,9 @@
             "ja-JP": "ユーザーが離れたりリクエストが止まったりしても、タイムアウトのない呼び出しは走り続けます。固まったリクエストにも課金され、接続も占有されたままになります。"
         },
         "fix": {
-            "zh-CN": "给调用传 signal（如 AbortSignal.timeout(30_000)），并把请求自身的取消信号一并接上。",
-            "en-US": "Pass a signal to the call, such as AbortSignal.timeout(30_000), and wire in the request's own abort signal too.",
-            "ja-JP": "呼び出しに signal（例: AbortSignal.timeout(30_000)）を渡し、リクエスト自体の中断シグナルもつないでください。"
+            "zh-CN": "暂不处理：当前 ctx.pt.ai.chat / stream 不支持超时参数，不要自行传 signal（会被原样发给网关、不起作用）；待 SDK 支持超时参数后再按其说明设置。",
+            "en-US": "No action for now: ctx.pt.ai.chat / stream does not take a timeout option yet. Do not pass a signal yourself (it is sent to the gateway as-is and has no effect); set a timeout once the SDK supports one.",
+            "ja-JP": "現時点では対応不要です。ctx.pt.ai.chat / stream はまだタイムアウトのオプションに対応していません。signal を自分で渡さないでください（そのままゲートウェイに送られ、効果はありません）。SDK が対応したら、その説明に従って設定してください。"
         }
     },
     "EFF-001": {
