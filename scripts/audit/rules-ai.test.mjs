@@ -99,6 +99,18 @@ test('AI-002：BATCH_SIZE 这类名字不算上限（fix 文案里明说了，�
     assert.deepEqual(h, [['backend/src/index.ts', 6]]);
 });
 
+test('AI-002：名字中间带 MAX_ 的常量也算上限（如 DAILY_MAX_ITEMS）', async () => {
+    const h = await lines('AI-002', JOBS, {
+        'backend/src/index.ts': [
+            'const DAILY_MAX_ITEMS = 20;',
+            app({
+                'POST /jobs/daily': 'async (req, ctx) => {\n      let n = 0;\n      for (const r of rows) { if (n++ >= DAILY_MAX_ITEMS) break; await ctx.pt.ai.chat({ messages: [], max_tokens: 1 }); }\n    }'
+            })
+        ].join('\n')
+    });
+    assert.deepEqual(h, []);
+});
+
 // ─── AI-003 ───
 test('AI-003：对象字面量缺 max_tokens 命中', async () => {
     const h = await lines('AI-003', V2(), {

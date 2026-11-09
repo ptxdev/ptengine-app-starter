@@ -63,10 +63,11 @@ function ai001(ctx) {
 }
 
 // ─── AI-002 任务路由里调 AI 却没上限 ───
-const CAP_NAME = /^MAX_|_MAX$|LIMIT/;
+// 名字任意位置含 MAX_ / _MAX / LIMIT 即算上限常量（DAILY_MAX_ITEMS、ITEMS_MAX、DAILY_LIMIT），与 fix 文案的说法一致
+const CAP_NAME = /MAX_|_MAX|LIMIT/;
 
 /**
- * 路由函数体里有没有看得出来的「上限」：`.slice(` 截断、MAX_* / *_MAX / *LIMIT* 常量、
+ * 路由函数体里有没有看得出来的「上限」：`.slice(` 截断、名字含 MAX_ / _MAX / LIMIT 的常量、
  * 或 `if (n < 10)` 这种和数字字面量比大小的判断。只认这三种，任一存在就当已经设了上限
  * （不去证明上限真的作用在 AI 调用上 —— 那需要数据流分析，做不准反而误报）。
  */

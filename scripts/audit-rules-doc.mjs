@@ -31,10 +31,11 @@ const SEVERITY_LABEL = { severe: '严重', normal: '一般' };
 /** 规则文案里的占位在文档里换成的泛称（只渲染 zh-CN）。新增占位要在这里补，测试会拦下漏补的。 */
 const DOC_PLACEHOLDERS = { host: '某个外部主机', scope: '某个权限' };
 /**
- * 标题整句改写：EFF-004 的「有一个 {kb} KB 的 JS 包，超过 800 KB」去掉具体值后只剩一句别扭的话，
- * 按 id 整句换掉比对着原文做字符串替换清楚 —— 原文改了措辞也不会悄悄替换失败。
+ * 整句改写：占位换成泛称后仍别扭的句子（EFF-004「有一个 {kb} KB 的 JS 包」、DES-001「权限 {scope} 的声明」）
+ * 按 id 整句换掉，比对着原文做字符串替换清楚 —— 原文改了措辞也不会悄悄替换失败。只影响文档，json 不动。
  */
-const DOC_TITLE = { 'EFF-004': '单个 JS 包超过 800 KB' };
+const DOC_TITLE = { 'EFF-004': '单个 JS 包超过 800 KB', 'DES-001': '权限声明与代码不一致' };
+const DOC_FIX = { 'DES-001': '让 manifest.json 的 scopes 与代码实际调用对齐：没用到就删掉声明，用到了就补上声明。' };
 // 占位两侧的空格是给英文主机名、权限名留的；换成中文泛称后一并去掉，免得读成「请求了 某个外部主机，」
 const docText = t => t.replace(/ ?\{(\w+)\} ?/g, (m, k) => DOC_PLACEHOLDERS[k] ?? m);
 const INTRO = '下面这些由 `npm run audit` 在验收时逐条检查；写之前照着做，大多数就不会出现在自检卡上。';
@@ -55,7 +56,7 @@ export function renderRulesDoc(rules, lang) {
         lines.push('', `### ${heading}`, '');
         for (const [id, r] of entries) {
             const title = DOC_TITLE[id] ?? docText(r.title[lang]);
-            lines.push(`- **${id}**（${SEVERITY_LABEL[r.severity]}）：${title} —— ${docText(r.fix[lang])}`);
+            lines.push(`- **${id}**（${SEVERITY_LABEL[r.severity]}）：${title} —— ${DOC_FIX[id] ?? docText(r.fix[lang])}`);
         }
     }
     return lines.join('\n');

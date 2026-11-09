@@ -30,11 +30,11 @@ test('renderRulesDoc：四个维度标题按序、每条规则一行、格式与
     assert.ok(body.includes('`npm run audit`'), '含节首说明');
 });
 
-test('renderRulesDoc：文档里不留 {占位}；{scope} 换泛称，EFF-004 标题不带具体 KB 数', () => {
+test('renderRulesDoc：文档里不留 {占位}；DES-001 / EFF-004 整句改写，不带泛称与具体 KB 数', () => {
     const body = renderRulesDoc(rules, 'zh-CN');
     assert.doesNotMatch(body, /\{\w+\}/);
-    const d = rules['DES-001'];
-    assert.ok(body.includes(`：${d.title['zh-CN'].replace(/ ?\{scope\} ?/, '某个权限')} —— `), 'DES-001 标题');
+    assert.ok(body.includes('- **DES-001**（一般）：权限声明与代码不一致 —— '), 'DES-001 标题');
+    assert.ok(!body.includes('某个权限'), 'DES-001 的 fix 也不带泛称');
     assert.ok(body.includes('- **EFF-004**（一般）：单个 JS 包超过 800 KB —— '), 'EFF-004 标题');
 });
 

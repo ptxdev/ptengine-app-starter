@@ -47,7 +47,7 @@ function badProject() {
     const files = {
         'manifest.json': JSON.stringify({
             schemaVersion: 2,
-            scopes: ['jobs:run', 'ai:chat'],
+            scopes: ['jobs:run', 'ai:invoke'],
             backend: { egress: [], jobs: [{ type: 'daily', route: '/jobs/daily', name: { 'zh-CN': '日报' } }] }
         }),
         'backend/src/index.ts': [
