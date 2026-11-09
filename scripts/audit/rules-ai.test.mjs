@@ -105,6 +105,21 @@ test('AI-001：截断不算数时照报 —— slice 上限是变量、外层还
     assert.deepEqual(h, [['backend/src/a.ts', 2], ['backend/src/a.ts', 3], ['backend/src/a.ts', 4]]);
 });
 
+test('AI-001：照报 —— 别的函数里同名的截断 const 不算（参数遮蔽）、接收者链上有 flatMap', async () => {
+    const h = await lines('AI-001', V2(), {
+        'backend/src/a.ts': [
+            'function prep(rows) { const top = rows.slice(0, 10); return top; }',
+            'async function run(ctx, top) {',
+            '  for (const r of top) await ctx.pt.ai.chat({ messages: [] });',
+            '}',
+            'async function g(ctx, sites) {',
+            '  await Promise.all(sites.slice(0, 5).flatMap(s => s.pages).map(p => ctx.pt.ai.chat({ messages: [] })));',
+            '}'
+        ].join('\n')
+    });
+    assert.deepEqual(h, [['backend/src/a.ts', 3], ['backend/src/a.ts', 6]]);
+});
+
 // ─── AI-002 ───
 test('AI-002：任务路由里调 AI 且没有上限 → 命中', async () => {
     const h = await lines('AI-002', JOBS, {

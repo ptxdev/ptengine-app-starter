@@ -151,6 +151,21 @@ test('SEC-003：照报 —— 占位生成器里混了值、const 不是字面�
     assert.deepEqual(h.map(f => f.line), [3, 4, 5]);
 });
 
+test('SEC-003：照报 —— 别的函数里的同名字面量 const 不算（作用域不外溢、参数遮蔽）', async () => {
+    const h = await hits('SEC-003', V2(), {
+        'backend/src/a.ts': [
+            "function helper() { const id = 'fixed'; return id; }",
+            'function get(db, id) {',
+            '  return db.prepare(`SELECT * FROM t WHERE id = ${id}`);',
+            '}',
+            "const T = 'reports';",
+            'function q(db, T) { return db.prepare(`SELECT * FROM ${T}`); }',
+            'function r(db) { let U; if (x) { const U2 = 1; } return db.prepare(`SELECT * FROM ${U}`); }'
+        ].join('\n')
+    });
+    assert.deepEqual(h.map(f => f.line), [3, 6, 7]);
+});
+
 // ─── SEC-004 ───
 test('SEC-004：dangerouslySetInnerHTML / eval / new Function / postMessage(*) 命中，限定 origin 不报', async () => {
     const h = await hits('SEC-004', V1, {

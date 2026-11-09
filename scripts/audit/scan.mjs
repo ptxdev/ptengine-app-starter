@@ -292,18 +292,45 @@ export function enclosingFunction(ts, node) {
     return null;
 }
 
-/** 由近到远（所在函数 → 外层函数 → 文件顶层）找 `const name = 初值` 的初值；找不到 → null。 */
+/**
+ * 由近到远（所在函数 → 外层函数 → … → 文件顶层）找 ident 所指的 `const name = 初值`，返回初值；找不到 → null。
+ * 每一层只看这一层自己的参数和语句（不进嵌套函数体）；声明所在的块还必须包住 ident（块级作用域）。
+ * 拿不准就返回 null：某一层先遇到同名的参数、let / var、解构绑定、没有初值的绑定（for-of 变量、catch 参数）、
+ * 同名函数 / 类声明，或同一层有不止一处同名声明。
+ */
 export function constInitializer(ts, ident) {
+    const name = ident.text;
     const scopes = [];
     for (let f = enclosingFunction(ts, ident); f; f = enclosingFunction(ts, f)) scopes.push(f);
     scopes.push(ident.getSourceFile());
+    const encloses = (block, node) => { for (let p = node.parent; p; p = p.parent) if (p === block) return true; return false; };
     for (const scope of scopes) {
-        let found = null;
-        walk(ts, scope, n => {
-            if (!found && ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === ident.text && n.initializer
-                && ts.isVariableDeclarationList(n.parent) && (n.parent.flags & ts.NodeFlags.Const)) found = n.initializer;
-        });
-        if (found) return found;
+        if (!ts.isSourceFile(scope) && scope.parameters?.some(prm => bindingNames(ts, prm.name).includes(name))) return null;
+        const decls = [];
+        let shadow = false;
+        const visit = n => {
+            if (shadow) return;
+            if (n !== scope && ts.isFunctionLike(n)) {
+                // 嵌套函数体不看；但同名的函数声明本身就是这一层的绑定
+                if (ts.isFunctionDeclaration(n) && n.name?.text === name) shadow = true;
+                return;
+            }
+            if (ts.isClassDeclaration(n) && n.name?.text === name) shadow = true;
+            else if (ts.isVariableDeclaration(n) && bindingNames(ts, n.name).includes(name)) {
+                const list = n.parent;
+                const isConst = ts.isVariableDeclarationList(list) && (list.flags & ts.NodeFlags.Const) !== 0;
+                if (!isConst || !ts.isIdentifier(n.name) || !n.initializer) shadow = true;
+                else decls.push(n);
+            }
+            ts.forEachChild(n, visit);
+        };
+        visit(scope);
+        if (shadow || decls.length > 1) return null;
+        if (decls.length === 1) {
+            // `const` 声明 → 声明列表 → 变量语句 → 所在的块 / 文件
+            const block = decls[0].parent.parent.parent;
+            return block && encloses(block, ident) ? decls[0].initializer : null;
+        }
     }
     return null;
 }

@@ -88,7 +88,8 @@ function isCappedSource(ts, e, depth = 0) {
         const [from, to] = e.arguments;
         return e.arguments.length === 2 && ts.isNumericLiteral(from) && isCapValue(ts, to);
     }
-    return LOOP_CALLBACKS.includes(method) && isCappedSource(ts, e.expression.expression, depth);
+    // flatMap 会把每个元素展开成多个，截断过的数量传不过来，按没截断算
+    return method !== 'flatMap' && LOOP_CALLBACKS.includes(method) && isCappedSource(ts, e.expression.expression, depth);
 }
 
 /**
