@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { collectFiles, loadTs, parseFile, walk, callee, insideLoop, enclosingRouteKey, lineOf, stringLiteralsIn } from './scan.mjs';
+import { collectFiles, loadTs, parseFile, walk, callee, insideLoop, loopVariables, enclosingRouteKey, lineOf, stringLiteralsIn } from './scan.mjs';
 import { runAudit, runRules } from './run.mjs';
 
 /** 临时项目：files 是 { 相对路径: 内容 }。 */
@@ -104,6 +104,18 @@ test('insideLoop：for-of 体内 true；rows.map(r => f(r)) 内 true；rows.map(
     assert.deepEqual(at('for (const r of await f()) {}'), [false]);
     assert.deepEqual(at('rows.map(r => { const h = () => f(); return h; });'), [false]);
     assert.deepEqual(at('f();'), [false]);
+});
+
+test('loopVariables：for-of / for-in 声明名（含解构）、回调元素形参（reduce 取第二个）；for(;;) 跳过往上找；函数边界停', () => {
+    const at = (code) => callsNamed(code, 'f').nodes.map(n => loopVariables(ts, n));
+    assert.deepEqual(at('for (const { a, b: [c] } of rows) { f(); }'), [['a', 'c']]);
+    assert.deepEqual(at('for (k in obj) f();'), [['k']]);
+    assert.deepEqual(at('rows.map((r, i) => f());'), [['r']]);
+    assert.deepEqual(at('rows.reduce((acc, r) => f(), 0);'), [['r']]);
+    assert.deepEqual(at('for (const r of rows) { for (let i = 0; i < 3; i++) f(); }'), [['r']]);
+    assert.deepEqual(at('for (const r of f()) {}'), [[]]);
+    assert.deepEqual(at('for (const r of rows) { const g = () => f(); }'), [[]]);
+    assert.deepEqual(at('while (x) f();'), [[]]);
 });
 
 test('enclosingRouteKey：createApp({ routes: { "POST /jobs/daily": async ctx => { f() } } }) 里的 f() → "POST /jobs/daily"', () => {

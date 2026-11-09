@@ -137,7 +137,7 @@ function isFunctionLike(ts, n) {
 }
 
 /** 函数是不是直接作为 `xs.map(...)` 一类调用的实参。 */
-function isLoopCallback(ts, fn) {
+export function isLoopCallback(ts, fn) {
     if (!ts.isArrowFunction(fn) && !ts.isFunctionExpression(fn)) return false;
     const call = fn.parent;
     if (!call || !ts.isCallExpression(call) || !call.arguments.includes(fn)) return false;
@@ -157,6 +157,30 @@ export function insideLoop(ts, node) {
         if (isFunctionLike(ts, p)) return isLoopCallback(ts, p);
     }
     return false;
+}
+
+/**
+ * node 所在的最近一层「带循环变量」的循环里，循环变量的名字（解构的全部算上）：
+ * `for (const r of rows)` / `for (const k in obj)` 的声明名，或 LOOP_CALLBACKS 回调的元素形参
+ * （一般是第一个；reduce 的第一个是累加器，元素在第二个）。
+ * for(;;) / while 没有「每个元素」这回事，跳过继续往上找；遇到别的函数边界就停（同 insideLoop）。
+ * 只认语句体：`for (const r of f(r0))` 里的 f 不算在循环里。找不到 → []。
+ */
+export function loopVariables(ts, node) {
+    let child = node;
+    for (let p = node.parent; p; child = p, p = p.parent) {
+        if ((ts.isForOfStatement(p) || ts.isForInStatement(p)) && p.statement === child) {
+            const init = p.initializer;
+            if (ts.isVariableDeclarationList(init)) return init.declarations.flatMap(d => bindingNames(ts, d.name));
+            return ts.isIdentifier(init) ? [init.text] : [];
+        }
+        if (isFunctionLike(ts, p)) {
+            if (!isLoopCallback(ts, p)) return [];
+            const prm = p.parameters[p.parent.expression.name.text === 'reduce' ? 1 : 0];
+            return prm ? bindingNames(ts, prm.name) : [];
+        }
+    }
+    return [];
 }
 
 /** 属性 / 键名的文本（标识符、带引号的字符串、无插值模板）；计算属性名等 → null。 */

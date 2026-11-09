@@ -17,9 +17,10 @@ import { readManifest, resolveBackend } from '../manifest.mjs';
 import { collectFiles, loadTs, parseFile } from './scan.mjs';
 import { rules as rulesSec } from './rules-sec.mjs';
 import { rules as rulesAi } from './rules-ai.mjs';
+import { rules as rulesEff } from './rules-eff.mjs';
 
 /** @type {Rule[][]} 各维度的规则表；后续任务每加一个维度在这里加一项。 */
-const RULE_MODULES = [rulesSec, rulesAi];
+const RULE_MODULES = [rulesSec, rulesAi, rulesEff];
 
 /** manifest.json 缺失或不是合法 JSON → null；依赖 manifest 的规则自己判空跳过，其余照跑。 */
 function loadManifest(root) {
