@@ -127,9 +127,9 @@
             "ja-JP": "ジョブのルートも普通の HTTP エンドポイントです。呼び出し元がプラットフォームのスケジューラーか確認しないと、アプリにアクセスできる誰でもジョブを起動でき、クォータ消費や通知送信につながります。"
         },
         "fix": {
-            "zh-CN": "在任务 handler 开头调用 ctx.requireTrigger()，校验不通过直接返回。",
-            "en-US": "Call ctx.requireTrigger() at the top of the job handler and return early if the check fails.",
-            "ja-JP": "ジョブのハンドラーの先頭で ctx.requireTrigger() を呼び、検証に失敗したらそこで返してください。"
+            "zh-CN": "在任务 handler 第一行调用 ctx.requireTrigger('job')：不是平台调度器发起的调用会被它直接以 403 拒绝，不用自己判断返回值。",
+            "en-US": "Call ctx.requireTrigger('job') on the first line of the job handler. It rejects any call not made by the platform scheduler with a 403 by itself, so there is no return value to check.",
+            "ja-JP": "ジョブのハンドラーの 1 行目で ctx.requireTrigger('job') を呼んでください。プラットフォームのスケジューラー以外からの呼び出しはこれ自体が 403 で拒否するので、戻り値を確認する必要はありません。"
         }
     },
     "AI-001": {
@@ -231,19 +231,19 @@
         "dimension": "ai-cost",
         "severity": "normal",
         "title": {
-            "zh-CN": "前端每次渲染或每次输入都会触发后端 AI 接口",
-            "en-US": "The front end hits an AI endpoint on every render or keystroke",
-            "ja-JP": "フロントエンドが描画や入力のたびに AI エンドポイントを呼んでいます"
+            "zh-CN": "前端每次渲染或每次输入都会请求后端",
+            "en-US": "The front end calls the backend on every render or every keystroke",
+            "ja-JP": "フロントエンドが描画のたび・入力のたびにバックエンドを呼んでいます"
         },
         "detail": {
-            "zh-CN": "useEffect 没有依赖数组、或在 onChange 里直接调 AI 接口，一个用户随手操作就能发出成百上千次计费调用。",
-            "en-US": "A useEffect without a dependency array, or an AI call straight from onChange, lets a single user fire hundreds of billed calls just by using the page.",
-            "ja-JP": "依存配列のない useEffect や、onChange から直接 AI を呼ぶ実装では、ユーザー 1 人が普通に操作するだけで課金対象の呼び出しが何百回も発生します。"
+            "zh-CN": "没有依赖数组的 useEffect 每次渲染都会执行，onChange 每输入一个字符都会触发；在这两处直接请求后端（尤其是 AI 接口），一个用户随手操作就能发出成百上千次计费调用。",
+            "en-US": "A useEffect without a dependency array runs on every render, and onChange fires on every keystroke. Calling the backend (especially an AI endpoint) directly from either lets a single user fire hundreds of billed calls just by using the page.",
+            "ja-JP": "依存配列のない useEffect は描画のたびに、onChange は 1 文字入力するたびに実行されます。ここから直接バックエンド（特に AI エンドポイント）を呼ぶと、ユーザー 1 人が普通に操作するだけで課金対象の呼び出しが何百回も発生します。"
         },
         "fix": {
-            "zh-CN": "改为点击按钮或提交时才调用；必须随输入触发时加防抖，并给 useEffect 写明依赖数组。",
-            "en-US": "Call it on an explicit button click or submit. If it must follow typing, debounce it and give useEffect a proper dependency array.",
-            "ja-JP": "ボタンのクリックや送信時にだけ呼ぶようにしてください。入力に連動させる必要があるならデバウンスを入れ、useEffect には依存配列を明示してください。"
+            "zh-CN": "别在没有依赖数组的 useEffect 里直接请求；输入事件里的请求要防抖，或改为点击按钮 / 提交时显式触发。",
+            "en-US": "Do not make requests directly in a useEffect that has no dependency array. For requests from input events, debounce them or trigger them explicitly on a button click or submit.",
+            "ja-JP": "依存配列のない useEffect の中で直接リクエストしないでください。入力イベントからのリクエストはデバウンスするか、ボタンのクリックや送信時に明示的に実行してください。"
         }
     },
     "AI-007": {

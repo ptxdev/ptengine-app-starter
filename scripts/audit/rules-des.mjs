@@ -21,12 +21,16 @@ const SCOPE_USES = {
 };
 /**
  * 只用于「声明了没用」方向的额外在用认定（「用了未声明」仍只认 SCOPE_USES）：
- * asset:read 前端也能用（`window.PtApp.asset.list()` 等，见 AGENTS.md）；notify:send 还覆盖 `ctx.pt.render.*`。
+ * asset:read 前端也能用（`window.PtApp.asset.list()` 等，见 AGENTS.md）；notify:send 还覆盖 `ctx.pt.render.*`；
+ * jobs:run 还覆盖 `ctx.pt.jobs.*` 与前端 `PtApp.subscriptions.*`。
  * 不认这些会让只在前端读资产、只用 render.chart 的项目被劝删掉在用的权限。
  */
 const ALSO_USED_BY = {
     'asset:read': /(^|\.)asset\.(list|sharedWithMe|get)\(/,
-    'notify:send': /ctx\.pt\.render\./
+    'notify:send': /ctx\.pt\.render\./,
+    // jobs:run：后端的 ctx.pt.jobs.*、前端的 PtApp.subscriptions.*（订阅抽屉）都要它；
+    // 另外 manifest 声明了 backend.jobs 时平台上传必须有 jobs:run（见 des001），劝删会直接上传失败
+    'jobs:run': /ctx\.pt\.jobs\.|(^|\.)PtApp\.subscriptions\./
 };
 /** 换了写法也能看出「大概在用」的标识符：出现了就不报「声明了没用」。 */
 const SCOPE_IDENTS = { 'jobs:run': 'requireTrigger', 'openapi:read': 'openApiUrl' };
@@ -111,6 +115,9 @@ function des001(ctx) {
     if (unusedCandidates.length === 0 || filesIn(ctx, 'backend').length === 0) return out;
     if (ctx.files.some(f => ptOpaque(ts, f.sf))) return out;
     const alsoUsed = scopeUses(ctx, ALSO_USED_BY);
+    // manifest 声明了 backend.jobs：平台上传第 1 步要求 jobs:run（MANIFEST_JOBS_SCOPE_MISSING），不管代码里怎么写都算在用
+    const jobs = ctx.manifest.backend?.jobs;
+    if (Array.isArray(jobs) && jobs.length > 0) alsoUsed.set('jobs:run', { file: 'manifest.json', line: 0 });
     for (const scope of unusedCandidates) {
         if (alsoUsed.has(scope)) continue;
         if (SCOPE_IDENTS[scope] && hasIdentifier(ts, ctx.files, SCOPE_IDENTS[scope])) continue;

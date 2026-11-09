@@ -11,7 +11,18 @@ import {
     unwrapParens, walk
 } from './scan.mjs';
 
-const KNOWN_SECRET = /^(sk-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|ghp_[A-Za-z0-9]{36})$/;
+const KNOWN_SECRET = /^(AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|ghp_[A-Za-z0-9]{36})$/;
+/**
+ * `sk-` 密钥（OpenAI / Anthropic 风格）：光看前缀会命中 `sk-skeleton-loading-item` 这类 class 名（severe 进门禁），
+ * 所以还要求 sk- 之后至少有一位数字，且大小写混合或长度 ≥ 32 —— 真密钥是随机串，两条都满足。
+ */
+function isSkKey(text) {
+    const m = /^sk-([A-Za-z0-9_-]{16,})$/.exec(text);
+    if (!m) return false;
+    const rest = m[1];
+    return /\d/.test(rest) && ((/[a-z]/.test(rest) && /[A-Z]/.test(rest)) || rest.length >= 32);
+}
+const isKnownSecret = text => KNOWN_SECRET.test(text) || isSkKey(text);
 const SECRET_CHARS = /^[A-Za-z0-9+/=_-]+$/;
 const SECRET_NAME = /key|token|secret|password/i;
 const PLATFORM_HOSTS = ['ptengine.ai', 'ptengine.jp', 'ptengine.com'];
@@ -65,7 +76,7 @@ function sec001(ctx) {
     const out = [];
     for (const file of filesIn(ctx, 'web')) {
         for (const { text, node } of stringLiteralsIn(ts, file.sf)) {
-            let hit = KNOWN_SECRET.test(text);
+            let hit = isKnownSecret(text);
             if (!hit && text.length >= 32 && SECRET_CHARS.test(text)) {
                 // 只看字面量**直接**赋给的变量 / 属性名：长 base64 串在前端很常见（图片、class 名、hash），
                 // 光凭长相会大量误报，名字里带 key/token/secret/password 才算
@@ -244,6 +255,13 @@ function unwrapUserQuery(ts, n) {
     return n && ts.isCallExpression(n) && isUserQuery(ts, n);
 }
 
+/** ident 是不是只被读了条数：`x.length` / `x.rows.length` 这类以 .length 收尾的名字链的根。 */
+function onlyLength(ts, ident) {
+    let n = ident;
+    while (ts.isPropertyAccessExpression(n.parent) && n.parent.expression === n) n = n.parent;
+    return n !== ident && n.name.text === 'length';
+}
+
 function sec006(ctx) {
     const { ts } = ctx;
     const out = [];
@@ -266,7 +284,9 @@ function sec006(ctx) {
                 // .bind：D1 的 `db.prepare(sql).bind(x)` 是最常见的写法，结果出现在 bind 的实参里而不是 prepare 的
                 if (!(/\.(prepare|bind|put)$/.test(name) || name === 'console.log' || name.endsWith('.console.log'))) return;
                 const refs = [];
-                for (const a of n.arguments) walk(ts, a, m => { if (ts.isIdentifier(m) && isReference(ts, m)) refs.push(m); });
+                for (const a of n.arguments) {
+                    walk(ts, a, m => { if (ts.isIdentifier(m) && isReference(ts, m) && !onlyLength(ts, m)) refs.push(m); });
+                }
                 // 只算赋值之后的调用：前面的同名引用不可能是这次查询的结果
                 if (vars.some(v => n.pos >= v.pos && refs.some(r => r.text === v.name && !shadowedByParam(ts, r, fn, v.name)))) {
                     out.push({ rule: 'SEC-006', file: file.rel, line: lineOf(file.sf, n) });

@@ -48,7 +48,7 @@ function badProject() {
         'manifest.json': JSON.stringify({
             schemaVersion: 2,
             scopes: ['jobs:run', 'ai:invoke'],
-            backend: { egress: [], jobs: [{ type: 'daily', route: '/jobs/daily', name: { 'zh-CN': '日报' } }] }
+            backend: { egress: [], jobs: [{ type: 'daily', route: 'POST /jobs/daily', title: '日报' }] }
         }),
         'backend/src/index.ts': [
             "import { createApp } from '@ptengine/app-backend';",
@@ -64,7 +64,7 @@ function badProject() {
             ''
         ].join('\n'),
         'web/src/App.tsx': [
-            "const KEY = 'sk-abcdefghijklmnopqrstuvwx';",
+            "const KEY = 'sk-abcdefghij1234567890KLMN';",
             "export default function App() { fetch('/api/ping', { headers: { authorization: KEY } }); return null; }",
             ''
         ].join('\n')

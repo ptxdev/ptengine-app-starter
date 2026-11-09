@@ -112,7 +112,7 @@
 - **SEC-004**（严重）：用了 dangerouslySetInnerHTML、eval、new Function 或 postMessage(..., '*') —— 改用 JSX 渲染文本（确需 HTML 时先用 DOMPurify 之类清洗）；去掉 eval / new Function；postMessage 写明确的目标源。
 - **SEC-005**（严重）：无后端应用的前端直接请求了非平台的外部地址 —— 把应用升到 schemaVersion 2 并加 backend/，外部请求放到后端经 ctx.fetch 发出、在 egress 声明；只需取 Ptengine 数据时用 PtApp.data.query。
 - **SEC-006**（一般）：含 email / userId 的用户查询结果被写进了 D1、KV 或日志 —— 只存聚合结果或业务需要的字段；确需按人存时去掉 email，用不可逆的哈希代替 userId，并设过期时间。
-- **SEC-007**（一般）：定时任务路由没有调用 requireTrigger —— 在任务 handler 开头调用 ctx.requireTrigger()，校验不通过直接返回。
+- **SEC-007**（一般）：定时任务路由没有调用 requireTrigger —— 在任务 handler 第一行调用 ctx.requireTrigger('job')：不是平台调度器发起的调用会被它直接以 403 拒绝，不用自己判断返回值。
 
 ### AI 成本（ai-cost）
 
@@ -121,7 +121,7 @@
 - **AI-003**（一般）：ai.chat 调用没有设置 max_tokens —— 按实际需要的输出长度给调用加上 max_tokens。
 - **AI-004**（一般）：查询结果未截断就整段拼进了 prompt —— 先用 slice(0, N) 截断，或先在代码里汇总、只挑需要的列，再放进 prompt。
 - **AI-005**（一般）：同一个请求里多次调用 AI，且彼此不依赖 —— 合并成一次调用，在 prompt 里一次提出所有问题，并要求按字段分别返回结构化结果。
-- **AI-006**（一般）：前端每次渲染或每次输入都会触发后端 AI 接口 —— 改为点击按钮或提交时才调用；必须随输入触发时加防抖，并给 useEffect 写明依赖数组。
+- **AI-006**（一般）：前端每次渲染或每次输入都会请求后端 —— 别在没有依赖数组的 useEffect 里直接请求；输入事件里的请求要防抖，或改为点击按钮 / 提交时显式触发。
 - **AI-007**（一般）：面向用户的 AI 调用没有超时 —— 暂不处理：当前 ctx.pt.ai.chat / stream 不支持超时参数，不要自行传 signal（会被原样发给网关、不起作用）；待 SDK 支持超时参数后再按其说明设置。
 
 ### 效率（efficiency）

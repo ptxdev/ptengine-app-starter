@@ -123,6 +123,26 @@ test('DES-001：不命中 —— 声明与使用一致、注释里的字样、ct
     assert.deepEqual(await scoped(null, { 'backend/src/index.ts': 'await ctx.pt.ai.chat({});\n' }), []);
 });
 
+test('DES-001：不命中 —— jobs:run 由 manifest backend.jobs、ctx.pt.jobs.*、前端 PtApp.subscriptions.* 任一在用（删了会上传失败）', async () => {
+    const backendNoTrigger = 'export async function h(ctx) { return ctx.json({}); }\n';
+    // manifest 声明了 backend.jobs：平台要求 jobs:run（MANIFEST_JOBS_SCOPE_MISSING），哪怕代码里没写 requireTrigger
+    const withJobs = { ...WITH_BACKEND(['jobs:run']), backend: { egress: [], jobs: [{ type: 'daily', route: 'POST /jobs/daily', title: '日报' }] } };
+    assert.deepEqual(await scoped(withJobs, { ...WEB_CALLS_API, 'backend/src/index.ts': backendNoTrigger }), []);
+    // 后端只用 ctx.pt.jobs.*
+    assert.deepEqual(await scoped(WITH_BACKEND(['jobs:run']), {
+        ...WEB_CALLS_API,
+        'backend/src/index.ts': 'export async function h(ctx) { return ctx.json(await ctx.pt.jobs.list()); }\n'
+    }), []);
+    // 前端只用 PtApp.subscriptions.*
+    assert.deepEqual(await scoped(WITH_BACKEND(['jobs:run']), {
+        'web/src/a.ts': 'fetch("/api/x"); window.PtApp.subscriptions.open();\n',
+        'backend/src/index.ts': backendNoTrigger
+    }), []);
+    // 都没有：照报「声明了没用」
+    assert.deepEqual(await scoped(WITH_BACKEND(['jobs:run']), { ...WEB_CALLS_API, 'backend/src/index.ts': backendNoTrigger }),
+        [['manifest.json', 0, 'jobs:run']]);
+});
+
 // ─── DES-002 ───
 test('DES-002：有后端但前端从不调 /api/ → manifest.json:0', async () => {
     const h = await lines('DES-002', WITH_BACKEND([]), {

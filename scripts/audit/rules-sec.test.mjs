@@ -32,8 +32,21 @@ async function hits(rule, manifest, files) {
 
 // ─── SEC-001 ───
 test('SEC-001：已知前缀的密钥字面量命中，line 指向字面量', async () => {
-    const h = await hits('SEC-001', V1, { 'web/src/a.ts': 'const x = 1;\nconst k = "sk-abcdefghijklmnopqrstuv";\n' });
+    const h = await hits('SEC-001', V1, { 'web/src/a.ts': 'const x = 1;\nconst k = "sk-abcdefghij1234567890KLMN";\n' });
     assert.deepEqual(h.map(f => [f.file, f.line]), [['web/src/a.ts', 2]]);
+});
+
+test('SEC-001：sk- 要带数字且（大小写混合或 ≥ 32 位）才算密钥；sk- 开头的长 class 名不报', async () => {
+    const h = await hits('SEC-001', V1, {
+        'web/src/a.ts': [
+            `const a = "sk-proj-${'Ab3'.repeat(8)}";`,
+            `const b = "sk-${'a1'.repeat(16)}";`,
+            'const c = "sk-skeleton-loading-item";',
+            'const d = "sk-skeleton-loading-item-v2";',
+            'const e = "sk-abcdefghijklmnopqrstuvwxyzabcdefgh";'
+        ].join('\n')
+    });
+    assert.deepEqual(h.map(f => f.line), [1, 2]);
 });
 
 test('SEC-001：长随机串 + 变量 / 属性名像密钥才命中', async () => {
@@ -179,7 +192,7 @@ test('SEC-006：user_* 查询结果写进 KV / 日志命中；非 user_ 查询�
             'async function a(ctx) {',
             "  const users = await ctx.pt.query('user_list', {});",
             "  await ctx.env.KV.put('k', JSON.stringify(users));",
-            '  console.log(users.rows.length);',
+            '  console.log(users.rows);',
             '}',
             'async function b(ctx) {',
             "  const t = await ctx.pt.query('traffic_insight', {});",
@@ -191,6 +204,21 @@ test('SEC-006：user_* 查询结果写进 KV / 日志命中；非 user_ 查询�
         ].join('\n')
     });
     assert.deepEqual(h.map(f => f.line), [3, 4]);
+});
+
+test('SEC-006：不命中 —— 只读 .length（条数不是用户数据）', async () => {
+    const h = await hits('SEC-006', V2(), {
+        'backend/src/a.ts': [
+            'async function a(ctx) {',
+            "  const users = await ctx.pt.query('user_list', {});",
+            "  const { rows } = await ctx.pt.query('user_list', {});",
+            '  console.log(users.rows.length);',
+            "  console.log('n =', rows.length, users.length);",
+            "  await ctx.env.KV.put('count', String(rows.length));",
+            '}'
+        ].join('\n')
+    });
+    assert.deepEqual(h, []);
 });
 
 // ─── SEC-007 ───
