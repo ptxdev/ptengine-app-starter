@@ -55,7 +55,7 @@ When it is done, make it run `npm run doctor` — that command exists to turn th
 | `backend/` | Backend. One Cloudflare Worker, serving `/api/*` only. Optional |
 | `shared/api.ts` | The API contract shared by both sides — the single source of truth |
 | `manifest.json` | App declaration: version, entry, scopes, backend resources, secrets, egress |
-| `scripts/ptx*.mjs` | The `ptx` CLI: `dev` / `build` / `package` / `deploy` / `doctor` |
+| `scripts/ptx*.mjs` | The `ptx` CLI: `dev` / `build` / `package` / `deploy` / `doctor` / `audit` |
 
 ## Two kinds of apps
 
@@ -77,10 +77,13 @@ Plenty of apps need no backend at all. To go front-end only: `rm -rf backend/`, 
 |---|---|
 | `npm run dev` | vite + `wrangler dev` (your worker plus the local gateway stub `ptx-local-gateway`) + a local token endpoint. `PTX_WEB_PORT` / `PTX_API_PORT` move the ports |
 | `npm run doctor` | Checks conventions and manifest consistency. `npm run doctor -- --deps` also reports dependency drift |
+| `npm run audit` | Self-check of your source code: security, AI cost, efficiency and design. See below |
 | `npm run ptx -- job run <type> [--params '<json>'] [--preview]` | Calls a job route locally as a scheduled job (needs `npm run dev` running; port `PTX_API_PORT`, default 8787); prints the status, body and how the platform would classify the returned result |
 | `npm run build` | Type-check (web + backend + shared) + vite build + wrangler bundle |
 | `npm run package` | Assemble the zip and self-check its structure |
 | `npm run deploy` | Upload. `--publish` releases immediately, `--stream` streams progress, `--dry-run` only prints |
+
+`npm run audit` statically checks `web/src`, `backend/src` and `shared` against 23 rules in four areas — security (hard-coded keys, undeclared egress, string-built SQL, `eval`…), AI cost (AI calls inside loops, uncapped scheduled jobs, missing `max_tokens`…), efficiency (per-item queries in loops, missing `timeRange`, JS chunks over 800 KB…) and design (scopes out of sync with the code, half-built front end / back end, async components without loading or error states). Exit code `2` means at least one severe finding, `1` only normal ones, `0` none, and `3` that the check itself could not run (the reason is on stderr). `--src <dir>` (repeatable) limits the scan to the given directories, `--json` prints a single JSON document with every message in all three languages, and `PTX_LANG` (`zh-CN` / `en-US` / `ja-JP`, default `en-US`) picks the language of the terminal output — e.g. `npm run audit -- --src web/src --json`. The same rules are listed in the “自检规则” (self-check rules) section of [`AGENTS.md`](./AGENTS.md), so you can follow them while writing code instead of meeting them for the first time here.
 
 ## Local development
 

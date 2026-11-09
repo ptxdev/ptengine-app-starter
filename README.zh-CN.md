@@ -55,7 +55,7 @@ npx skills add ptxdev/ptengine-skills          # 大多数助手
 | `backend/` | 后端。一个 Cloudflare Worker，只服务 `/api/*`。可选 |
 | `shared/api.ts` | 前后端共享的接口契约 —— 唯一真相来源 |
 | `manifest.json` | 应用声明：版本、入口、权限、后端资源、密钥、出站白名单 |
-| `scripts/ptx*.mjs` | `ptx` 命令行：`dev` / `build` / `package` / `deploy` / `doctor` |
+| `scripts/ptx*.mjs` | `ptx` 命令行：`dev` / `build` / `package` / `deploy` / `doctor` / `audit` |
 
 ## 两种应用
 
@@ -77,10 +77,13 @@ npx skills add ptxdev/ptengine-skills          # 大多数助手
 |---|---|
 | `npm run dev` | vite + `wrangler dev`（你的 worker 加本地网关桩 `ptx-local-gateway`）+ 本地令牌端点。端口冲突用 `PTX_WEB_PORT` / `PTX_API_PORT` |
 | `npm run doctor` | 查约定与 manifest 自洽性。`npm run doctor -- --deps` 额外报依赖漂移 |
+| `npm run audit` | 自检源码：安全、AI 成本、效率、合理性四个方面。说明见下 |
 | `npm run ptx -- job run <type> [--params '<json>'] [--preview]` | 以定时任务身份在本地调一次任务路由（需 `npm run dev` 在跑；端口取 `PTX_API_PORT`，缺省 8787）；打印状态码、响应体，以及平台会把返回结果判成什么 |
 | `npm run build` | 类型检查（web + backend + shared）+ vite build + wrangler bundle |
 | `npm run package` | 组装 zip 并做结构自检 |
 | `npm run deploy` | 上传。`--publish` 立即发布，`--stream` 流式打印进度，`--dry-run` 只打印不发请求 |
+
+`npm run audit` 对 `web/src`、`backend/src`、`shared` 做静态检查，23 条规则分四个方面 —— 安全（写死密钥、未声明的 egress、拼接 SQL、`eval` 等）、AI 成本（循环里调 AI、定时任务没上限、没设 `max_tokens` 等）、效率（循环里逐个查询、缺 `timeRange`、单个 JS 包超过 800 KB 等）、合理性（scope 声明与代码不一致、前后端只有一半、异步组件没处理加载中或出错）。退出码 `2` 表示有严重项，`1` 只有一般项，`0` 没有问题，`3` 表示自检本身没跑起来（原因看 stderr）。`--src <dir>`（可重复）只扫给定目录；`--json` 只输出一个 JSON，每条文案三语齐全；`PTX_LANG`（`zh-CN` / `en-US` / `ja-JP`，缺省 `en-US`）决定终端输出的语言 —— 例如 `npm run audit -- --src web/src --json`。同一份规则也列在 [`AGENTS.md`](./AGENTS.md) 的「自检规则」一节，写代码时照着做，不必等自检才第一次看到。
 
 ## 本地开发
 

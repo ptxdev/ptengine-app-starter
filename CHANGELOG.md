@@ -10,6 +10,7 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/app-backend` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|---|
+| v3.10.0 | `^2.11.0` | `^0.10.0` | `^0.5.0` | **2**（轻应用 1）| 新增 `ptx audit`（23 条确定性自检规则，四维：安全 / AI 成本 / 效率 / 合理性；`--src`、`--json`、`PTX_LANG`；`npm run audit:doc` 从规则表生成 AGENTS.md「自检规则」一节；评审 rubric `scripts/audit-rubric.md` 供 Builder 与 skill 共用）。依赖区间不变 |
 | v3.9.0 | `^2.11.0` | `^0.10.0` | `^0.5.0` | **2**（轻应用 1）| 热图截图：前端 `PtApp.heatmap.capture / getCapture`（app-sdk 2.11），后端 `ctx.pt.heatmap.capture / getCapture`（app-backend 0.10），需 `analytics:read`；推送 `imageUrl` 也收本应用的热图截图。**`0.x` 的 caret 不跨 minor，旧项目要手改区间再 `npm install`** |
 | v3.8.0 | `^2.10.0` | `^0.9.0` | `^0.5.0` | **2**（轻应用 1）| 定时任务与推送（`jobs:run` / `notify:send`、`backend.jobs`、`ctx.pt.jobs.*` / `ctx.pt.notify.send`、`PtApp.subscriptions.open`）。另含即时通知声明 `backend.notify.instant`（app-sdk 2.10.0 起）。邮件推送在平台侧暂未开放 |
 | v3.7.1 | `^2.8.0` | `^0.8.0` | `^0.5.0` | **2**（轻应用 1）| 本地 dev token 的 `scopes` 改为照抄 `manifest.json`（以前写死四项，声明了 `asset:read` / `asset:write` / `ai:invoke` 的应用本地 403）；`AGENTS.md` 与后端模板头注释的能力清单对齐到 app-sdk 2.8 / app-backend 0.8 的实际导出。依赖区间不变 |
@@ -32,6 +33,26 @@
 | v1.1.0 | `^0.3.0` | — | `^0.3.0` | 1 | 预装 UI 组件库 + Tailwind，暗色跟随平台主题 |
 | v1.0.1 | `^0.3.0` | — | — | 1 | 支持在平台内加载本地 dev server 联调 |
 | v1.0.0 | `^0.2.0` | — | — | 1 | 首个版本 |
+
+## [3.10.0] - 2026-11-09
+
+> 依赖区间不变（`@ptengine/app-sdk ^2.11.0` / `@ptengine/app-backend ^0.10.0`），只加脚本与文档。
+
+### 新增
+
+- **`npm run audit`（`ptx audit`）**：对 `web/src`、`backend/src`、`shared` 做确定性的静态自检，23 条规则分四维 ——
+  安全（写死密钥、未声明的 egress、拼接 SQL、eval / `postMessage('*')` 等）、AI 成本（循环里调 AI、定时任务没上限、没设 `max_tokens` 等）、
+  效率（循环里逐个查询、缺 `timeRange`、单个 JS 包超过 800 KB 等）、合理性（scope 声明与代码不一致、前后端只有一半、异步组件没处理加载 / 出错）。
+  退出码：2 有严重项、1 只有一般项、0 无问题、3 自检本身没跑起来（原因在 stderr）。
+  `--src <dir>`（可重复）只扫给定目录，目录不存在按 3 退出；`--json` 输出一个 JSON、文案三语齐全；终端输出语言看 `PTX_LANG`（缺省 `en-US`）。
+  Builder 用 `node scripts/ptx-audit.mjs --root <dir> --json` 直接调。
+- 规则表 `scripts/audit-rules.json` 是唯一来源：`npm run audit:doc` 把它渲染成 `AGENTS.md` 的「自检规则（写代码前先看）」一节，测试里的 `--check` 拦住两边不一致。
+- `scripts/audit-rubric.md`：规则查不出来、要读懂代码才能判断的那部分（合理性 / 效率 / 安全 / AI 成本）的评审标准与输出格式，Builder 的评审和 skill 共用这一份。
+
+### 变更
+
+- `web/vite.config.ts`：React 与 `@ptengine/design-components` 各拆成独立 chunk。不拆时模板自己的单个 JS 包约 845 KB，会触发 EFF-004；
+  拆开后各包都在 800 KB 以下，版本之间文件名 hash 稳定，浏览器能命中缓存。
 
 ## [3.9.0] - 2026-11-06
 
