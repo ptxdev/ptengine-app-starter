@@ -10,7 +10,7 @@
         "deploy": "node scripts/ptx.mjs deploy",
         "doctor": "node scripts/ptx.mjs doctor",
         "audit": "node scripts/ptx.mjs audit",
-        "test": "node --test scripts/*.test.mjs",
+        "test": "node --test scripts/*.test.mjs scripts/audit/*.test.mjs",
         "sync-rules": "node scripts/sync-rules.mjs",
         "ptx": "node scripts/ptx.mjs"
     },
