@@ -28,12 +28,21 @@ const DIMENSIONS = [
     ['design', '合理性（design）'],
 ];
 const SEVERITY_LABEL = { severe: '严重', normal: '一般' };
+/** 规则文案里的占位在文档里换成的泛称（只渲染 zh-CN）。新增占位要在这里补，测试会拦下漏补的。 */
+const DOC_PLACEHOLDERS = { host: '某个外部主机', scope: '某个权限' };
+/**
+ * 标题整句改写：EFF-004 的「有一个 {kb} KB 的 JS 包，超过 800 KB」去掉具体值后只剩一句别扭的话，
+ * 按 id 整句换掉比对着原文做字符串替换清楚 —— 原文改了措辞也不会悄悄替换失败。
+ */
+const DOC_TITLE = { 'EFF-004': '单个 JS 包超过 800 KB' };
+// 占位两侧的空格是给英文主机名、权限名留的；换成中文泛称后一并去掉，免得读成「请求了 某个外部主机，」
+const docText = t => t.replace(/ ?\{(\w+)\} ?/g, (m, k) => DOC_PLACEHOLDERS[k] ?? m);
 const INTRO = '下面这些由 `npm run audit` 在验收时逐条检查；写之前照着做，大多数就不会出现在自检卡上。';
 
 /**
  * 渲染标记之间的正文。同一维度内严重在前、同严重度按 id 升序，
  * 读的人先看到最不能犯的；排序稳定，json 里条目顺序变了也不会让 --check 误报。
- * `{host}` 这类占位原样保留：文档里没有具体值，编一个反而误导。
+ * `{host}` 这类占位换成泛称：文档里没有具体值，编一个反而误导，原样留着读起来又像模板没填。
  */
 export function renderRulesDoc(rules, lang) {
     const lines = [INTRO];
@@ -45,7 +54,8 @@ export function renderRulesDoc(rules, lang) {
         if (!entries.length) continue;
         lines.push('', `### ${heading}`, '');
         for (const [id, r] of entries) {
-            lines.push(`- **${id}**（${SEVERITY_LABEL[r.severity]}）：${r.title[lang]} —— ${r.fix[lang]}`);
+            const title = DOC_TITLE[id] ?? docText(r.title[lang]);
+            lines.push(`- **${id}**（${SEVERITY_LABEL[r.severity]}）：${title} —— ${docText(r.fix[lang])}`);
         }
     }
     return lines.join('\n');
@@ -81,8 +91,10 @@ function main(args) {
         return 0;
     }
     if (args.includes('--check')) {
-        const now = currentSection(readFileSync(file, 'utf8')).split('\n');
-        const want = body.split('\n');
+        // 换行统一成 \n 再去首尾空白：Windows 上检出的 CRLF、编辑器多留的空行不算内容不一致
+        const norm = t => t.replace(/\r\n/g, '\n').trim().split('\n');
+        const now = norm(currentSection(readFileSync(file, 'utf8')));
+        const want = norm(body);
         const i = want.findIndex((l, k) => l !== now[k]);
         if (i < 0 && now.length === want.length) return 0;
         const at = i < 0 ? want.length : i;

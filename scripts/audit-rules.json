@@ -165,9 +165,9 @@
             "ja-JP": "定期ジョブは無人で繰り返し実行されます。処理量に上限がないと、データが急増したときに誰かが気づくまで費用がかかり続けます。"
         },
         "fix": {
-            "zh-CN": "定义一个上限常量（如 MAX_ITEMS），用 slice(0, MAX_ITEMS) 或计数器限制每次运行处理的条数和 AI 调用次数。",
-            "en-US": "Define a cap constant (e.g. MAX_ITEMS) and use slice(0, MAX_ITEMS) or a counter to limit how many items and AI calls each run can make.",
-            "ja-JP": "上限の定数（例: MAX_ITEMS）を定義し、slice(0, MAX_ITEMS) やカウンターで 1 回の実行あたりの処理件数と AI 呼び出し回数を制限してください。"
+            "zh-CN": "在任务路由里设一个看得出来的上限：用名字带 MAX_ 或 LIMIT 的常量（如 MAX_ITEMS），配合 slice(0, MAX_ITEMS) 或计数器，或直接写数字字面量（如 if (count < 50)），限制每次运行处理的条数和 AI 调用次数。叫 BATCH_SIZE 这类名字的常量不算上限。",
+            "en-US": "Put a visible cap in the job route: a constant whose name contains MAX_ or LIMIT (e.g. MAX_ITEMS) used with slice(0, MAX_ITEMS) or a counter, or a numeric literal (e.g. if (count < 50)), to limit how many items and AI calls each run can make. A constant named like BATCH_SIZE does not count as a cap.",
+            "ja-JP": "ジョブのルートに見て分かる上限を置いてください。名前に MAX_ か LIMIT を含む定数（例: MAX_ITEMS）を slice(0, MAX_ITEMS) やカウンターと組み合わせるか、数値リテラル（例: if (count < 50)）で、1 回の実行あたりの処理件数と AI 呼び出し回数を制限します。BATCH_SIZE のような名前の定数は上限とみなされません。"
         }
     },
     "AI-003": {

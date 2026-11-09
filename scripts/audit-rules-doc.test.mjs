@@ -23,10 +23,19 @@ test('renderRulesDoc：四个维度标题按序、每条规则一行、格式与
     const items = body.split('\n').filter(l => l.startsWith('- **'));
     assert.equal(items.length, Object.keys(rules).length);
     const r = rules['SEC-002'];
-    assert.ok(items.includes(`- **SEC-002**（严重）：${r.title['zh-CN']} —— ${r.fix['zh-CN']}`), '严重行格式，占位原样保留');
+    const sub = t => t.replace(/ ?\{host\} ?/g, '某个外部主机');
+    assert.ok(items.includes(`- **SEC-002**（严重）：${sub(r.title['zh-CN'])} —— ${sub(r.fix['zh-CN'])}`), '严重行格式，占位换成泛称');
     const n = rules['DES-003'];
     assert.ok(items.includes(`- **DES-003**（一般）：${n.title['zh-CN']} —— ${n.fix['zh-CN']}`), '一般行格式');
     assert.ok(body.includes('`npm run audit`'), '含节首说明');
+});
+
+test('renderRulesDoc：文档里不留 {占位}；{scope} 换泛称，EFF-004 标题不带具体 KB 数', () => {
+    const body = renderRulesDoc(rules, 'zh-CN');
+    assert.doesNotMatch(body, /\{\w+\}/);
+    const d = rules['DES-001'];
+    assert.ok(body.includes(`：${d.title['zh-CN'].replace(/ ?\{scope\} ?/, '某个权限')} —— `), 'DES-001 标题');
+    assert.ok(body.includes('- **EFF-004**（一般）：单个 JS 包超过 800 KB —— '), 'EFF-004 标题');
 });
 
 test('renderRulesDoc：同一维度内严重在前，同严重度按 id 升序', () => {
@@ -54,6 +63,21 @@ test('replaceSection：缺标记或顺序颠倒就抛错', () => {
 test('--check：仓库里的 AGENTS.md 与 audit-rules.json 一致（改了 json 记得 npm run audit:doc）', () => {
     const r = spawnSync(process.execPath, [SCRIPT, '--check'], { cwd: ROOT, encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);
+});
+
+test('--check：CRLF 换行与首尾空白不算不一致', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'audit-doc-'));
+    try {
+        const file = join(dir, 'AGENTS.md');
+        const md = readFileSync(join(ROOT, 'AGENTS.md'), 'utf8')
+            .replace('<!-- audit-rules:start -->\n', '<!-- audit-rules:start -->\n\n')
+            .replace(/\n/g, '\r\n');
+        writeFileSync(file, md);
+        const r = spawnSync(process.execPath, [SCRIPT, '--check', '--file', file], { encoding: 'utf8' });
+        assert.equal(r.status, 0, r.stderr);
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
 });
 
 test('--check：生成段被改过就退出 1 且不写文件', () => {

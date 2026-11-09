@@ -72,6 +72,35 @@ test('collectFiles：--src 给了就只扫给的', () => {
     }
 });
 
+test('collectFiles：unscanned 不数隐藏目录与虚拟环境、缓存、构建产物里的文件', () => {
+    const root = fixture({
+        'web/src/a.tsx': 'export const a = 1;',
+        '.cache/x.py': 'x',
+        'venv/lib/y.py': 'y',
+        'tools/.venv/lib/z.py': 'z',
+        'tools/__pycache__/w.py': 'w',
+        'coverage/v.go': 'v',
+        'build/b.rb': 'b',
+        'tools/real.php': '<?php'
+    });
+    try {
+        assert.deepEqual(collectFiles(root, undefined).unscanned, ['.php']);
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test('runAudit：显式给的 --src 目录不存在就抛错（CLI 退出 3），不静默给一个空的 ok', async () => {
+    const root = fixture({ 'web/src/a.tsx': 'export const a = 1;' });
+    try {
+        await assert.rejects(runAudit({ root, src: ['web/scr'] }), { message: '扫描目录不存在：web/scr' });
+        // 缺省目录缺了照旧跳过：没有后端的项目本来就没有 backend/src
+        assert.deepEqual((await runAudit({ root })).scanned, ['web/src']);
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
 test('parseFile：语法错误返回 null，正常返回 sf', () => {
     const root = fixture({ 'web/src/ok.tsx': 'export const A = () => <div>{1}</div>;', 'web/src/bad.ts': 'const = ;' });
     try {

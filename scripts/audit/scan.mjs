@@ -13,6 +13,11 @@ import { extname, join, relative, resolve, sep } from 'node:path';
 export const DEFAULT_SRC = ['web/src', 'backend/src', 'shared'];
 /** 构建产物和依赖：不是项目自己写的代码，扫了只会产生噪音。 */
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.out', '.wrangler', '.git']);
+/**
+ * 数 unscanned 时额外跳过的目录：Python 虚拟环境、缓存、覆盖率与构建产物里的 .py 等不是项目自己写的，
+ * 点名它们只会让「还有别的语言没查」变成噪音。隐藏目录（.cache、.venv…）一律跳过。
+ */
+const UNSCANNED_SKIP_DIRS = new Set([...SKIP_DIRS, 'venv', '__pycache__', 'coverage', 'build']);
 const SCAN_EXT = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs']);
 /** 见到这些语言就在 unscanned 里点名：让读结果的人知道「没报问题」不等于「这些也查过了」。 */
 const UNSCANNED_EXT = new Set(['.py', '.go', '.rb', '.php', '.java']);
@@ -24,12 +29,12 @@ export const LOOP_CALLBACKS = ['map', 'forEach', 'flatMap', 'reduce', 'filter', 
 
 const toPosix = p => p.split(sep).join('/');
 
-/** 深度优先列出 dir 下的文件（跳过 SKIP_DIRS），返回绝对路径。 */
-function listFiles(dir) {
+/** 深度优先列出 dir 下的文件，skip(目录名) 为真的目录整棵跳过；返回绝对路径。 */
+function listFiles(dir, skip = name => SKIP_DIRS.has(name)) {
     const out = [];
     for (const ent of readdirSync(dir, { withFileTypes: true })) {
         if (ent.isDirectory()) {
-            if (!SKIP_DIRS.has(ent.name)) out.push(...listFiles(join(dir, ent.name)));
+            if (!skip(ent.name)) out.push(...listFiles(join(dir, ent.name), skip));
         } else if (ent.isFile()) {
             out.push(join(dir, ent.name));
         }
@@ -44,7 +49,8 @@ function areaOf(rel) {
 
 /**
  * @param {string} root
- * @param {string[] | undefined} srcDirs 相对 root 的目录；不给用 DEFAULT_SRC
+ * @param {string[] | undefined} srcDirs 相对 root 的目录；不给用 DEFAULT_SRC（缺的跳过）。
+ *   显式给的目录不存在就抛错：多半是路径打错了，静默跳过会得到一个什么都没扫的「ok」。
  * @returns {{ files: { abs: string, rel: string, area: 'web'|'backend'|'shared'|'other' }[], unscanned: string[], scanned: string[] }}
  *   scanned 是实际存在、扫过的目录（相对 root 的 POSIX 路径），给输出里的 scanned 用。
  */
@@ -54,7 +60,10 @@ export function collectFiles(root, srcDirs) {
     const seen = new Set();
     for (const d of srcDirs ?? DEFAULT_SRC) {
         const abs = resolve(root, d);
-        if (!existsSync(abs) || !statSync(abs).isDirectory()) continue;
+        if (!existsSync(abs) || !statSync(abs).isDirectory()) {
+            if (srcDirs) throw new Error(`扫描目录不存在：${d}`);
+            continue;
+        }
         scanned.push(toPosix(relative(root, abs)) || '.');
         for (const f of listFiles(abs)) {
             // --src 给了互相包含的目录（如 web 和 web/src）时同一文件只算一次
@@ -65,7 +74,8 @@ export function collectFiles(root, srcDirs) {
         }
     }
     // 未扫语言看整个项目而不只看扫描目录：tools/ 下的 Python 脚本同样是「没查过」的代码
-    const unscanned = [...new Set(listFiles(root).map(f => extname(f)).filter(e => UNSCANNED_EXT.has(e)))].sort();
+    const skipForUnscanned = name => name.startsWith('.') || UNSCANNED_SKIP_DIRS.has(name);
+    const unscanned = [...new Set(listFiles(root, skipForUnscanned).map(f => extname(f)).filter(e => UNSCANNED_EXT.has(e)))].sort();
     return { files, unscanned, scanned };
 }
 

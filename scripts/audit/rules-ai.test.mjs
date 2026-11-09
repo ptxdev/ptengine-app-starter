@@ -90,6 +90,15 @@ test('AI-002：不命中 —— .slice / MAX_ 常量 / if (n < 10) 任一存在�
     assert.deepEqual(h2, []);
 });
 
+test('AI-002：BATCH_SIZE 这类名字不算上限（fix 文案里明说了，两边要一致）', async () => {
+    const h = await lines('AI-002', JOBS, {
+        'backend/src/index.ts': app({
+            'POST /jobs/daily': 'async (req, ctx) => {\n      const n = BATCH_SIZE;\n      return ctx.pt.ai.chat({ messages: [], max_tokens: 1 });\n    }'
+        })
+    });
+    assert.deepEqual(h, [['backend/src/index.ts', 6]]);
+});
+
 // ─── AI-003 ───
 test('AI-003：对象字面量缺 max_tokens 命中', async () => {
     const h = await lines('AI-003', V2(), {
