@@ -213,7 +213,7 @@ function sec005(ctx) {
     return out;
 }
 
-// ─── SEC-006 用户查询结果落盘 / 进日志 ───
+// ─── SEC-006 用户查询结果落盘 / 进日志（汇点：.prepare / .bind / .put / console.log）───
 const isUserQuery = (ts, call) => callee(ts, call) === 'ctx.pt.query'
     && call.arguments[0] !== undefined && isPlainString(ts, call.arguments[0]) && call.arguments[0].text.startsWith('user_');
 
@@ -242,7 +242,8 @@ function sec006(ctx) {
             walk(ts, fn, n => {
                 if (!ts.isCallExpression(n)) return;
                 const name = callee(ts, n);
-                if (!(/\.(prepare|put)$/.test(name) || name === 'console.log' || name.endsWith('.console.log'))) return;
+                // .bind：D1 的 `db.prepare(sql).bind(x)` 是最常见的写法，结果出现在 bind 的实参里而不是 prepare 的
+                if (!(/\.(prepare|bind|put)$/.test(name) || name === 'console.log' || name.endsWith('.console.log'))) return;
                 const refs = new Set();
                 for (const a of n.arguments) walk(ts, a, m => { if (ts.isIdentifier(m)) refs.add(m.text); });
                 // 只算赋值之后的调用：前面的同名引用不可能是这次查询的结果

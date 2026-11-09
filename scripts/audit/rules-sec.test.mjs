@@ -188,3 +188,17 @@ test('SEC-007：调了 requireTrigger 不报', async () => {
     });
     assert.deepEqual(h, []);
 });
+
+test('SEC-006：user_* 查询结果进 .bind 实参（D1 最常见写法）命中', async () => {
+    const h = await hits('SEC-006', V2(), {
+        'backend/src/a.ts': [
+            'async function a(ctx, db) {',
+            "  const { rows } = await ctx.pt.query('user_list', {});",
+            "  await db.prepare('INSERT INTO t (v) VALUES (?)')",
+            '    .bind(JSON.stringify(rows)).run();',
+            "  await db.prepare('SELECT 1').bind(1).run();",
+            '}'
+        ].join('\n')
+    });
+    assert.deepEqual(h.map(f => f.line), [3]);
+});
