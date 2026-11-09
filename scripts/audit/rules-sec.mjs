@@ -6,7 +6,9 @@
  * 唯一例外是 SEC-002 的变量目标 —— 后端出站是硬限制，降成 normal 提醒一下。
  */
 import { findRouteHandler } from '../ptx-doctor.mjs';
-import { callee, lineOf, stringLiteralsIn, walk } from './scan.mjs';
+import {
+    bindingNames, callee, eachCall, enclosingFunction, isReference, lineOf, shadowedByParam, stringLiteralsIn, walk
+} from './scan.mjs';
 
 const KNOWN_SECRET = /^(sk-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|ghp_[A-Za-z0-9]{36})$/;
 const SECRET_CHARS = /^[A-Za-z0-9+/=_-]+$/;
@@ -14,11 +16,6 @@ const SECRET_NAME = /key|token|secret|password/i;
 const PLATFORM_HOSTS = ['ptengine.ai', 'ptengine.jp', 'ptengine.com'];
 
 const filesIn = (ctx, area) => (area ? ctx.files.filter(f => f.area === area) : ctx.files);
-
-/** 遍历文件里的所有调用，visit(node, calleeText)。 */
-function eachCall(ctx, file, visit) {
-    walk(ctx.ts, file.sf, n => { if (ctx.ts.isCallExpression(n)) visit(n, callee(ctx.ts, n)); });
-}
 
 const isPlainString = (ts, n) => ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n);
 
@@ -60,41 +57,6 @@ function hostMatches(host, domains) {
 function nameText(ts, name) {
     if (!name) return null;
     if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isPrivateIdentifier(name)) return name.text;
-    return null;
-}
-
-/** 解构写法里绑定出来的全部变量名。 */
-function bindingNames(ts, name, out = []) {
-    if (ts.isIdentifier(name)) out.push(name.text);
-    else if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
-        for (const el of name.elements) if (!ts.isOmittedExpression(el)) bindingNames(ts, el.name, out);
-    }
-    return out;
-}
-
-/**
- * ident 是不是在「读一个变量」：`x.rows` 的 rows、`{ rows: n }` 的键只是名字，不是对变量 rows 的引用。
- * 简写属性 `{ rows }` 读的就是变量，算引用。
- */
-function isReference(ts, ident) {
-    const p = ident.parent;
-    if ((ts.isPropertyAccessExpression(p) || ts.isPropertyAssignment(p)) && p.name === ident) return false;
-    return true;
-}
-
-/**
- * 从 node 往上到 fn（不含）之间，有没有哪个函数的参数也叫 name：`list.map(rows => log(rows))` 里的
- * rows 是回调参数，不是外层的查询结果。已知盲区：内层块里 `const rows = …` 的遮蔽不处理（少见，且只会多报 normal）。
- */
-function shadowedByParam(ts, node, fn, name) {
-    for (let p = node.parent; p && p !== fn; p = p.parent) {
-        if (ts.isFunctionLike(p) && p.parameters?.some(prm => bindingNames(ts, prm.name).includes(name))) return true;
-    }
-    return false;
-}
-
-function enclosingFunction(ts, node) {
-    for (let p = node.parent; p; p = p.parent) if (ts.isFunctionLike(p)) return p;
     return null;
 }
 

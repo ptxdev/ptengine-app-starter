@@ -175,17 +175,24 @@ function isRoutesObject(ts, obj) {
 }
 
 /**
- * node 所在的后端路由键（如 `'POST /jobs/daily'`）；不在 createApp 的 routes 里内联写的处理函数中 → null。
+ * node 所在的后端路由：{ key: 路由键（如 `'POST /jobs/daily'`）, node: 该路由的属性 / 方法节点 }；
+ * 不在 createApp 的 routes 里内联写的处理函数中 → null。
  * 处理函数写成别处定义的变量时认不出来，按「拿不准就不报」返回 null。
  */
-export function enclosingRouteKey(ts, node) {
+export function enclosingRoute(ts, node) {
     for (let p = node.parent; p; p = p.parent) {
         if ((ts.isPropertyAssignment(p) || ts.isMethodDeclaration(p)) && p.parent && ts.isObjectLiteralExpression(p.parent)
             && isRoutesObject(ts, p.parent)) {
-            return propName(ts, p.name);
+            const key = propName(ts, p.name);
+            return key === null ? null : { key, node: p };
         }
     }
     return null;
+}
+
+/** node 所在的后端路由键；见 enclosingRoute。 */
+export function enclosingRouteKey(ts, node) {
+    return enclosingRoute(ts, node)?.key ?? null;
 }
 
 /** 节点起始所在行，1 起（不含前导注释与空白）。 */
@@ -200,4 +207,45 @@ export function stringLiteralsIn(ts, node) {
         if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) out.push({ text: n.text, node: n });
     });
     return out;
+}
+
+/** 遍历文件里的所有调用，visit(node, calleeText)。 */
+export function eachCall(ctx, file, visit) {
+    walk(ctx.ts, file.sf, n => { if (ctx.ts.isCallExpression(n)) visit(n, callee(ctx.ts, n)); });
+}
+
+/** 解构写法里绑定出来的全部变量名。 */
+export function bindingNames(ts, name, out = []) {
+    if (ts.isIdentifier(name)) out.push(name.text);
+    else if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+        for (const el of name.elements) if (!ts.isOmittedExpression(el)) bindingNames(ts, el.name, out);
+    }
+    return out;
+}
+
+/**
+ * ident 是不是在「读一个变量」：`x.rows` 的 rows、`{ rows: n }` 的键只是名字，不是对变量 rows 的引用。
+ * 简写属性 `{ rows }` 读的就是变量，算引用。
+ */
+export function isReference(ts, ident) {
+    const p = ident.parent;
+    if ((ts.isPropertyAccessExpression(p) || ts.isPropertyAssignment(p)) && p.name === ident) return false;
+    return true;
+}
+
+/**
+ * 从 node 往上到 fn（不含）之间，有没有哪个函数的参数也叫 name：`list.map(rows => log(rows))` 里的
+ * rows 是回调参数，不是外层的查询结果。已知盲区：内层块里 `const rows = …` 的遮蔽不处理（少见，且只会多报 normal）。
+ */
+export function shadowedByParam(ts, node, fn, name) {
+    for (let p = node.parent; p && p !== fn; p = p.parent) {
+        if (ts.isFunctionLike(p) && p.parameters?.some(prm => bindingNames(ts, prm.name).includes(name))) return true;
+    }
+    return false;
+}
+
+/** 包住 node 的最近一层函数（含箭头函数、方法）；顶层代码 → null。 */
+export function enclosingFunction(ts, node) {
+    for (let p = node.parent; p; p = p.parent) if (ts.isFunctionLike(p)) return p;
+    return null;
 }
