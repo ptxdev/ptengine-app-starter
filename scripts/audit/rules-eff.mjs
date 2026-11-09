@@ -6,7 +6,7 @@
 import { basename } from 'node:path';
 import {
     bindingNames, callee, eachCall, enclosingFunction, exclusive, filesIn, insideLoop, isReference, lineOf, loopVariables, propName,
-    shadowedByParam, walk
+    shadowedByParam, unwrapParens, walk
 } from './scan.mjs';
 
 /**
@@ -19,8 +19,6 @@ export const isDataQuery = name => DATA_QUERY.test(name);
 function eachDataQuery(ctx, visit, area) {
     for (const file of filesIn(ctx, area)) eachCall(ctx, file, (call, name) => { if (isDataQuery(name)) visit(call, file); });
 }
-
-const unwrapParens = (ts, n) => { while (n && ts.isParenthesizedExpression(n)) n = n.expression; return n; };
 
 // ─── EFF-001 循环里按循环变量逐个查询 ───
 /**

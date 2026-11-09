@@ -107,6 +107,9 @@ export function parseFile(ts, file) {
     return { sf, text };
 }
 
+/** 去掉外层括号：`(await q())` → `await q()`。 */
+export const unwrapParens = (ts, n) => { while (n && ts.isParenthesizedExpression(n)) n = n.expression; return n; };
+
 /** 深度优先（先序）遍历 node 及其所有子孙。 */
 export function walk(ts, node, visit) {
     visit(node);

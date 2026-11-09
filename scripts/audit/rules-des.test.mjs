@@ -107,6 +107,16 @@ test('DES-001：不命中 —— 声明与使用一致、注释里的字样、ct
         ...WEB_CALLS_API,
         'backend/src/index.ts': 'export const h = async ({ pt }) => pt.ai.chat({});\n'
     }), []);
+    // asset:read 只在前端经 PtApp.asset 用、notify:send 只用 ctx.pt.render.chart：都算在用
+    assert.deepEqual(await scoped(WITH_BACKEND(['asset:read', 'notify:send']), {
+        'web/src/a.ts': 'fetch("/api/x"); await window.PtApp.asset.list({ type: "page" });\n',
+        'backend/src/index.ts': 'export async function h(ctx) { return ctx.pt.render.chart({}); }\n'
+    }), []);
+    // 这些额外写法只用来放过「声明了没用」，不会反过来报「用了未声明」
+    assert.deepEqual(await scoped(WITH_BACKEND([]), {
+        'web/src/a.ts': 'fetch("/api/x"); await PtApp.asset.get("id");\n',
+        'backend/src/index.ts': 'export async function h(ctx) { return ctx.pt.render.chart({}); }\n'
+    }), []);
     // 只扫了前端（没有后端文件）时不报「声明了没用」
     assert.deepEqual(await scoped(WEB_ONLY(['ai:invoke']), { 'web/src/a.ts': 'export const x = 1;\n' }), []);
     // 没有 manifest：整条不跑
@@ -134,7 +144,8 @@ test('DES-002：不命中 —— 前端有 /api/ 字面量、`/api${p}` 模板�
         'const u = "/api/orders";\n',
         'export const get = p => fetch(`/api${p}`);\n',
         'client.api.call("orders");\n',
-        'callApi("orders");\n'
+        'callApi("orders");\n',
+        'const BASE = "/api"; fetch(BASE + "/orders");\n'
     ]) {
         assert.deepEqual(await lines('DES-002', WITH_BACKEND([]), { 'web/src/a.ts': web, 'backend/src/index.ts': 'export default {};\n' }), [], web);
     }
@@ -158,10 +169,14 @@ test('DES-003：组件里 fetch().then 没有 catch、await 不在 try 且没有
             '  const [rows, setRows] = useState([]);',
             '  useEffect(() => { (async () => { setRows(await client.api.list()); })(); }, []);',
             '  return rows.length ? <ul /> : null;',
-            '};'
+            '};',
+            'export function C() {',
+            '  useEffect(() => { void fetch("/x").then(r => r.json()); }, []);',
+            '  return <div />;',
+            '}'
         )
     });
-    assert.deepEqual(h, [['web/src/A.tsx', 5], ['web/src/A.tsx', 11]]);
+    assert.deepEqual(h, [['web/src/A.tsx', 5], ['web/src/A.tsx', 11], ['web/src/A.tsx', 15]]);
 });
 
 test('DES-003：不命中 —— 有 catch / then 第二参、链被返回或 await、await 在 try 里、有 error 状态、不是组件、后端文件', async () => {
@@ -178,6 +193,10 @@ test('DES-003：不命中 —— 有 catch / then 第二参、链被返回或 aw
             '  const [loadErr, setLoadErr] = useState(null);',
             '  useEffect(() => { (async () => { await fetch("/x"); })(); }, []);',
             '  return <div>{loadErr}</div>;',
+            '}',
+            'export function D() {',
+            '  const { data, error } = useQuery({ queryKey: ["x"], queryFn: async () => { await fetch("/x"); } });',
+            '  return <div>{error ? "err" : data}</div>;',
             '}',
             'export async function notComponent() {',
             '  fetch("/x").then(r => r.json());',

@@ -4,9 +4,7 @@
  * 这几条看的是「整体搭得对不对」，误报的代价比漏报大（会让人去删一个其实在用的权限 / 后端），
  * 所以一律「拿不准就不报」：认不出调用方式（解构、转手、换了参数名）就当作用到了。
  */
-import { bindingNames, callee, eachCall, filesIn, lineOf, nameChain, stringLiteralsIn, walk } from './scan.mjs';
-
-const unwrapParens = (ts, n) => { while (n && ts.isParenthesizedExpression(n)) n = n.expression; return n; };
+import { bindingNames, callee, eachCall, filesIn, lineOf, nameChain, stringLiteralsIn, unwrapParens, walk } from './scan.mjs';
 
 // ─── DES-001 scopes 与代码不一致 ───
 /**
@@ -21,10 +19,19 @@ const SCOPE_USES = {
     'asset:read': /ctx\.pt\.asset\.(list|sharedWithMe|get)\(/,
     'openapi:read': /ctx\.pt\.openApiUrl/
 };
+/**
+ * 只用于「声明了没用」方向的额外在用认定（「用了未声明」仍只认 SCOPE_USES）：
+ * asset:read 前端也能用（`window.PtApp.asset.list()` 等，见 AGENTS.md）；notify:send 还覆盖 `ctx.pt.render.*`。
+ * 不认这些会让只在前端读资产、只用 render.chart 的项目被劝删掉在用的权限。
+ */
+const ALSO_USED_BY = {
+    'asset:read': /(^|\.)asset\.(list|sharedWithMe|get)\(/,
+    'notify:send': /ctx\.pt\.render\./
+};
 /** 换了写法也能看出「大概在用」的标识符：出现了就不报「声明了没用」。 */
 const SCOPE_IDENTS = { 'jobs:run': 'requireTrigger', 'openapi:read': 'openApiUrl' };
 /** ctx.pt 下按命名空间调用的几组：`ctx.pt.ai` 后面不再接 `.方法` 就是被转手了。 */
-const PT_NAMESPACES = new Set(['ai', 'notify', 'asset']);
+const PT_NAMESPACES = new Set(['ai', 'notify', 'asset', 'render']);
 
 /**
  * ctx.pt 是否以认不出的方式被使用：换了参数名（`c.pt`）、整个转手 / 解构（`helper(ctx.pt)`、`const { ai } = ctx.pt`、
@@ -52,8 +59,9 @@ function ptOpaque(ts, node) {
  * 调用比 `被调用者(`，所以带 `\(` 的正则（asset:read、jobs:run）只认真的调用。
  * `requireScope('x')` 的字面量也算用到 x —— 与 ptx doctor 的 checkScopeConsistency 同一口径。
  * 返回 scope → 首次出现的 { file, line }（文件按扫描顺序，文件内按先序遍历）。
+ * table 换成 ALSO_USED_BY 时只看正则，不看 requireScope。
  */
-function scopeUses(ctx) {
+function scopeUses(ctx, table = SCOPE_USES) {
     const { ts } = ctx;
     const first = new Map();
     const mark = (scope, file, node) => { if (!first.has(scope)) first.set(scope, { file: file.rel, line: lineOf(file.sf, node) }); };
@@ -63,7 +71,7 @@ function scopeUses(ctx) {
             if (ts.isCallExpression(n)) {
                 const name = callee(ts, n);
                 text = `${name}(`;
-                if (/(^|\.)requireScope$/.test(name)) {
+                if (table === SCOPE_USES && /(^|\.)requireScope$/.test(name)) {
                     for (const a of n.arguments) {
                         if ((ts.isStringLiteral(a) || ts.isNoSubstitutionTemplateLiteral(a)) && a.text in SCOPE_USES) mark(a.text, file, n);
                     }
@@ -72,7 +80,7 @@ function scopeUses(ctx) {
                 text = nameChain(ts, n);
             }
             if (text === null) return;
-            for (const [scope, re] of Object.entries(SCOPE_USES)) if (re.test(text)) mark(scope, file, n);
+            for (const [scope, re] of Object.entries(table)) if (re.test(text)) mark(scope, file, n);
         });
     }
     return first;
@@ -102,7 +110,9 @@ function des001(ctx) {
     const unusedCandidates = [...declared].filter(s => s in SCOPE_USES && !used.has(s));
     if (unusedCandidates.length === 0 || filesIn(ctx, 'backend').length === 0) return out;
     if (ctx.files.some(f => ptOpaque(ts, f.sf))) return out;
+    const alsoUsed = scopeUses(ctx, ALSO_USED_BY);
     for (const scope of unusedCandidates) {
+        if (alsoUsed.has(scope)) continue;
         if (SCOPE_IDENTS[scope] && hasIdentifier(ts, ctx.files, SCOPE_IDENTS[scope])) continue;
         out.push({ rule: 'DES-001', file: 'manifest.json', line: 0, args: { scope } });
     }
@@ -111,7 +121,7 @@ function des001(ctx) {
 
 // ─── DES-002 前后端只接了一半 ───
 /**
- * 前端调后端的痕迹：`'/api/…'` 字面量、`/api${path}` 这种模板开头（starter 自带的 web/src/api.ts 就是这么拼的，
+ * 前端调后端的痕迹：`'/api/…'` / `'/api'` 字面量（`const BASE = '/api'; fetch(BASE + p)`）、`/api${path}` 这种模板开头（starter 自带的 web/src/api.ts 就是这么拼的，
  * 不认它会把所有只走 api() 封装的项目误报成「前端没调后端」）、`api.call(` / `callApi(`。
  */
 const API_PREFIX = /^\/api(\/|$)/;
@@ -119,7 +129,7 @@ const API_PREFIX = /^\/api(\/|$)/;
 function webCallsApi(ctx) {
     const { ts } = ctx;
     return filesIn(ctx, 'web').some(file => {
-        if (stringLiteralsIn(ts, file.sf).some(s => s.text.startsWith('/api/'))) return true;
+        if (stringLiteralsIn(ts, file.sf).some(s => API_PREFIX.test(s.text))) return true;
         let found = false;
         walk(ts, file.sf, n => {
             if (found) return;
