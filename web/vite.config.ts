@@ -86,7 +86,23 @@ export default defineConfig({
     build: {
         outDir: 'dist',
         assetsDir: 'assets',
-        emptyOutDir: true
+        emptyOutDir: true,
+        rollupOptions: {
+            output: {
+                /**
+                 * 把 React 和组件库各自拆成独立的包，不和业务代码挤在一个 JS 里。
+                 *
+                 * 不拆时 starter 本身的单个包就有 ~845 KB，超过 `npm run audit` 的 EFF-004 门槛（800 KB），
+                 * 每个新应用一开局就带一条自检提示。拆开后各包都在门槛下；这两块在版本之间基本不变，
+                 * 文件名 hash 稳定，发新版时浏览器还能命中缓存。再引入大依赖（echarts 等）时照这里加一行，
+                 * 或在用到的地方 import() 按需加载。
+                 */
+                manualChunks(id) {
+                    if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'react';
+                    if (/[\\/]node_modules[\\/]@ptengine[\\/]design-components[\\/]/.test(id)) return 'design-components';
+                }
+            }
+        }
     },
 
     server: {
