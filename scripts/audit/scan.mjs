@@ -137,7 +137,7 @@ function isFunctionLike(ts, n) {
 }
 
 /** 函数是不是直接作为 `xs.map(...)` 一类调用的实参。 */
-export function isLoopCallback(ts, fn) {
+function isLoopCallback(ts, fn) {
     if (!ts.isArrowFunction(fn) && !ts.isFunctionExpression(fn)) return false;
     const call = fn.parent;
     if (!call || !ts.isCallExpression(call) || !call.arguments.includes(fn)) return false;
@@ -276,4 +276,39 @@ export function shadowedByParam(ts, node, fn, name) {
 export function enclosingFunction(ts, node) {
     for (let p = node.parent; p; p = p.parent) if (ts.isFunctionLike(p)) return p;
     return null;
+}
+
+/**
+ * fn 里的两个节点（如两处调用 / 两个 await）是否不可能在同一次执行里都发生：分在同一个 if 的两支 / 三元的两支 / switch 的不同 case，
+ * try 块与 catch 块（失败兜底：`try { r = await ai.chat(a) } catch { r = await ai.chat(b) }`），
+ * `||` / `??` 的两侧（`(await ai.chat(a)) ?? (await ai.chat(b))` 右侧只在左侧落空时才跑），
+ * 或前一处在一条 return 语句里而后一处不在（`if (x) return ai.chat(a); return ai.chat(b);`）。
+ * `return Promise.all([ai.chat(a), ai.chat(b)])` 两处在同一条 return 里，照常算。
+ */
+export function exclusive(ts, a, b, fn) {
+    const pathOf = n => { const s = []; for (let p = n; p && p !== fn; p = p.parent) s.push(p); return s; };
+    const pa = pathOf(a);
+    const pb = new Set(pathOf(b));
+    const ret = pa.find(p => ts.isReturnStatement(p));
+    if (ret && !pb.has(ret)) return true;
+    for (let i = 1; i < pa.length; i++) {
+        const anc = pa[i];
+        if (!pb.has(anc)) continue;
+        // anc 是最近公共祖先；看 a、b 分别从它的哪个孩子下来
+        const ca = pa[i - 1];
+        const cb = pathOf(b).find(x => x.parent === anc);
+        if (ts.isIfStatement(anc)) return ca !== cb && ca !== anc.expression && cb !== anc.expression;
+        if (ts.isConditionalExpression(anc)) return ca !== cb && ca !== anc.condition && cb !== anc.condition;
+        if (ts.isCaseBlock(anc)) return ca !== cb;
+        if (ts.isTryStatement(anc)) {
+            const sides = new Set([ca, cb]);
+            return sides.has(anc.tryBlock) && sides.has(anc.catchClause);
+        }
+        if (ts.isBinaryExpression(anc)) {
+            const op = anc.operatorToken.kind;
+            return ca !== cb && (op === ts.SyntaxKind.BarBarToken || op === ts.SyntaxKind.QuestionQuestionToken);
+        }
+        return false;
+    }
+    return false;
 }

@@ -102,10 +102,25 @@ test('EFF-003：有 JSX 的前端文件整包 import echarts / d3 / framer-motio
             "import * as echarts from 'echarts';",
             "import { motion } from 'framer-motion';",
             "import * as d3 from \"d3\";",
-            'export const C = () => <div />;'
+            "import { init, type EChartsOption } from 'echarts';",
+            'export const C = () => <motion.div ref={el => init(el)} />;'
         )
     });
-    assert.deepEqual(h, [['web/src/Chart.tsx', 1], ['web/src/Chart.tsx', 2], ['web/src/Chart.tsx', 3]]);
+    assert.deepEqual(h, [['web/src/Chart.tsx', 1], ['web/src/Chart.tsx', 2], ['web/src/Chart.tsx', 3], ['web/src/Chart.tsx', 4]]);
+});
+
+test('EFF-003：不命中 —— 命名导入只在类型位置用（没写 type，编译时整条删掉）', async () => {
+    const h = await lines('EFF-003', {
+        'web/src/Chart.tsx': src(
+            "import { EChartsOption, ECharts } from 'echarts';",
+            "import { Variants } from 'framer-motion';",
+            'const opt: EChartsOption = {};',
+            'let inst = null as ECharts | null;',
+            'function f(v: Variants[]): Promise<EChartsOption> { return null!; }',
+            'export const C = (p: { o: EChartsOption }) => <div />;'
+        )
+    });
+    assert.deepEqual(h, []);
 });
 
 test('EFF-003：不命中 —— 子路径、import type、没有 JSX 的文件、后端文件', async () => {
@@ -144,9 +159,50 @@ const q = n => `  const r${n} = await window.PtApp.data.query({ queryType: "q${n
 test('EFF-005：首屏文件同一函数里串行 await 3 次查询 → 报第一处', async () => {
     const h = await lines('EFF-005', {
         'web/src/App.tsx': src('async function load() {', q(1), q(2), q(3), '}', 'export const A = () => <div />;'),
-        'web/src/pages/index.tsx': src('const load = async () => {', q(1), '  log(1);', q(2), q(3), q(4), '};')
+        'web/src/pages/index.tsx': src('const load = async () => {', q(1), '  log(1);', q(2), q(3), q(4), '};'),
+        'web/src/main.tsx': src('async function boot() {', q(1), q(2), q(3), '}'),
+        'web/src/routes/index.tsx': src('export async function loader() {', '  if (x) return null;', q(1), q(2), q(3), '}')
     });
-    assert.deepEqual(h, [['web/src/App.tsx', 2], ['web/src/pages/index.tsx', 2]]);
+    assert.deepEqual(h, [['web/src/App.tsx', 2], ['web/src/main.tsx', 2], ['web/src/pages/index.tsx', 2], ['web/src/routes/index.tsx', 3]]);
+});
+
+test('EFF-005：不命中 —— 后一次查询用了前一次的结果（直接 / 解构 / 转手变量），必须串行', async () => {
+    const h = await lines('EFF-005', {
+        'web/src/App.tsx': src(
+            'async function a() {',
+            '  const r1 = await PtApp.data.query({ params: { timeRange: t } });',
+            '  const r2 = await PtApp.data.query({ params: { timeRange: t, ids: r1.ids } });',
+            '  await PtApp.data.query({ params: { timeRange: t, ...r2 } });',
+            '}',
+            'async function b() {',
+            '  const { rows } = await PtApp.data.query({ params: { timeRange: t } });',
+            '  const ids = rows.map(r => r[0]);',
+            '  await PtApp.data.query({ params: { timeRange: t, ids } });',
+            '  let x;',
+            '  x = await PtApp.data.query({ params: { timeRange: t } });',
+            '  await PtApp.data.query({ params: { timeRange: t, x } });',
+            '}'
+        )
+    });
+    assert.deepEqual(h, []);
+});
+
+test('EFF-005：不命中 —— 互斥分支（if/else、switch 不同 case）里的 await 不合并计数', async () => {
+    const h = await lines('EFF-005', {
+        'web/src/App.tsx': src(
+            'async function a(mode) {',
+            '  if (mode) {', '  ' + q(1), '  ' + q(2), '  } else {', '  ' + q(3), '  }',
+            '}',
+            'async function b(mode) {',
+            '  switch (mode) {',
+            '    case 1: await PtApp.data.query({ params: { timeRange: t } }); break;',
+            '    case 2: await PtApp.data.query({ params: { timeRange: t } }); break;',
+            '    default: await PtApp.data.query({ params: { timeRange: t } });',
+            '  }',
+            '}'
+        )
+    });
+    assert.deepEqual(h, []);
 });
 
 test('EFF-005：不命中 —— 只有 2 次、Promise.all / allSettled 里、分散在不同函数、不是首屏文件', async () => {
@@ -178,10 +234,13 @@ test('EFF-006：后端循环里 prepare 命中', async () => {
             '    await env.DB.prepare("SELECT * FROM t WHERE id = ?").bind(id).first();',
             '  }',
             '  await Promise.all(ids.map(id => db().prepare("SELECT 1").bind(id).all()));',
+            '  const ps = [];',
+            '  for (const id of ids) ps.push(env.DB.prepare("UPDATE t SET n = 1 WHERE id = ?").bind(id).run());',
+            '  for (const id of ids) ps.push(...[env.DB.prepare("SELECT 1").bind(id).first()]);',
             '}'
         )
     });
-    assert.deepEqual(h, [['backend/src/a.ts', 3], ['backend/src/a.ts', 5]]);
+    assert.deepEqual(h, [['backend/src/a.ts', 3], ['backend/src/a.ts', 5], ['backend/src/a.ts', 7], ['backend/src/a.ts', 8]]);
 });
 
 test('EFF-006：不命中 —— 循环外 prepare、循环里只攒语句交给 db.batch、前端文件、prepared 之类的名字', async () => {

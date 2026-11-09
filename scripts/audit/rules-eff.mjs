@@ -5,7 +5,7 @@
  */
 import { basename } from 'node:path';
 import {
-    callee, eachCall, enclosingFunction, filesIn, insideLoop, isReference, lineOf, loopVariables, propName,
+    bindingNames, callee, eachCall, enclosingFunction, exclusive, filesIn, insideLoop, isReference, lineOf, loopVariables, propName,
     shadowedByParam, walk
 } from './scan.mjs';
 
@@ -75,13 +75,43 @@ function hasJsx(ts, sf) {
     return found;
 }
 
-/** 编译后会被整个删掉的 import：`import type …`，或花括号里全是 `type X`（且没有默认导入）。 */
-function typeOnly(ts, decl) {
+/**
+ * ident 是否处在类型位置（`: X`、`as X`、`Promise<X>`、`typeof x`、`implements X`……）：这些编译后全部抹掉。
+ * 类的 `extends Base` 在语法上也是 ExpressionWithTypeArguments，但它是值，单独放回来。
+ */
+function inTypePosition(ts, ident) {
+    for (let p = ident.parent; p; p = p.parent) {
+        if (ts.isExpressionWithTypeArguments(p) && ts.isHeritageClause(p.parent)
+            && p.parent.token === ts.SyntaxKind.ExtendsKeyword && ts.isClassLike(p.parent.parent)) return false;
+        if (ts.isTypeNode(p)) return true;
+        if (ts.isStatement(p)) return false;
+    }
+    return false;
+}
+
+/** 文件里在「值」的位置读到的名字（不含 import 语句本身、属性名、类型位置）。同名局部变量的遮蔽不区分 —— 只会让少数情况漏掉放过，不会多报。 */
+function valueNames(ts, sf) {
+    const names = new Set();
+    for (const st of sf.statements) {
+        if (ts.isImportDeclaration(st)) continue;
+        walk(ts, st, n => { if (ts.isIdentifier(n) && isReference(ts, n) && !inTypePosition(ts, n)) names.add(n.text); });
+    }
+    return names;
+}
+
+/**
+ * 这条 import 会不会把整包打进来。编译时被整条删掉的不算：`import type …`、花括号里全是 `type X`、
+ * 以及没写 type 但每个命名绑定都只在类型位置用（`import { EChartsOption } from 'echarts'`）。
+ * 默认导入 / 命名空间导入 / 副作用导入（`import 'd3'`）照旧算整包。
+ */
+function bundlesWhole(ts, decl, used) {
     const clause = decl.importClause;
-    if (!clause) return false; // `import 'd3'`：副作用导入，照样整包打进来
-    if (clause.isTypeOnly) return true;
+    if (!clause) return true;
+    if (clause.isTypeOnly) return false;
+    if (clause.name) return true;
     const nb = clause.namedBindings;
-    return !clause.name && !!nb && ts.isNamedImports(nb) && nb.elements.length > 0 && nb.elements.every(e => e.isTypeOnly);
+    if (!nb || ts.isNamespaceImport(nb)) return true;
+    return nb.elements.some(e => !e.isTypeOnly && used().has(e.name.text));
 }
 
 /**
@@ -92,8 +122,10 @@ function eff003(ctx) {
     const { ts } = ctx;
     const out = [];
     for (const file of filesIn(ctx, 'web')) {
+        let names = null;
+        const used = () => (names ??= valueNames(ts, file.sf));
         const heavy = file.sf.statements.filter(s => ts.isImportDeclaration(s) && ts.isStringLiteral(s.moduleSpecifier)
-            && HEAVY.has(s.moduleSpecifier.text) && !typeOnly(ts, s));
+            && HEAVY.has(s.moduleSpecifier.text) && bundlesWhole(ts, s, used));
         if (heavy.length === 0 || !hasJsx(ts, file.sf)) continue;
         for (const s of heavy) out.push({ rule: 'EFF-003', file: file.rel, line: lineOf(file.sf, s) });
     }
@@ -127,6 +159,71 @@ function inPromiseAll(ts, node, fn) {
     return false;
 }
 
+/** await 的结果绑给了哪些变量：`const r = await q()`、`const { rows } = (await q()).x`、`r = await q()`。 */
+function awaitResultVars(ts, aw) {
+    let n = aw;
+    while (n.parent && (ts.isParenthesizedExpression(n.parent) || ts.isAsExpression(n.parent) || ts.isNonNullExpression(n.parent)
+        || (ts.isPropertyAccessExpression(n.parent) && n.parent.expression === n))) n = n.parent;
+    const p = n.parent;
+    if (p && ts.isVariableDeclaration(p) && p.initializer === n) return bindingNames(ts, p.name);
+    if (p && ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.EqualsToken && p.right === n && ts.isIdentifier(p.left)) {
+        return [p.left.text];
+    }
+    return [];
+}
+
+/** node 里读到的变量名（属性名、键、被内层回调形参遮蔽的不算）。 */
+function readNames(ts, node) {
+    const names = new Set();
+    walk(ts, node, n => { if (ts.isIdentifier(n) && isReference(ts, n) && !shadowedByParam(ts, n, node, n.text)) names.add(n.text); });
+    return names;
+}
+
+/**
+ * 由 seeds 算出来的变量（只追 fn 这一层的 `const x = <读了 seeds 的表达式>`，算到不再变）：
+ * `const { rows } = await q1(); const ids = rows.map(…); await q2({ ids })` 里 q2 依赖 q1。
+ */
+function derivedFrom(ts, fn, seeds) {
+    const vars = new Set(seeds);
+    const decls = [];
+    walk(ts, fn, n => {
+        if (ts.isVariableDeclaration(n) && n.initializer && enclosingFunction(ts, n) === fn) decls.push(n);
+    });
+    for (let changed = true; changed;) {
+        changed = false;
+        for (const d of decls) {
+            if (![...readNames(ts, d.initializer)].some(r => vars.has(r))) continue;
+            for (const name of bindingNames(ts, d.name)) if (!vars.has(name)) { vars.add(name); changed = true; }
+        }
+    }
+    return vars;
+}
+
+/**
+ * 互不依赖、且会在同一次执行里先后发生的 await：
+ * - 实参读了前面某次 await 的结果（含转手变量）→ 必须串行，不计；
+ * - 和已选的分在 if/else 两支、switch 不同 case 等互斥位置（scan 的 exclusive）→ 不合并。
+ * 返回第一组 ≥ 3 个的，没有 → null。
+ */
+function serialGroup(ts, fn, awaits) {
+    const independent = awaits.filter((aw, j) => {
+        if (j === 0) return true;
+        const deps = derivedFrom(ts, fn, awaits.slice(0, j).flatMap(a => awaitResultVars(ts, a)));
+        if (deps.size === 0) return true;
+        const call = unwrapParens(ts, aw.expression);
+        return !call.arguments.some(a => [...readNames(ts, a)].some(r => deps.has(r)));
+    });
+    for (let i = 0; i < independent.length; i++) {
+        const group = [independent[i]];
+        for (const b of independent.slice(i + 1)) if (group.every(a => !exclusive(ts, a, b, fn))) group.push(b);
+        if (group.length >= 3) return group;
+    }
+    return null;
+}
+
+/**
+ * 已知盲区：只数函数体里的 await，模块顶层的 `await q()`（main.tsx 里偶见）不看。
+ */
 function eff005(ctx) {
     const { ts } = ctx;
     const out = [];
@@ -142,8 +239,9 @@ function eff005(ctx) {
             if (!fn || inPromiseAll(ts, n, fn)) return;
             byFn.set(fn, [...(byFn.get(fn) ?? []), n]);
         });
-        for (const awaits of byFn.values()) {
-            if (awaits.length >= 3) out.push({ rule: 'EFF-005', file: file.rel, line: lineOf(file.sf, awaits[0]) });
+        for (const [fn, awaits] of byFn) {
+            const group = awaits.length >= 3 && serialGroup(ts, fn, awaits);
+            if (group) out.push({ rule: 'EFF-005', file: file.rel, line: lineOf(file.sf, group[0]) });
         }
     }
     return out;
@@ -161,15 +259,15 @@ function chainTop(ts, call) {
 /**
  * 循环里只是攒语句、最后交给 db.batch 的（`stmts.push(db.prepare(…).bind(id))`、
  * `ids.map(id => db.prepare(…).bind(id))`、`flatMap(id => [db.prepare…])`），正是这条规则建议的改法，不报。
+ * 前提是链尾没有执行：`ps.push(db.prepare(…).bind(id).run())` 每轮已经发了一条 SQL，照样是 N+1。
  */
 function collectedForBatch(ts, call) {
     const top = chainTop(ts, call);
     const p = top.parent;
-    if (!p) return false;
+    if (!p || /\.(first|all|run|raw)$/.test(callee(ts, top) ?? '')) return false;
     if (ts.isArrayLiteralExpression(p)) return true;
     if (ts.isCallExpression(p) && p.arguments.includes(top) && /(^|\.)push$/.test(callee(ts, p))) return true;
-    // 箭头函数直接返回语句本身（没 await、没执行）：多半是 map 出一组语句给 batch
-    return ts.isArrowFunction(p) && p.body === top && !/\.(first|all|run|raw)$/.test(callee(ts, top) ?? '');
+    return ts.isArrowFunction(p) && p.body === top;
 }
 
 function eff006(ctx) {
