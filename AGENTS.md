@@ -98,6 +98,50 @@
 
 ---
 
+## 自检规则（写代码前先看）
+
+<!-- 本节标记之间由 npm run audit:doc 从 scripts/audit-rules.json 生成，不要手改 -->
+<!-- audit-rules:start -->
+下面这些由 `npm run audit` 在验收时逐条检查；写之前照着做，大多数就不会出现在自检卡上。
+
+### 安全（security）
+
+- **SEC-001**（严重）：前端代码里写死了疑似密钥 —— 把密钥移到后端（wrangler secret 或平台配置），前端改为调用 /api/ 接口，由后端代为请求；并作废已暴露的密钥。
+- **SEC-002**（严重）：后端请求了 {host}，但 manifest 的 egress 里没有声明 —— 把 {host} 加进 manifest.json 的 backend.egress；如果目标主机是变量拼出来的，把所有可能的主机都声明上。
+- **SEC-003**（严重）：D1 的 SQL 是拼接出来的，混入了变量 —— SQL 里用 ? 占位，值通过 .bind(...) 传入；表名、列名这类不能绑定的部分，用白名单校验后再拼。
+- **SEC-004**（严重）：用了 dangerouslySetInnerHTML、eval、new Function 或 postMessage(..., '*') —— 改用 JSX 渲染文本（确需 HTML 时先用 DOMPurify 之类清洗）；去掉 eval / new Function；postMessage 写明确的目标源。
+- **SEC-005**（严重）：无后端应用的前端直接请求了非平台的外部地址 —— 把应用升到 schemaVersion 2 并加 backend/，外部请求放到后端经 ctx.fetch 发出、在 egress 声明；只需取 Ptengine 数据时用 PtApp.data.query。
+- **SEC-006**（一般）：含 email / userId 的用户查询结果被写进了 D1、KV 或日志 —— 只存聚合结果或业务需要的字段；确需按人存时去掉 email，用不可逆的哈希代替 userId，并设过期时间。
+- **SEC-007**（一般）：定时任务路由没有调用 requireTrigger —— 在任务 handler 开头调用 ctx.requireTrigger()，校验不通过直接返回。
+
+### AI 成本（ai-cost）
+
+- **AI-001**（严重）：在循环或递归里调用了 AI —— 把多条数据合并进一次调用（在 prompt 里列出、要求结构化输出）；确实要逐条处理时，先用常量上限截断。
+- **AI-002**（严重）：定时任务里调用 AI，却没有常量上限 —— 定义一个上限常量（如 MAX_ITEMS），用 slice(0, MAX_ITEMS) 或计数器限制每次运行处理的条数和 AI 调用次数。
+- **AI-003**（一般）：ai.chat 调用没有设置 max_tokens —— 按实际需要的输出长度给调用加上 max_tokens。
+- **AI-004**（一般）：查询结果未截断就整段拼进了 prompt —— 先用 slice(0, N) 截断，或先在代码里汇总、只挑需要的列，再放进 prompt。
+- **AI-005**（一般）：同一个请求里多次调用 AI，且彼此不依赖 —— 合并成一次调用，在 prompt 里一次提出所有问题，并要求按字段分别返回结构化结果。
+- **AI-006**（一般）：前端每次渲染或每次输入都会触发后端 AI 接口 —— 改为点击按钮或提交时才调用；必须随输入触发时加防抖，并给 useEffect 写明依赖数组。
+- **AI-007**（一般）：面向用户的 AI 调用没有超时或 AbortSignal —— 给调用传 signal（如 AbortSignal.timeout(30_000)），并把请求自身的取消信号一并接上。
+
+### 效率（efficiency）
+
+- **EFF-001**（一般）：在循环里按维度值逐个发 data.query —— 改成一次查询，把这个维度放进分组（dimension / groupBy），再在代码里按维度值拆分结果。
+- **EFF-002**（一般）：data.query 的参数里没有 timeRange —— 在参数里显式写 timeRange，范围取界面上用户选的时间，或业务需要的最短窗口。
+- **EFF-003**（一般）：echarts / d3 / framer-motion 被整包静态引入 —— 改用 import() 或 React.lazy 按需加载；echarts 只引入用到的图表与组件（echarts/core + 按需注册）。
+- **EFF-004**（一般）：构建产物里有一个 {kb} KB 的 JS 包，超过 800 KB —— 用 import() 拆分大依赖和非首屏页面，或在 vite 配置的 build.rollupOptions.output.manualChunks 里单独分包。
+- **EFF-005**（一般）：首屏串行 await 了 3 次及以上的查询 —— 用 Promise.all 并发发出互不依赖的查询；非首屏必需的数据延后到用户需要时再取。
+- **EFF-006**（一般）：在循环里逐条查询 D1（N+1） —— 改成一条带 IN (...) 的查询一次取回；写入则用 db.batch([...]) 合并成一次。
+
+### 合理性（design）
+
+- **DES-001**（一般）：权限 {scope} 的声明与代码不一致 —— 让 manifest.json 的 scopes 与代码实际调用对齐：没用到就删掉 {scope}，用到了就补上声明。
+- **DES-002**（一般）：前后端只有一半：有后端但前端没调 /api/，或反过来 —— 补齐缺的一侧：前端通过 /api/ 调用后端接口；或者后端确实不需要就删掉 backend/，前端也去掉对 /api/ 的调用。
+- **DES-003**（一般）：异步取数的组件没有处理加载中或出错的情况 —— 加上加载中和出错两个分支：显示加载占位，失败时给出提示和重试；Promise 链补上 catch。
+<!-- audit-rules:end -->
+
+---
+
 ## 轻应用（只有前端）
 
 不少应用根本不需要后端 —— 数据从 `PtApp.data.query()` 取，交互用 `PtApp.ui`。
@@ -828,6 +872,7 @@ npx wrangler d1 migrations apply ptapp-local --local
 
 ```bash
 npm run doctor     # 体检：把本文件的检查项跑一遍（改完先跑这个）
+npm run audit      # 自检：按上面「自检规则」查代码（安全 / AI 成本 / 效率 / 合理性）；退出码 2 有严重项、1 只有一般项、0 无问题
 npm run build      # 类型检查（web + backend + shared）+ 构建前端 + 打包后端
 npm run package    # 组装 zip + 结构自检
 ```

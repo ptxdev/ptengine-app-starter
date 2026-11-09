@@ -165,9 +165,9 @@
             "ja-JP": "定期ジョブは無人で繰り返し実行されます。処理量に上限がないと、データが急増したときに誰かが気づくまで費用がかかり続けます。"
         },
         "fix": {
-            "zh-CN": "定义 MAX_ 常量，用 slice(0, MAX_ITEMS) 或计数器限制每次运行处理的条数和 AI 调用次数。",
-            "en-US": "Define a MAX_ constant and use slice(0, MAX_ITEMS) or a counter to limit how many items and AI calls each run can make.",
-            "ja-JP": "MAX_ 定数を定義し、slice(0, MAX_ITEMS) やカウンターで 1 回の実行あたりの処理件数と AI 呼び出し回数を制限してください。"
+            "zh-CN": "定义一个上限常量（如 MAX_ITEMS），用 slice(0, MAX_ITEMS) 或计数器限制每次运行处理的条数和 AI 调用次数。",
+            "en-US": "Define a cap constant (e.g. MAX_ITEMS) and use slice(0, MAX_ITEMS) or a counter to limit how many items and AI calls each run can make.",
+            "ja-JP": "上限の定数（例: MAX_ITEMS）を定義し、slice(0, MAX_ITEMS) やカウンターで 1 回の実行あたりの処理件数と AI 呼び出し回数を制限してください。"
         }
     },
     "AI-003": {
