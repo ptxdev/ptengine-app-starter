@@ -1,0 +1,439 @@
+{
+    "SEC-001": {
+        "dimension": "security",
+        "severity": "severe",
+        "title": {
+            "zh-CN": "前端代码里写死了疑似密钥",
+            "en-US": "A secret-like literal is hard-coded in front-end code",
+            "ja-JP": "フロントエンドのコードに秘密鍵らしき値がそのまま書かれています"
+        },
+        "detail": {
+            "zh-CN": "web/ 构建出来的是公开静态文件，任何访问者都能在浏览器里看到这个值。密钥一旦进了产物，就等于已经泄露。",
+            "en-US": "Everything under web/ is built into public static files, so any visitor can read this value in the browser. Once a secret is in the bundle, treat it as leaked.",
+            "ja-JP": "web/ のビルド成果物は公開される静的ファイルなので、誰でもブラウザからこの値を読めます。成果物に入った時点で漏えいしたものと考えてください。"
+        },
+        "fix": {
+            "zh-CN": "把密钥移到后端（wrangler secret 或平台配置），前端改为调用 /api/ 接口，由后端代为请求；并作废已暴露的密钥。",
+            "en-US": "Move the secret to the backend (a wrangler secret or platform config) and have the front end call an /api/ route instead. Rotate the exposed key.",
+            "ja-JP": "鍵はバックエンド（wrangler secret かプラットフォームの設定）に移し、フロントエンドからは /api/ 経由で呼び出してください。露出した鍵は無効化してください。"
+        }
+    },
+    "SEC-002": {
+        "dimension": "security",
+        "severity": "severe",
+        "title": {
+            "zh-CN": "后端请求了 {host}，但 manifest 的 egress 里没有声明",
+            "en-US": "The backend calls {host}, which is not declared in manifest egress",
+            "ja-JP": "バックエンドが {host} を呼んでいますが、manifest の egress に宣言がありません"
+        },
+        "detail": {
+            "zh-CN": "未声明的出站主机会被平台网关拦截（EGRESS_PLATFORM_BLOCKED）。本地跑得通，上线后才失败，而且报错不直观。",
+            "en-US": "Outbound hosts that are not declared are blocked by the platform gateway (EGRESS_PLATFORM_BLOCKED). It works locally and only fails after going live.",
+            "ja-JP": "宣言されていない外部ホストへの通信はプラットフォームのゲートウェイで遮断されます（EGRESS_PLATFORM_BLOCKED）。ローカルでは動くため、公開後に初めて失敗します。"
+        },
+        "fix": {
+            "zh-CN": "把 {host} 加进 manifest.json 的 backend.egress；如果目标主机是变量拼出来的，把所有可能的主机都声明上。",
+            "en-US": "Add {host} to backend.egress in manifest.json. If the host is built from a variable, declare every host it can resolve to.",
+            "ja-JP": "manifest.json の backend.egress に {host} を追加してください。ホストが変数から組み立てられる場合は、取り得るホストをすべて宣言してください。"
+        }
+    },
+    "SEC-003": {
+        "dimension": "security",
+        "severity": "severe",
+        "title": {
+            "zh-CN": "D1 的 SQL 是拼接出来的，混入了变量",
+            "en-US": "A D1 SQL statement is built by concatenating variables",
+            "ja-JP": "D1 の SQL が変数を連結して組み立てられています"
+        },
+        "detail": {
+            "zh-CN": "用模板字符串或 + 把变量拼进 SQL，传入的值只要带引号就能改写语句，造成 SQL 注入。",
+            "en-US": "Splicing values into SQL with template strings or + lets any value containing a quote rewrite the statement. That is SQL injection.",
+            "ja-JP": "テンプレート文字列や + で値を SQL に埋め込むと、引用符を含む値で文が書き換えられ、SQL インジェクションになります。"
+        },
+        "fix": {
+            "zh-CN": "SQL 里用 ? 占位，值通过 .bind(...) 传入；表名、列名这类不能绑定的部分，用白名单校验后再拼。",
+            "en-US": "Use ? placeholders and pass values through .bind(...). For table or column names, which cannot be bound, check them against an allowlist first.",
+            "ja-JP": "SQL では ? プレースホルダーを使い、値は .bind(...) で渡してください。テーブル名・列名などバインドできない部分は許可リストで検証してから使ってください。"
+        }
+    },
+    "SEC-004": {
+        "dimension": "security",
+        "severity": "severe",
+        "title": {
+            "zh-CN": "用了 dangerouslySetInnerHTML、eval、new Function 或 postMessage(..., '*')",
+            "en-US": "Uses dangerouslySetInnerHTML, eval, new Function, or postMessage(..., '*')",
+            "ja-JP": "dangerouslySetInnerHTML・eval・new Function・postMessage(..., '*') のいずれかを使っています"
+        },
+        "detail": {
+            "zh-CN": "前三者会把字符串当 HTML 或代码执行，内容只要有一处来自外部就是 XSS；postMessage 目标写 '*' 会把消息发给任何窗口，数据可能泄露到别的源。",
+            "en-US": "The first three run strings as HTML or code, so any outside input becomes XSS. postMessage with '*' delivers the message to any window, which can leak data to other origins.",
+            "ja-JP": "前の 3 つは文字列を HTML やコードとして実行するため、外部由来の内容が混ざれば XSS になります。postMessage の宛先を '*' にすると任意のウィンドウに届き、データが他オリジンに漏れるおそれがあります。"
+        },
+        "fix": {
+            "zh-CN": "改用 JSX 渲染文本（确需 HTML 时先用 DOMPurify 之类清洗）；去掉 eval / new Function；postMessage 写明确的目标源。",
+            "en-US": "Render text through JSX (sanitize with something like DOMPurify if you truly need HTML), drop eval / new Function, and give postMessage an explicit target origin.",
+            "ja-JP": "テキストは JSX で描画し（HTML が必要なら DOMPurify などで無害化）、eval / new Function はやめ、postMessage には宛先オリジンを明示してください。"
+        }
+    },
+    "SEC-005": {
+        "dimension": "security",
+        "severity": "severe",
+        "title": {
+            "zh-CN": "无后端应用的前端直接请求了非平台的外部地址",
+            "en-US": "A frontend-only app calls a non-platform URL directly",
+            "ja-JP": "バックエンドなしのアプリが、フロントエンドからプラットフォーム外の URL を直接呼んでいます"
+        },
+        "detail": {
+            "zh-CN": "schemaVersion 为 1 的应用没有后端，前端去请求自建服务（或把 VITE_ 变量当地址用）等于另起一套后端，绕开了平台的身份校验，请求方是谁无从确认。",
+            "en-US": "A schemaVersion 1 app has no backend. Calling your own service from the browser (or using a VITE_ variable as the URL) sets up a side backend that bypasses platform identity, so callers cannot be verified.",
+            "ja-JP": "schemaVersion 1 のアプリにはバックエンドがありません。ブラウザから自前のサービスを呼ぶ（VITE_ 変数を URL に使う場合も同じ）と、プラットフォームの本人確認を迂回した別のバックエンドができてしまいます。"
+        },
+        "fix": {
+            "zh-CN": "把应用升到 schemaVersion 2 并加 backend/，外部请求放到后端经 ctx.fetch 发出、在 egress 声明；只需取 Ptengine 数据时用 PtApp.data.query。",
+            "en-US": "Move to schemaVersion 2 with a backend/ and make the outside call there through ctx.fetch, declared in egress. For Ptengine data alone, use PtApp.data.query.",
+            "ja-JP": "schemaVersion 2 にして backend/ を追加し、外部への通信はバックエンドの ctx.fetch から行って egress に宣言してください。Ptengine のデータだけなら PtApp.data.query を使ってください。"
+        }
+    },
+    "SEC-006": {
+        "dimension": "security",
+        "severity": "normal",
+        "title": {
+            "zh-CN": "含 email / userId 的用户查询结果被写进了 D1、KV 或日志",
+            "en-US": "User query results with email / userId are written to D1, KV, or logs",
+            "ja-JP": "email / userId を含むユーザー照会の結果が D1・KV・ログに書き込まれています"
+        },
+        "detail": {
+            "zh-CN": "user_* 查询返回的是个人信息。存下来就要承担保管、删除与合规责任，没有明确用途时不该落库或打日志。",
+            "en-US": "user_* queries return personal data. Storing it brings retention, deletion, and compliance duties, so it should not be persisted or logged without a clear need.",
+            "ja-JP": "user_* の照会結果は個人情報です。保存すれば管理・削除・コンプライアンスの責任が生じるため、明確な目的がなければ保存やログ出力は避けるべきです。"
+        },
+        "fix": {
+            "zh-CN": "只存聚合结果或业务需要的字段；确需按人存时去掉 email，用不可逆的哈希代替 userId，并设过期时间。",
+            "en-US": "Store only aggregates or the fields you need. If you must keep per-user rows, drop email, replace userId with a one-way hash, and set an expiry.",
+            "ja-JP": "集計値か業務に必要な項目だけを保存してください。ユーザー単位で残す必要があるなら email は除き、userId は不可逆なハッシュに置き換え、有効期限を設けてください。"
+        }
+    },
+    "SEC-007": {
+        "dimension": "security",
+        "severity": "normal",
+        "title": {
+            "zh-CN": "定时任务路由没有调用 requireTrigger",
+            "en-US": "A scheduled job route does not call requireTrigger",
+            "ja-JP": "定期ジョブのルートで requireTrigger が呼ばれていません"
+        },
+        "detail": {
+            "zh-CN": "任务路由也是普通的 HTTP 接口。不校验调用方是平台调度器，任何能访问应用的人都能手动触发任务，连带消耗配额和发通知。",
+            "en-US": "A job route is an ordinary HTTP endpoint. Without checking that the caller is the platform scheduler, anyone who can reach the app can fire the job, burning quota and sending notifications.",
+            "ja-JP": "ジョブのルートも普通の HTTP エンドポイントです。呼び出し元がプラットフォームのスケジューラーか確認しないと、アプリにアクセスできる誰でもジョブを起動でき、クォータ消費や通知送信につながります。"
+        },
+        "fix": {
+            "zh-CN": "在任务 handler 第一行调用 ctx.requireTrigger('job')：不是平台调度器发起的调用会被它直接以 403 拒绝，不用自己判断返回值。",
+            "en-US": "Call ctx.requireTrigger('job') on the first line of the job handler. It rejects any call not made by the platform scheduler with a 403 by itself, so there is no return value to check.",
+            "ja-JP": "ジョブのハンドラーの 1 行目で ctx.requireTrigger('job') を呼んでください。プラットフォームのスケジューラー以外からの呼び出しはこれ自体が 403 で拒否するので、戻り値を確認する必要はありません。"
+        }
+    },
+    "AI-001": {
+        "dimension": "ai-cost",
+        "severity": "severe",
+        "title": {
+            "zh-CN": "在循环里调用了 AI",
+            "en-US": "AI is called inside a loop",
+            "ja-JP": "ループの中で AI を呼び出しています"
+        },
+        "detail": {
+            "zh-CN": "ctx.pt.ai.chat / stream 放在 for、while、map、forEach、reduce 里，调用次数随数据量线性增长，费用和耗时都不可控。",
+            "en-US": "Putting ctx.pt.ai.chat / stream inside for, while, map, forEach, or reduce makes the number of calls grow with the data, so cost and latency are unbounded.",
+            "ja-JP": "ctx.pt.ai.chat / stream を for・while・map・forEach・reduce の中に置くと、呼び出し回数がデータ量に比例して増え、費用も処理時間も読めなくなります。"
+        },
+        "fix": {
+            "zh-CN": "把多条数据合并进一次调用（在 prompt 里列出、要求结构化输出）；确实要逐条处理时，先用常量上限截断，如 rows.slice(0, MAX_ITEMS)。",
+            "en-US": "Batch the items into one call (list them in the prompt and ask for structured output). If you must go item by item, cap the list with a constant first, e.g. rows.slice(0, MAX_ITEMS).",
+            "ja-JP": "複数件を 1 回の呼び出しにまとめてください（プロンプトに並べ、構造化された出力を求める）。1 件ずつ処理する必要があるなら、先に rows.slice(0, MAX_ITEMS) のように定数の上限で件数を絞ってください。"
+        }
+    },
+    "AI-002": {
+        "dimension": "ai-cost",
+        "severity": "severe",
+        "title": {
+            "zh-CN": "定时任务里调用 AI，却没有常量上限",
+            "en-US": "A scheduled job calls AI without a constant upper bound",
+            "ja-JP": "定期ジョブで AI を呼んでいますが、定数の上限がありません"
+        },
+        "detail": {
+            "zh-CN": "定时任务无人值守，按计划反复执行。处理量没有上限时，一次数据暴涨就会持续烧钱，直到有人发现。",
+            "en-US": "Scheduled jobs run unattended and repeatedly. Without a cap on how much they process, one spike in data keeps burning money until someone notices.",
+            "ja-JP": "定期ジョブは無人で繰り返し実行されます。処理量に上限がないと、データが急増したときに誰かが気づくまで費用がかかり続けます。"
+        },
+        "fix": {
+            "zh-CN": "在任务路由里设一个看得出来的上限：用名字带 MAX_ / _MAX / LIMIT 的常量（如 MAX_ITEMS），配合 slice(0, MAX_ITEMS) 或计数器，或直接写数字字面量（如 if (count < 50)），限制每次运行处理的条数和 AI 调用次数。叫 BATCH_SIZE 这类名字的常量不算上限。",
+            "en-US": "Put a visible cap in the job route: a constant whose name contains MAX_, _MAX or LIMIT (e.g. MAX_ITEMS) used with slice(0, MAX_ITEMS) or a counter, or a numeric literal (e.g. if (count < 50)), to limit how many items and AI calls each run can make. A constant named like BATCH_SIZE does not count as a cap.",
+            "ja-JP": "ジョブのルートに見て分かる上限を置いてください。名前に MAX_ / _MAX / LIMIT のいずれかを含む定数（例: MAX_ITEMS）を slice(0, MAX_ITEMS) やカウンターと組み合わせるか、数値リテラル（例: if (count < 50)）で、1 回の実行あたりの処理件数と AI 呼び出し回数を制限します。BATCH_SIZE のような名前の定数は上限とみなされません。"
+        }
+    },
+    "AI-003": {
+        "dimension": "ai-cost",
+        "severity": "normal",
+        "title": {
+            "zh-CN": "ai.chat 调用没有设置 max_tokens",
+            "en-US": "An ai.chat call does not set max_tokens",
+            "ja-JP": "ai.chat の呼び出しに max_tokens が指定されていません"
+        },
+        "detail": {
+            "zh-CN": "不限制输出长度，模型可能写出远超需要的内容，输出 token 按量计费，响应也会变慢。",
+            "en-US": "Without an output limit the model may write far more than needed. Output tokens are billed, and responses get slower.",
+            "ja-JP": "出力の長さを制限しないと、モデルが必要以上に長く書くことがあります。出力トークンは従量課金で、応答も遅くなります。"
+        },
+        "fix": {
+            "zh-CN": "按实际需要的输出长度给调用加上 max_tokens。",
+            "en-US": "Add max_tokens to the call, sized to the output you actually need.",
+            "ja-JP": "必要な出力の長さに合わせて、呼び出しに max_tokens を指定してください。"
+        }
+    },
+    "AI-004": {
+        "dimension": "ai-cost",
+        "severity": "normal",
+        "title": {
+            "zh-CN": "查询结果未截断就整段拼进了 prompt",
+            "en-US": "Query results go into the prompt without truncation",
+            "ja-JP": "照会結果が切り詰められないままプロンプトに入っています"
+        },
+        "detail": {
+            "zh-CN": "把 rows、result 或 JSON.stringify(查询返回) 原样放进 prompt，输入 token 会随数据量增长，数据一多就费用翻倍，甚至超出上下文长度。",
+            "en-US": "Dropping rows, result, or JSON.stringify(query output) straight into the prompt makes input tokens grow with the data, raising cost and eventually overflowing the context window.",
+            "ja-JP": "rows・result・JSON.stringify(照会結果) をそのままプロンプトに入れると、入力トークンがデータ量に比例して増え、費用がかさみ、いずれコンテキスト長も超えます。"
+        },
+        "fix": {
+            "zh-CN": "先用 slice(0, N) 截断，或先在代码里汇总、只挑需要的列，再放进 prompt。",
+            "en-US": "Trim with slice(0, N), or aggregate in code and keep only the columns you need, before putting it in the prompt.",
+            "ja-JP": "プロンプトに入れる前に slice(0, N) で切り詰めるか、コード側で集計して必要な列だけに絞ってください。"
+        }
+    },
+    "AI-005": {
+        "dimension": "ai-cost",
+        "severity": "normal",
+        "title": {
+            "zh-CN": "同一个请求里多次调用 AI，且彼此不依赖",
+            "en-US": "One request handler makes several independent AI calls",
+            "ja-JP": "1 つのリクエスト内で、互いに依存しない AI 呼び出しを複数回行っています"
+        },
+        "detail": {
+            "zh-CN": "这几次调用的输入互不依赖，每次都要重复发送系统提示和上下文，按次计费、耗时叠加。",
+            "en-US": "The calls do not depend on each other, yet each one resends the system prompt and context. You pay per call and the latency adds up.",
+            "ja-JP": "各呼び出しの入力は互いに依存していないのに、毎回システムプロンプトとコンテキストを送り直しています。呼び出しごとに課金され、待ち時間も積み重なります。"
+        },
+        "fix": {
+            "zh-CN": "合并成一次调用，在 prompt 里一次提出所有问题，并要求按字段分别返回结构化结果。",
+            "en-US": "Merge them into one call that asks all the questions at once and returns a structured result with one field per answer.",
+            "ja-JP": "1 回の呼び出しにまとめ、プロンプトですべての質問を一度に出し、回答ごとに項目を分けた構造化結果を返させてください。"
+        }
+    },
+    "AI-006": {
+        "dimension": "ai-cost",
+        "severity": "normal",
+        "title": {
+            "zh-CN": "前端每次渲染或每次输入都会请求后端",
+            "en-US": "The front end calls the backend on every render or every keystroke",
+            "ja-JP": "フロントエンドが描画のたび・入力のたびにバックエンドを呼んでいます"
+        },
+        "detail": {
+            "zh-CN": "没有依赖数组的 useEffect 每次渲染都会执行，onChange 每输入一个字符都会触发；在这两处直接请求后端（尤其是 AI 接口），一个用户随手操作就能发出成百上千次计费调用。",
+            "en-US": "A useEffect without a dependency array runs on every render, and onChange fires on every keystroke. Calling the backend (especially an AI endpoint) directly from either lets a single user fire hundreds of billed calls just by using the page.",
+            "ja-JP": "依存配列のない useEffect は描画のたびに、onChange は 1 文字入力するたびに実行されます。ここから直接バックエンド（特に AI エンドポイント）を呼ぶと、ユーザー 1 人が普通に操作するだけで課金対象の呼び出しが何百回も発生します。"
+        },
+        "fix": {
+            "zh-CN": "别在没有依赖数组的 useEffect 里直接请求；输入事件里的请求要防抖，或改为点击按钮 / 提交时显式触发。",
+            "en-US": "Do not make requests directly in a useEffect that has no dependency array. For requests from input events, debounce them or trigger them explicitly on a button click or submit.",
+            "ja-JP": "依存配列のない useEffect の中で直接リクエストしないでください。入力イベントからのリクエストはデバウンスするか、ボタンのクリックや送信時に明示的に実行してください。"
+        }
+    },
+    "AI-007": {
+        "dimension": "ai-cost",
+        "severity": "normal",
+        "title": {
+            "zh-CN": "面向用户的 AI 调用没有超时",
+            "en-US": "A user-facing AI call has no timeout",
+            "ja-JP": "ユーザー操作から呼ばれる AI 呼び出しにタイムアウトがありません"
+        },
+        "detail": {
+            "zh-CN": "用户已经离开或请求卡住时，没有超时的调用会一直跑完，挂死的请求照样计费，还占着连接。",
+            "en-US": "If the user leaves or the request stalls, a call with no timeout keeps running. Hung requests are still billed and hold a connection open.",
+            "ja-JP": "ユーザーが離れたりリクエストが止まったりしても、タイムアウトのない呼び出しは走り続けます。固まったリクエストにも課金され、接続も占有されたままになります。"
+        },
+        "fix": {
+            "zh-CN": "暂不处理：当前 ctx.pt.ai.chat / stream 不支持超时参数，不要自行传 signal（会被原样发给网关、不起作用）；待 SDK 支持超时参数后再按其说明设置。",
+            "en-US": "No action for now: ctx.pt.ai.chat / stream does not take a timeout option yet. Do not pass a signal yourself (it is sent to the gateway as-is and has no effect); set a timeout once the SDK supports one.",
+            "ja-JP": "現時点では対応不要です。ctx.pt.ai.chat / stream はまだタイムアウトのオプションに対応していません。signal を自分で渡さないでください（そのままゲートウェイに送られ、効果はありません）。SDK が対応したら、その説明に従って設定してください。"
+        }
+    },
+    "EFF-001": {
+        "dimension": "efficiency",
+        "severity": "normal",
+        "title": {
+            "zh-CN": "在循环里按维度值逐个发 data.query",
+            "en-US": "data.query is called in a loop, once per dimension value",
+            "ja-JP": "ループの中でディメンションの値ごとに data.query を呼んでいます"
+        },
+        "detail": {
+            "zh-CN": "循环变量进了查询参数，等于把一次分组查询拆成 N 次，请求数和等待时间都随取值个数增长，还容易触发限流。",
+            "en-US": "The loop variable goes into the query params, splitting what could be one grouped query into N. Requests and wait time grow with the number of values, and rate limits come sooner.",
+            "ja-JP": "ループ変数が照会パラメーターに入っており、1 回のグループ化照会で済むものを N 回に分けています。リクエスト数も待ち時間も値の数だけ増え、レート制限にもかかりやすくなります。"
+        },
+        "fix": {
+            "zh-CN": "改成一次查询，把这个维度放进分组（dimension / groupBy），再在代码里按维度值拆分结果。",
+            "en-US": "Make a single query with that dimension as the grouping (dimension / groupBy), then split the result by value in code.",
+            "ja-JP": "そのディメンションでグループ化（dimension / groupBy）した 1 回の照会にし、結果をコード側で値ごとに分けてください。"
+        }
+    },
+    "EFF-002": {
+        "dimension": "efficiency",
+        "severity": "normal",
+        "title": {
+            "zh-CN": "data.query 的参数里没有 timeRange",
+            "en-US": "data.query params have no timeRange",
+            "ja-JP": "data.query のパラメーターに timeRange がありません"
+        },
+        "detail": {
+            "zh-CN": "不给时间范围就走默认窗口，查多长时间的数据由平台决定，结果可能和预期不符，查询也可能比需要的慢。",
+            "en-US": "Without a time range the default window applies, so the platform decides how much history you get. Results may not match expectations and the query can be slower than needed.",
+            "ja-JP": "期間を指定しないと既定の期間が使われ、どれだけの期間を照会するかはプラットフォーム任せになります。結果が想定と合わなかったり、必要以上に遅くなったりします。"
+        },
+        "fix": {
+            "zh-CN": "在参数里显式写 timeRange，范围取界面上用户选的时间，或业务需要的最短窗口。",
+            "en-US": "Set timeRange explicitly, using the range the user picked in the UI or the shortest window the feature needs.",
+            "ja-JP": "パラメーターに timeRange を明示してください。画面でユーザーが選んだ期間か、機能に必要な最短の期間を使います。"
+        }
+    },
+    "EFF-003": {
+        "dimension": "efficiency",
+        "severity": "normal",
+        "title": {
+            "zh-CN": "echarts / d3 / framer-motion 被整包静态引入",
+            "en-US": "echarts / d3 / framer-motion is statically imported in full",
+            "ja-JP": "echarts / d3 / framer-motion がまるごと静的にインポートされています"
+        },
+        "detail": {
+            "zh-CN": "这些库体积大，在页面组件里静态 import 会全部打进首屏包，即使用户还没看到图表也得先下载。",
+            "en-US": "These libraries are large. A static import in a page component puts all of it in the initial bundle, downloaded before the user ever sees a chart.",
+            "ja-JP": "これらのライブラリはサイズが大きく、ページコンポーネントで静的にインポートすると全体が初回のバンドルに入り、グラフを見る前からダウンロードが必要になります。"
+        },
+        "fix": {
+            "zh-CN": "改用 import() 或 React.lazy 按需加载；echarts 只引入用到的图表与组件（echarts/core + 按需注册）。",
+            "en-US": "Load it on demand with import() or React.lazy. For echarts, import only the charts and components you use (echarts/core plus explicit registration).",
+            "ja-JP": "import() や React.lazy で必要なときに読み込んでください。echarts は使うグラフとコンポーネントだけを取り込みます（echarts/core と個別登録）。"
+        }
+    },
+    "EFF-004": {
+        "dimension": "efficiency",
+        "severity": "normal",
+        "title": {
+            "zh-CN": "构建产物里有一个 {kb} KB 的 JS 包，超过 800 KB",
+            "en-US": "The build has a {kb} KB JS chunk, over the 800 KB limit",
+            "ja-JP": "ビルド成果物に {kb} KB の JS チャンクがあり、800 KB を超えています"
+        },
+        "detail": {
+            "zh-CN": "单个 JS 包过大，页面要等它下载并解析完才能显示，网络一般时首屏明显变慢。",
+            "en-US": "The page cannot render until this chunk is downloaded and parsed, so a large one makes first load noticeably slow on ordinary networks.",
+            "ja-JP": "このチャンクのダウンロードと解析が終わるまでページは表示されないため、大きいと一般的な回線で初回表示が目に見えて遅くなります。"
+        },
+        "fix": {
+            "zh-CN": "用 import() 拆分大依赖和非首屏页面，或在 vite 配置的 build.rollupOptions.output.manualChunks 里单独分包。",
+            "en-US": "Split heavy dependencies and non-initial pages with import(), or separate them via build.rollupOptions.output.manualChunks in the vite config.",
+            "ja-JP": "重い依存や初回表示に不要なページを import() で分割するか、vite 設定の build.rollupOptions.output.manualChunks で別チャンクにしてください。"
+        }
+    },
+    "EFF-005": {
+        "dimension": "efficiency",
+        "severity": "normal",
+        "title": {
+            "zh-CN": "首屏串行 await 了 3 次及以上的查询",
+            "en-US": "The first screen awaits three or more queries one after another",
+            "ja-JP": "初回表示で 3 回以上の照会を順番に await しています"
+        },
+        "detail": {
+            "zh-CN": "互不依赖的查询一个等一个，首屏时间是所有查询耗时之和，用户要盯着加载状态等很久。",
+            "en-US": "Independent queries wait on each other, so first-screen time is the sum of all of them and users stare at a spinner for longer.",
+            "ja-JP": "互いに依存しない照会を 1 つずつ待っているため、初回表示までの時間がすべての照会時間の合計になり、ユーザーは長く待たされます。"
+        },
+        "fix": {
+            "zh-CN": "用 Promise.all 并发发出互不依赖的查询；非首屏必需的数据延后到用户需要时再取。",
+            "en-US": "Run independent queries together with Promise.all, and defer data the first screen does not need until it is wanted.",
+            "ja-JP": "依存しない照会は Promise.all で並行に実行し、初回表示に不要なデータは必要になってから取得してください。"
+        }
+    },
+    "EFF-006": {
+        "dimension": "efficiency",
+        "severity": "normal",
+        "title": {
+            "zh-CN": "在循环里逐条查询 D1（N+1）",
+            "en-US": "D1 is queried inside a loop (N+1)",
+            "ja-JP": "ループの中で D1 を 1 件ずつ照会しています（N+1）"
+        },
+        "detail": {
+            "zh-CN": "每次循环发一条 SQL，数据库往返次数随条数增长，数据一多接口就明显变慢。",
+            "en-US": "Each iteration sends its own SQL statement, so round trips grow with the item count and the endpoint slows down as data grows.",
+            "ja-JP": "ループのたびに SQL を 1 本送るため、往復回数が件数に比例して増え、データが増えるとエンドポイントが目に見えて遅くなります。"
+        },
+        "fix": {
+            "zh-CN": "改成一条带 IN (...) 的查询一次取回；写入则用 db.batch([...]) 合并成一次。",
+            "en-US": "Fetch everything with one query using IN (...). For writes, combine the statements with db.batch([...]).",
+            "ja-JP": "IN (...) を使った 1 本の照会でまとめて取得してください。書き込みは db.batch([...]) で 1 回にまとめます。"
+        }
+    },
+    "DES-001": {
+        "dimension": "design",
+        "severity": "normal",
+        "title": {
+            "zh-CN": "权限 {scope} 的声明与代码不一致",
+            "en-US": "Scope {scope} is declared but unused, or used but undeclared",
+            "ja-JP": "スコープ {scope} の宣言とコードの使い方が一致していません"
+        },
+        "detail": {
+            "zh-CN": "声明了却没用的权限会让用户在安装时授予多余权限；用了却没声明的，调用到时会被平台拒绝。两者都违背最小权限原则。",
+            "en-US": "An unused scope makes users grant more than the app needs at install. A used but undeclared one is rejected by the platform at call time. Both break least privilege.",
+            "ja-JP": "使っていないスコープを宣言すると、インストール時に余分な権限を求めることになります。宣言せずに使うと、呼び出し時にプラットフォームに拒否されます。どちらも最小権限の原則に反します。"
+        },
+        "fix": {
+            "zh-CN": "让 manifest.json 的 scopes 与代码实际调用对齐：没用到就删掉 {scope}，用到了就补上声明。",
+            "en-US": "Align scopes in manifest.json with what the code calls: remove {scope} if unused, or declare it if used.",
+            "ja-JP": "manifest.json の scopes を実際の呼び出しに合わせてください。使っていなければ {scope} を削除し、使っているなら宣言を追加します。"
+        }
+    },
+    "DES-002": {
+        "dimension": "design",
+        "severity": "normal",
+        "title": {
+            "zh-CN": "前后端只有一半：有后端但前端没调 /api/，或反过来",
+            "en-US": "Half-wired app: a backend with no /api/ calls from the front end, or vice versa",
+            "ja-JP": "片側だけの実装：バックエンドがあるのにフロントエンドが /api/ を呼んでいない、またはその逆です"
+        },
+        "detail": {
+            "zh-CN": "这通常说明改到一半：要么后端写了没人用，要么前端调用的接口根本不存在，页面上会直接报错或没数据。",
+            "en-US": "This usually means a change was left half done: either the backend is never used, or the front end calls endpoints that do not exist and the page errors or stays empty.",
+            "ja-JP": "多くの場合、変更が途中で止まっています。バックエンドが使われていないか、フロントエンドが存在しないエンドポイントを呼んでいて、画面がエラーになるかデータが表示されません。"
+        },
+        "fix": {
+            "zh-CN": "补齐缺的一侧：前端通过 /api/ 调用后端接口；或者后端确实不需要就删掉 backend/，前端也去掉对 /api/ 的调用。",
+            "en-US": "Complete the missing side: call the backend from the front end via /api/, or, if no backend is needed, remove backend/ along with any /api/ calls.",
+            "ja-JP": "足りない側を補ってください。フロントエンドから /api/ でバックエンドを呼ぶか、バックエンドが不要なら backend/ と /api/ の呼び出しをどちらも削除します。"
+        }
+    },
+    "DES-003": {
+        "dimension": "design",
+        "severity": "normal",
+        "title": {
+            "zh-CN": "异步取数的组件没有处理加载中或出错的情况",
+            "en-US": "A component loading async data has no loading or error state",
+            "ja-JP": "非同期でデータを取得するコンポーネントに、読み込み中やエラー時の表示がありません"
+        },
+        "detail": {
+            "zh-CN": "只取 data、或 fetch().then 没有 catch 时，加载过程和请求失败都会显示成一块空白，用户分不清是没数据还是出错了。",
+            "en-US": "Reading only data, or fetch().then without a catch, shows a blank area both while loading and on failure. Users cannot tell empty data from an error.",
+            "ja-JP": "data だけを参照したり、fetch().then に catch がなかったりすると、読み込み中も失敗時も空白になり、ユーザーにはデータがないのかエラーなのか区別がつきません。"
+        },
+        "fix": {
+            "zh-CN": "加上加载中和出错两个分支：显示加载占位，失败时给出提示和重试；Promise 链补上 catch。",
+            "en-US": "Add loading and error branches: show a placeholder while loading and a message with retry on failure. Add a catch to the promise chain.",
+            "ja-JP": "読み込み中とエラーの分岐を追加してください。読み込み中はプレースホルダーを、失敗時はメッセージと再試行を表示し、Promise チェーンには catch を付けます。"
+        }
+    }
+}

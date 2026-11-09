@@ -10,6 +10,7 @@
  *   ptx deploy     上传到平台（CI 用 PTENGINE_TOKEN）
  *   ptx job run    以定时任务身份在本地调一次任务路由（需先 ptx dev）
  *   ptx doctor     体检：约定是否被改坏、manifest 是否自洽
+ *   ptx audit      自检：代码里的安全 / AI 成本 / 效率 / 合理性问题
  */
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -25,7 +26,8 @@ const COMMANDS = {
     package: './ptx-package.mjs',
     deploy: './ptx-deploy.mjs',
     job: './ptx-job.mjs',
-    doctor: './ptx-doctor.mjs'
+    doctor: './ptx-doctor.mjs',
+    audit: './ptx-audit.mjs'
 };
 
 function usage() {
@@ -45,6 +47,8 @@ ptx <command>
              以定时任务身份调一次本地任务路由（先在另一个终端跑 npm run dev），
              打印状态码、响应体，以及平台会把返回结果判成 stored / none / invalid / too_large
   doctor     体检（改完代码、尤其是 AI 改完之后跑一次）
+  audit [--json] [--src <dir>]... [--root <dir>]
+             自检：安全 / AI 成本 / 效率 / 合理性；退出码 severe→2、只有 normal→1、无→0、跑不起来→3
 `);
 }
 

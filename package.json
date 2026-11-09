@@ -9,7 +9,9 @@
         "package": "node scripts/ptx.mjs package",
         "deploy": "node scripts/ptx.mjs deploy",
         "doctor": "node scripts/ptx.mjs doctor",
-        "test": "node --test scripts/*.test.mjs",
+        "audit": "node scripts/ptx.mjs audit",
+        "audit:doc": "node scripts/audit-rules-doc.mjs --write",
+        "test": "node --test scripts/*.test.mjs scripts/audit/*.test.mjs",
         "sync-rules": "node scripts/sync-rules.mjs",
         "ptx": "node scripts/ptx.mjs"
     },
