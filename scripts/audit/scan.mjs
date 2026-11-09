@@ -113,7 +113,8 @@ export function walk(ts, node, visit) {
     ts.forEachChild(node, child => walk(ts, child, visit));
 }
 
-function nameChain(ts, expr) {
+/** 纯名字链的文本：`ctx.pt.ai` → `'ctx.pt.ai'`；链里夹着调用 / 下标等 → null。 */
+export function nameChain(ts, expr) {
     if (ts.isIdentifier(expr)) return expr.text;
     if (expr.kind === ts.SyntaxKind.ThisKeyword) return 'this';
     if (ts.isPropertyAccessExpression(expr)) {
