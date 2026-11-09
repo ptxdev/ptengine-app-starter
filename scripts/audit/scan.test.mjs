@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -17,7 +17,9 @@ function fixture(files) {
 }
 
 // 临时目录里没有 node_modules：loadTs 要回退到脚本旁的 typescript，顺带把回退测了
-const ts = loadTs(mkdtempSync(join(tmpdir(), 'ptx-audit-ts-')));
+const tsRoot = mkdtempSync(join(tmpdir(), 'ptx-audit-ts-'));
+after(() => rmSync(tsRoot, { recursive: true, force: true }));
+const ts = loadTs(tsRoot);
 
 /** 把一段代码解析成语法树，返回所有满足 pred 的节点。 */
 function nodesOf(code, pred, rel = 'backend/src/x.ts') {

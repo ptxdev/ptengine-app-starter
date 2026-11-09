@@ -139,14 +139,20 @@ test('EFF-003：不命中 —— 子路径、import type、没有 JSX 的文件�
 });
 
 // ─── EFF-004 ───
-test('EFF-004：web/dist/assets 里超过 800KB 的 JS 包各报一条，带 kb', async () => {
+test('EFF-004：web/dist/assets 里超过 800KB 的 JS 包各报一条，带 kb；file 去掉构建 hash（每次构建 id 不变）', async () => {
     const f = await hits('EFF-004', {
         'web/src/a.ts': 'export {};\n',
+        'web/dist/assets/index-Clypym9M.js': Buffer.alloc(900 * 1024, 'a'),
+        'web/dist/assets/vendor-a_b-C9d_.js': Buffer.alloc(1000 * 1024, 'a'),
         'web/dist/assets/x.js': Buffer.alloc(900 * 1024, 'a'),
         'web/dist/assets/small.js': Buffer.alloc(800 * 1024, 'a'),
         'web/dist/assets/big.css': Buffer.alloc(900 * 1024, 'a')
     });
-    assert.deepEqual(f.map(x => [x.file, x.line, x.args]), [['web/dist/assets/x.js', 0, { kb: '900' }]]);
+    assert.deepEqual(f.map(x => [x.file, x.line, x.args]).sort(), [
+        ['web/dist/assets/index.js', 0, { kb: '900' }],
+        ['web/dist/assets/vendor.js', 0, { kb: '1000' }],
+        ['web/dist/assets/x.js', 0, { kb: '900' }]
+    ]);
 });
 
 test('EFF-004：没有 web/dist 时不报', async () => {

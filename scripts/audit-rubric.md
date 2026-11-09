@@ -58,8 +58,8 @@
 - 只输出一个 JSON 数组，不要有任何其他文字；没有问题就输出 `[]`。
 - 每条是 `{ dimension, severity, file, line?, title, detail, fix }`：
   - `dimension` 取 `security`、`ai-cost`、`efficiency`、`design` 之一（分别对应安全、AI 成本、效率、合理性）。
-  - `severity` 取 `severe` 或 `normal`；`severe` 只许用在 `security` 和 `ai-cost`，其他维度一律 `normal`。
+  - `severity` 取 `severe` 或 `normal`；`severe` 只许用在 `security` 和 `ai-cost`，其他维度一律 `normal`。`severe` 只给上线后会造成损失或泄露的问题（数据外泄、额度被吃光、他人数据可写、注入），其余一律 `normal`。
   - `file` 是相对项目根的路径；`line` 是问题所在的行号，说不出具体行就省略。
-  - `title` 一句话说问题是什么；`detail` 说为什么是问题、会造成什么后果；`fix` 说具体怎么改。
+  - `title` 一句话说问题是什么；`detail` 说为什么是问题、会造成什么后果；`fix` 说具体怎么改。`title` 不超过 80 字，`detail`、`fix` 各不超过 300 字。
 - 最多 12 条；超过时只留最要紧的。
 - 不要重复给你的 `file:line` 列表里已经有的位置。

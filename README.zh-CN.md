@@ -83,7 +83,7 @@ npx skills add ptxdev/ptengine-skills          # 大多数助手
 | `npm run package` | 组装 zip 并做结构自检 |
 | `npm run deploy` | 上传。`--publish` 立即发布，`--stream` 流式打印进度，`--dry-run` 只打印不发请求 |
 
-`npm run audit` 对 `web/src`、`backend/src`、`shared` 做静态检查，23 条规则分四个方面 —— 安全（写死密钥、未声明的 egress、拼接 SQL、`eval` 等）、AI 成本（循环里调 AI、定时任务没上限、没设 `max_tokens` 等）、效率（循环里逐个查询、缺 `timeRange`、单个 JS 包超过 800 KB 等）、合理性（scope 声明与代码不一致、前后端只有一半、异步组件没处理加载中或出错）。退出码 `2` 表示有严重项，`1` 只有一般项，`0` 没有问题，`3` 表示自检本身没跑起来（原因看 stderr）。`--src <dir>`（可重复）只扫给定目录；`--json` 只输出一个 JSON，每条文案三语齐全；`PTX_LANG`（`zh-CN` / `en-US` / `ja-JP`，缺省 `en-US`）决定终端输出的语言 —— 例如 `npm run audit -- --src web/src --json`。同一份规则也列在 [`AGENTS.md`](./AGENTS.md) 的「自检规则」一节，写代码时照着做，不必等自检才第一次看到。
+`npm run audit` 对 `web/src`、`backend/src`、`shared` 做静态检查，23 条规则分四个方面 —— 安全（写死密钥、未声明的 egress、拼接 SQL、`eval` 等）、AI 成本（循环里调 AI、定时任务没上限、没设 `max_tokens` 等）、效率（循环里逐个查询、缺 `timeRange`、单个 JS 包超过 800 KB 等）、合理性（scope 声明与代码不一致、前后端只有一半、异步组件没处理加载中或出错）。退出码 `2` 表示有严重项，`1` 只有一般项，`0` 没有问题，`3` 表示自检本身没跑起来（原因看 stderr）。`--src <dir>`（可重复）只扫给定目录；`--json` 只输出一个 JSON，每条文案三语齐全；`PTX_LANG`（`zh-CN` / `en-US` / `ja-JP`，缺省 `en-US`）决定终端输出的语言 —— 例如 `npm run -s audit -- --src web/src --json`（`-s` 让 npm 不往 stdout 打横幅，输出才是合法 JSON）。同一份规则也列在 [`AGENTS.md`](./AGENTS.md) 的「自检规则」一节，写代码时照着做，不必等自检才第一次看到。
 
 ## 本地开发
 

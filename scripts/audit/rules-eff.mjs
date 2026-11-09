@@ -87,7 +87,10 @@ function inTypePosition(ts, ident) {
     return false;
 }
 
-/** 文件里在「值」的位置读到的名字（不含 import 语句本身、属性名、类型位置）。同名局部变量的遮蔽不区分 —— 只会让少数情况漏掉放过，不会多报。 */
+/**
+ * 文件里在「值」的位置读到的名字（不含 import 语句本身、属性名、类型位置）。同名局部变量的遮蔽不区分 ——
+ * 局部变量和 import 同名时会把只在类型位置用的 import 当成值用到了，让 EFF-003 多报（不会少报）；少见，先不处理。
+ */
 function valueNames(ts, sf) {
     const names = new Set();
     for (const st of sf.statements) {
@@ -133,11 +136,17 @@ function eff003(ctx) {
 // ─── EFF-004 构建产物里单个 JS 包过大 ───
 const CHUNK_LIMIT = 800 * 1024;
 
+/**
+ * 去掉 Vite 产物名里的内容 hash（`-` 加 8 位 base64url）：`index-Clypym9M.js` → `index.js`。
+ * hash 每次构建都变，留着它会让发布门禁按 rule + file 比对的 id 每次都不一样。
+ */
+const chunkName = file => file.replace(/-[A-Za-z0-9_-]{8}\.js$/, '.js');
+
 /** 没 build 过（distChunks 为空）就什么都不报 —— 不替用户跑构建。 */
 function eff004(ctx) {
     return ctx.distChunks
         .filter(c => c.bytes > CHUNK_LIMIT)
-        .map(c => ({ rule: 'EFF-004', file: c.file, line: 0, args: { kb: String(Math.round(c.bytes / 1024)) } }));
+        .map(c => ({ rule: 'EFF-004', file: chunkName(c.file), line: 0, args: { kb: String(Math.round(c.bytes / 1024)) } }));
 }
 
 // ─── EFF-005 首屏串行 await 多次查询 ───
