@@ -5,7 +5,8 @@
  * 这些静态看不出确定答案的写法一律放过，宁可漏报也不让 Builder 为一条误报去解释。
  */
 import {
-    bindingNames, callee, eachCall, enclosingFunction, enclosingRoute, insideLoop, isReference, lineOf, shadowedByParam, walk
+    bindingNames, callee, eachCall, enclosingFunction, enclosingRoute, filesIn, insideLoop, isReference, lineOf, propName,
+    shadowedByParam, walk
 } from './scan.mjs';
 
 /**
@@ -15,8 +16,6 @@ import {
  */
 const AI_CALL = /(^|\.)ai\.(chat|stream)$/;
 export const isAiCall = name => AI_CALL.test(name);
-
-const filesIn = (ctx, area) => (area ? ctx.files.filter(f => f.area === area) : ctx.files);
 
 /** 遍历所有 AI 调用，visit(call, file)。 */
 function eachAiCall(ctx, visit, area) {
@@ -33,9 +32,9 @@ function jobRoutes(ctx) {
 /** 路由键 `'POST /jobs/daily'` → `'/jobs/daily'`（没写方法就原样）。 */
 const routePath = key => key.replace(/^[A-Z]+\s+/, '');
 
-/** 对象字面量里有没有叫 name 的属性（含简写、方法）。 */
+/** 对象字面量里有没有叫 name 的属性（含简写、方法、带引号的键）。 */
 function hasProp(ts, obj, name) {
-    return obj.properties.some(p => p.name && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) && p.name.text === name);
+    return obj.properties.some(p => p.name && propName(ts, p.name) === name);
 }
 
 /**
@@ -147,12 +146,12 @@ function ai004(ctx) {
     eachAiCall(ctx, (call, file) => {
         const opts = call.arguments[0];
         if (!opts || !ts.isObjectLiteralExpression(opts)) return;
-        const messages = opts.properties.find(p => ts.isPropertyAssignment(p) && p.name.getText(file.sf) === 'messages');
+        const messages = opts.properties.find(p => ts.isPropertyAssignment(p) && propName(ts, p.name) === 'messages');
         if (!messages || !ts.isArrayLiteralExpression(messages.initializer)) return;
         for (const msg of messages.initializer.elements) {
             if (!ts.isObjectLiteralExpression(msg)) continue;
             for (const p of msg.properties) {
-                if (!ts.isPropertyAssignment(p) || p.name.getText(file.sf) !== 'content') continue;
+                if (!ts.isPropertyAssignment(p) || propName(ts, p.name) !== 'content') continue;
                 // 只看「拼」出来的 content（模板 / +）；整个 content 就是一个变量（`content: prompt`）时
                 // 看不出里面装了什么，不报
                 const tpl = unwrap(ts, p.initializer);
@@ -229,6 +228,8 @@ function derivedVars(ts, fn, seeds) {
 
 /**
  * 两处调用是否不可能在同一次执行里都发生：分在同一个 if 的两支 / 三元的两支 / switch 的不同 case，
+ * try 块与 catch 块（失败兜底：`try { r = await ai.chat(a) } catch { r = await ai.chat(b) }`），
+ * `||` / `??` 的两侧（`(await ai.chat(a)) ?? (await ai.chat(b))` 右侧只在左侧落空时才跑），
  * 或前一处在一条 return 语句里而后一处不在（`if (x) return ai.chat(a); return ai.chat(b);`）。
  * `return Promise.all([ai.chat(a), ai.chat(b)])` 两处在同一条 return 里，照常算。
  */
@@ -247,8 +248,21 @@ function exclusive(ts, a, b, fn) {
         if (ts.isIfStatement(anc)) return ca !== cb && ca !== anc.expression && cb !== anc.expression;
         if (ts.isConditionalExpression(anc)) return ca !== cb && ca !== anc.condition && cb !== anc.condition;
         if (ts.isCaseBlock(anc)) return ca !== cb;
+        if (ts.isTryStatement(anc)) {
+            const sides = new Set([ca, cb]);
+            return sides.has(anc.tryBlock) && sides.has(anc.catchClause);
+        }
+        if (ts.isBinaryExpression(anc)) {
+            const op = anc.operatorToken.kind;
+            return ca !== cb && (op === ts.SyntaxKind.BarBarToken || op === ts.SyntaxKind.QuestionQuestionToken);
+        }
         return false;
     }
+    return false;
+}
+
+function isAncestor(a, b) {
+    for (let p = b.parent; p; p = p.parent) if (p === a) return true;
     return false;
 }
 
@@ -266,7 +280,9 @@ function ai005(ctx) {
     for (const [fn, { file, calls }] of byFn) {
         if (calls.length < 2) continue;
         for (let j = 1; j < calls.length; j++) {
-            const earlier = calls.slice(0, j).filter(i => !exclusive(ts, i, calls[j], fn));
+            // 前一处是后一处的祖先（`ai.chat({ content: (await ai.chat(x)).content })` 里外层先被遍历到）：
+            // 内层的结果直接喂给外层，是依赖关系，不是两次独立调用
+            const earlier = calls.slice(0, j).filter(i => !isAncestor(i, calls[j]) && !exclusive(ts, i, calls[j], fn));
             if (earlier.length === 0) continue;
             const deps = derivedVars(ts, fn, earlier.flatMap(i => resultVars(ts, i)));
             const used = new Set();

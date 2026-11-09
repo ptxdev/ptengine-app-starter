@@ -7,15 +7,13 @@
  */
 import { findRouteHandler } from '../ptx-doctor.mjs';
 import {
-    bindingNames, callee, eachCall, enclosingFunction, isReference, lineOf, shadowedByParam, stringLiteralsIn, walk
+    bindingNames, callee, eachCall, enclosingFunction, filesIn, isReference, lineOf, shadowedByParam, stringLiteralsIn, walk
 } from './scan.mjs';
 
 const KNOWN_SECRET = /^(sk-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|ghp_[A-Za-z0-9]{36})$/;
 const SECRET_CHARS = /^[A-Za-z0-9+/=_-]+$/;
 const SECRET_NAME = /key|token|secret|password/i;
 const PLATFORM_HOSTS = ['ptengine.ai', 'ptengine.jp', 'ptengine.com'];
-
-const filesIn = (ctx, area) => (area ? ctx.files.filter(f => f.area === area) : ctx.files);
 
 const isPlainString = (ts, n) => ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n);
 

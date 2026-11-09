@@ -118,6 +118,13 @@ test('AI-004：模板 / + 拼接里直接塞 rows、JSON.stringify(data) 命中'
     assert.deepEqual(h, [['backend/src/a.ts', 2], ['backend/src/a.ts', 3]]);
 });
 
+test('AI-004：带引号的 "messages" / "content" 键一样认', async () => {
+    const h = await lines('AI-004', V2(), {
+        'backend/src/a.ts': 'await ctx.pt.ai.chat({ max_tokens: 1, "messages": [{ role: "user", \'content\': `数据：${records}` }] });\n'
+    });
+    assert.deepEqual(h, [['backend/src/a.ts', 1]]);
+});
+
 test('AI-004：不命中 —— 截断过、别的变量名、属性访问', async () => {
     const h = await lines('AI-004', V2(), {
         'backend/src/a.ts': [
@@ -153,7 +160,7 @@ test('AI-005：同一条 return 里的 Promise.all 两次调用照样命中第�
     assert.deepEqual(h, [['backend/src/a.ts', 4]]);
 });
 
-test('AI-005：不命中 —— 第二次用了第一次的结果（含转手变量、push 进 history）、if/else 两支、提前 return、不同函数', async () => {
+test('AI-005：不命中 —— 第二次用了第一次的结果（含转手变量、push 进 history、嵌套）、if/else 两支、提前 return、try/catch 兜底、?? 兜底、不同函数', async () => {
     const h = await lines('AI-005', V2(), {
         'backend/src/a.ts': [
             'async function f(ctx) {',
@@ -170,6 +177,18 @@ test('AI-005：不命中 —— 第二次用了第一次的结果（含转手变
             '  return ctx.pt.ai.chat({ messages: [] });',
             '}',
             'async function k(ctx) { return ctx.pt.ai.chat({ messages: [] }); }',
+            'async function t(ctx) {',
+            '  let r;',
+            '  try { r = await ctx.pt.ai.chat({ messages: [] }); }',
+            '  catch { r = await ctx.pt.ai.chat({ messages: [] }); }',
+            '  return r;',
+            '}',
+            'async function n(ctx) {',
+            '  return (await ctx.pt.ai.chat({ messages: [] })) ?? (await ctx.pt.ai.chat({ messages: [] }));',
+            '}',
+            'async function o(ctx, x) {',
+            '  return ctx.pt.ai.chat({ messages: [{ role: "user", content: (await ctx.pt.ai.chat({ messages: x })).content }] });',
+            '}',
             'async function m(ctx, history) {',
             '  const reply = await ctx.pt.ai.chat({ messages: history });',
             '  history.push({ role: "assistant", content: reply.content });',

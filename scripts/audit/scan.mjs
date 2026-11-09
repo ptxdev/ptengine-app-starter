@@ -159,7 +159,8 @@ export function insideLoop(ts, node) {
     return false;
 }
 
-function propName(ts, name) {
+/** 属性 / 键名的文本（标识符、带引号的字符串、无插值模板）；计算属性名等 → null。 */
+export function propName(ts, name) {
     if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name)) return name.text;
     return null;
 }
@@ -208,6 +209,9 @@ export function stringLiteralsIn(ts, node) {
     });
     return out;
 }
+
+/** ctx.files 里某个区域（web / backend / …）的文件；area 不给 → 全部。 */
+export const filesIn = (ctx, area) => (area ? ctx.files.filter(f => f.area === area) : ctx.files);
 
 /** 遍历文件里的所有调用，visit(node, calleeText)。 */
 export function eachCall(ctx, file, visit) {
