@@ -1,7 +1,7 @@
 {
     "name": "ptengine-app-starter",
     "private": true,
-    "version": "3.9.0",
+    "version": "3.10.0",
     "type": "module",
     "scripts": {
         "dev": "node scripts/ptx.mjs dev",
