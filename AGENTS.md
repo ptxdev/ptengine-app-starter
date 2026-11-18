@@ -651,7 +651,7 @@ Chatwork API 令牌 + 房间 / 通用 Webhook）；使用者在订阅抽屉里�
   `INSPECT_QUOTA_EXCEEDED`（429，**不重试**，等几秒不会好）、`INSPECT_NOT_FOUND`（404，含结果过 24 h 被删）、`INSPECT_UNAVAILABLE`（503，稍后重试）。
   另外：平台没能把任务派发出去时**调用本身成功**，视图是 `status: 'failed'`、`error.code === 'INSPECT_UNAVAILABLE'` —— 此时配额已退，稍后重试。
 - **任务失败**（`status: 'failed'` 时的 `error.code`，不退配额）：`INSPECT_BROWSER_UNAVAILABLE`（检测浏览器暂时不够，可稍后重试）、
-  `INSPECT_TIMEOUT`（排队 / 平台繁忙导致时可稍后重试；页面日志极大时也可能超时，此时重试同一页面无用，可用 `filter` 缩小）、
+  `INSPECT_TIMEOUT`（排队 / 平台繁忙导致时可稍后重试）、
   `INSPECT_PAGE_UNREACHABLE`（**页面打不开**：DNS / 连接失败，主文档没响应 —— 这是要如实告诉用户的站点问题）、`INSPECT_FAILED`（其它，检测本身出错）。
   **主文档 4xx / 5xx 不算失败**，在 `result.main.status` 里。
 - `result.blockedSuspected === true`：疑似被站点的机器人防护拦截，**其余字段不代表真实页面** —— 如实说「检测被站点防护拦截」，不要当成页面错误报。
