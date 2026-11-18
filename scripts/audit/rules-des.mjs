@@ -17,7 +17,9 @@ const SCOPE_USES = {
     'jobs:run': /requireTrigger\(/,
     'asset:write': /ctx\.pt\.asset\.(ensureFolder|create|update|uploadSource)/,
     'asset:read': /ctx\.pt\.asset\.(list|sharedWithMe|get)\(/,
-    'openapi:read': /ctx\.pt\.openApiUrl/
+    'openapi:read': /ctx\.pt\.openApiUrl/,
+    // 页面加载检测：后端 ctx.pt.page.*、前端 PtApp.page.* 都要它（写类，两边用了都得声明）
+    'page:inspect': /ctx\.pt\.page\.|PtApp\.page\./
 };
 /**
  * 只用于「声明了没用」方向的额外在用认定（「用了未声明」仍只认 SCOPE_USES）：
@@ -35,7 +37,7 @@ const ALSO_USED_BY = {
 /** 换了写法也能看出「大概在用」的标识符：出现了就不报「声明了没用」。 */
 const SCOPE_IDENTS = { 'jobs:run': 'requireTrigger', 'openapi:read': 'openApiUrl' };
 /** ctx.pt 下按命名空间调用的几组：`ctx.pt.ai` 后面不再接 `.方法` 就是被转手了。 */
-const PT_NAMESPACES = new Set(['ai', 'notify', 'asset', 'render']);
+const PT_NAMESPACES = new Set(['ai', 'notify', 'asset', 'render', 'page']);
 
 /**
  * ctx.pt 是否以认不出的方式被使用：换了参数名（`c.pt`）、整个转手 / 解构（`helper(ctx.pt)`、`const { ai } = ctx.pt`、

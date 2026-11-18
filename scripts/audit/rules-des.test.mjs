@@ -144,6 +144,37 @@ test('DES-001：不命中 —— jobs:run 由 manifest backend.jobs、ctx.pt.job
 });
 
 // ─── DES-002 ───
+test('DES-001：page:inspect —— 后端 ctx.pt.page.* / 前端 PtApp.page.* 都算在用；用了未声明报首次出现处，声明了没用报 manifest', async () => {
+    // 用了未声明：后端
+    assert.deepEqual(await scoped(WITH_BACKEND([]), {
+        ...WEB_CALLS_API,
+        'backend/src/index.ts': src(
+            'export async function h(ctx) {',
+            '  const ins = await ctx.pt.page.inspect({ url: "https://shop.example.jp/" });',
+            '  return ctx.json(await ctx.pt.page.getInspection(ins.inspectionId));',
+            '}'
+        )
+    }), [['backend/src/index.ts', 2, 'page:inspect']]);
+    // 用了未声明：前端
+    assert.deepEqual(await scoped(WITH_BACKEND([]), {
+        'web/src/a.ts': 'fetch("/api/x");\nawait window.PtApp.page.inspect({ url: "https://shop.example.jp/" });\n',
+        'backend/src/index.ts': 'export async function h(ctx) { return ctx.json({}); }\n'
+    }), [['web/src/a.ts', 2, 'page:inspect']]);
+    // 声明了没用
+    assert.deepEqual(await scoped(WITH_BACKEND(['page:inspect']), {
+        ...WEB_CALLS_API,
+        'backend/src/index.ts': 'export async function h(ctx) { return ctx.json({}); }\n'
+    }), [['manifest.json', 0, 'page:inspect']]);
+    // 不命中：声明且后端在用、只在前端用、ctx.pt.page 被转手
+    for (const [files, why] of [
+        [{ ...WEB_CALLS_API, 'backend/src/index.ts': 'export async function h(ctx) { return ctx.pt.page.getInspection("x"); }\n' }, '后端'],
+        [{ 'web/src/a.ts': 'fetch("/api/x"); await PtApp.page.getInspection("x");\n', 'backend/src/index.ts': 'export async function h(ctx) { return ctx.json({}); }\n' }, '前端'],
+        [{ ...WEB_CALLS_API, 'backend/src/index.ts': 'export async function h(ctx) { const p = ctx.pt.page; return p.inspect({}); }\n' }, '转手']
+    ]) {
+        assert.deepEqual(await scoped(WITH_BACKEND(['page:inspect']), files), [], why);
+    }
+});
+
 test('DES-002：有后端但前端从不调 /api/ → manifest.json:0', async () => {
     const h = await lines('DES-002', WITH_BACKEND([]), {
         'web/src/App.tsx': 'export const App = () => <div>{"/apis/x"}</div>;\n',

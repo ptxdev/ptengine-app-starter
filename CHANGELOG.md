@@ -34,6 +34,21 @@
 | v1.0.1 | `^0.3.0` | — | — | 1 | 支持在平台内加载本地 dev server 联调 |
 | v1.0.0 | `^0.2.0` | — | — | 1 | 首个版本 |
 
+## Unreleased
+
+> 依赖区间、`PACKAGE_FLOORS` 与版本号留到发版时随 `@ptengine/app-sdk` 2.12.0 / `@ptengine/app-backend` 0.11.0 一起改（两个包尚未发到 npm）。
+
+### 新增
+
+- **页面加载检测**（需 manifest 声明 `page:inspect`，写类 scope，自建应用也要管理员显式同意）：前端 `PtApp.page.inspect / getInspection`（app-sdk 2.12），
+  后端 `ctx.pt.page.inspect / getInspection`（app-backend 0.11）。用 Ptengine 的浏览器打开本档案网站的页面，读 console、未捕获异常、失败 / 4xx·5xx 请求、性能与埋点加载情况；
+  异步两段式，首查 10 s、之后每 3 s、最长约 90 s。配额每工作区每 UTC 日 200 次、每 run 10 次，同参数 10 分钟复用缓存；结果 24 h 后删除。
+- 规则快照同步（platform contract）：`validScopes` 新增 `page:inspect`。
+- `ptx audit` DES-001：认 `ctx.pt.page.*` / `PtApp.page.*` 为 `page:inspect` 的用法（用了未声明、声明了没用都会报；`ctx.pt.page` 被转手时不报「没用」）。
+- `AGENTS.md`：PtApp 契约、ctx 清单、scope 表加 `page:inspect`；新增「页面加载检测：检测 → 等结果 → ai.chat 总结 → notify.send」一节
+  （`waitForInspection` 示例、错误码、结果不可信时喂给大模型的写法）；预览模式注明 `page.inspect` 真实检测并计配额。
+  README / `backend/src/index.ts` 头注释同步。
+
 ## [3.10.0] - 2026-11-09
 
 > 依赖区间不变（`@ptengine/app-sdk ^2.11.0` / `@ptengine/app-backend ^0.10.0`），只加脚本与文档。
