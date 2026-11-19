@@ -5,8 +5,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { RULES } from './manifest.mjs';
 
-test('validScopes 末尾是 notify:send（manifest 校验据此放行）', () => {
-    assert.equal(RULES.validScopes.at(-1), 'notify:send');
+test('validScopes：含 notify:send，末尾是 page:inspect（manifest 校验据此放行）', () => {
+    assert.ok(RULES.validScopes.includes('notify:send'));
+    assert.equal(RULES.validScopes.at(-1), 'page:inspect', '缺 page:inspect（跑 npm run sync-rules）');
+    assert.equal(new Set(RULES.validScopes).size, RULES.validScopes.length, 'validScopes 不应有重复');
 });
 
 test('notify 段：数值上限齐全，三语 locale，ref / replyTo 正则能编译且口径正确', () => {

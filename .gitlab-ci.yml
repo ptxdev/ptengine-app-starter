@@ -23,9 +23,19 @@ verify:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_TAG
   script:
+    # 两种 runner 都要能跑（同 custom-app-platform 的 .gitlab-ci.yml）：docker runner 用上面的 image: node:22，
+    # 机器上没有 nvm，这段直接跳过；组里的 shell runner（如 cn-runner-rancher2）会忽略 image、自带 Node 16，
+    # 靠 nvm 切到 22。不切的话 doctor 在 Node 16 上报 `Object.hasOwn is not a function`。
+    - |
+      if [ -s "$HOME/.nvm/nvm.sh" ]; then
+        . "$HOME/.nvm/nvm.sh"
+        nvm install 22 >/dev/null
+        nvm use 22 >/dev/null
+      fi
     - node --version && npm --version
-    # `ptx package` 用系统的 zip / unzip 打包与自检，node:22（Debian）镜像里没有；不装会 spawnSync zip ENOENT
-    - apt-get update -qq && apt-get install -y -qq zip unzip > /dev/null
+    # `ptx package` 用系统的 zip / unzip 打包与自检，node:22（Debian）镜像里没有；不装会 spawnSync zip ENOENT。
+    # 已有就跳过：shell runner 上通常没有 root，apt-get 会失败。
+    - command -v zip >/dev/null && command -v unzip >/dev/null || (apt-get update -qq && apt-get install -y -qq zip unzip > /dev/null)
     # 用 npm ci 而非 install：package.json 与 lockfile 不一致时必须让 CI 红
     - npm ci --cache .npm --prefer-offline --no-audit --no-fund
     # doctor 查的是「违反了也不报错」的约定（manifest 声明、.dev.vars 不进包等），放最前
