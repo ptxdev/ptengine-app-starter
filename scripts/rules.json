@@ -63,7 +63,8 @@
         "ai:invoke",
         "asset:read",
         "jobs:run",
-        "notify:send"
+        "notify:send",
+        "page:inspect"
     ],
     "aiModels": [
         "claude-opus-5-5",
