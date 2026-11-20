@@ -34,6 +34,15 @@
 | v1.0.1 | `^0.3.0` | — | — | 1 | 支持在平台内加载本地 dev server 联调 |
 | v1.0.0 | `^0.2.0` | — | — | 1 | 首个版本 |
 
+## [3.10.1] - 2026-11-20
+
+### 修复
+
+- `npm run audit` 的 SEC-003（D1 SQL 拼接）不再误报**两支都是字面量的三元表达式**：可选子句的标准写法
+  `'… WHERE a = ?' + (onlyStatus ? ' AND status = ?' : '')`、模板里的 `${desc ? ' ORDER BY ts DESC' : ' ORDER BY ts'}`，
+  以及三元里套 `?` 占位生成器，值仍走 `.bind()`，不算拼接。任一支带变量照报；`flag && ' WHERE …'` 照报（falsy 时拼进去的是 `false`）。
+  线上 App Builder 自检 shadow 期观察到 3 个应用因此被判为严重项。依赖区间不变。
+
 ## [3.10.0] - 2026-11-09
 
 > 依赖区间不变（`@ptengine/app-sdk ^2.11.0` / `@ptengine/app-backend ^0.10.0`），只加脚本与文档。
