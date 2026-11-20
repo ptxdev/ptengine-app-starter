@@ -155,16 +155,21 @@ function isPlaceholderGen(ts, n) {
     return false;
 }
 
-/** 插进 SQL 的表达式是安全的：字面量、`?` 占位生成器、同文件内以字面量初始化的 const（表名常量）。 */
+/**
+ * 插进 SQL 的表达式是安全的：字面量、`?` 占位生成器、同文件内以字面量初始化的 const（表名常量）、
+ * 两支都安全的三元（可选子句 `cond ? ' AND status = ?' : ''`，值仍走 bind；条件本身不进 SQL 文本）。
+ * `flag && ' WHERE …'` 不算：falsy 时拼进去的是 "false"。
+ */
 function isSafeSqlPart(ts, n) {
     n = unwrapParens(ts, n);
     if (isPlainString(ts, n) || ts.isNumericLiteral(n) || isPlaceholderGen(ts, n)) return true;
+    if (ts.isConditionalExpression(n)) return !concatHasVariable(ts, n.whenTrue) && !concatHasVariable(ts, n.whenFalse);
     if (!ts.isIdentifier(n)) return false;
     const init = constInitializer(ts, n);
     return !!init && (isPlainString(ts, unwrapParens(ts, init)) || ts.isNumericLiteral(unwrapParens(ts, init)));
 }
 
-/** `a + b + c` 里有不安全的操作数。 */
+/** `a + b + c` 里有不安全的操作数（单个表达式也可：不是拼接就按 isSafeSqlPart 判）。 */
 function concatHasVariable(ts, n) {
     if (ts.isParenthesizedExpression(n)) return concatHasVariable(ts, n.expression);
     if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.PlusToken) {

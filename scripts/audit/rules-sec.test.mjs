@@ -166,6 +166,29 @@ test('SEC-003：照报 —— 别的函数里的同名字面量 const 不算（�
     assert.deepEqual(h.map(f => f.line), [3, 6, 7]);
 });
 
+test('SEC-003：不命中 —— 可选子句用三元拼接 / 插值，两支都是字面量或 ? 占位（值仍走 bind）', async () => {
+    const h = await hits('SEC-003', V2(), {
+        'backend/src/a.ts': [
+            "db.prepare('DELETE FROM t WHERE a = ? ' + (onlyStatus ? ' AND status = ?' : '')).bind(a, ...(onlyStatus ? [onlyStatus] : []));",
+            "db.prepare(`SELECT * FROM t WHERE a = ?${desc ? ' ORDER BY ts DESC' : ' ORDER BY ts'}`).bind(a);",
+            "db.prepare('SELECT * FROM t' + (x ? (y ? ' WHERE x = ?' : ' WHERE y = ?') : '')).bind(v);",
+            "db.prepare('SELECT * FROM t WHERE id IN (' + (ids.length ? ids.map(() => '?').join(',') : 'NULL') + ')').bind(...ids);"
+        ].join('\n')
+    });
+    assert.deepEqual(h, []);
+});
+
+test('SEC-003：照报 —— 三元任一支带变量', async () => {
+    const h = await hits('SEC-003', V2(), {
+        'backend/src/a.ts': [
+            "db.prepare('SELECT * FROM t' + (where ? ' WHERE ' + where : ''));",
+            "db.prepare(`SELECT * FROM t ORDER BY ${desc ? col : 'ts'}`);",
+            "db.prepare('SELECT * FROM t' + (flag && ' WHERE x = ?'));"
+        ].join('\n')
+    });
+    assert.deepEqual(h.map(f => f.line), [1, 2, 3]);
+});
+
 // ─── SEC-004 ───
 test('SEC-004：dangerouslySetInnerHTML / eval / new Function / postMessage(*) 命中，限定 origin 不报', async () => {
     const h = await hits('SEC-004', V1, {
