@@ -10,7 +10,7 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/app-backend` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|---|
-| v3.11.0-rc.1（预发，tag `next-3.11.0-rc.1`）| `^2.12.0-rc.1` | `^0.11.0-rc.1` | `^0.5.0` | **2**（轻应用 1）| 页面加载检测（`page:inspect`、`PtApp.page.inspect / getInspection`、`ctx.pt.page.inspect / getInspection`）。**预发**：依赖钉 npm `next` 上的 rc，只供 dev / staging 平台使用；tag 刻意不叫 `v3.*`。prod 上线时转正为 v3.11.0 |
+| v3.11.0-rc.2（预发，tag `next-3.11.0-rc.2`；= rc.1 + v3.10.1 修复）| `^2.12.0-rc.1` | `^0.11.0-rc.1` | `^0.5.0` | **2**（轻应用 1）| 页面加载检测（`page:inspect`、`PtApp.page.inspect / getInspection`、`ctx.pt.page.inspect / getInspection`）。**预发**：依赖钉 npm `next` 上的 rc，只供 dev / staging 平台使用；tag 刻意不叫 `v3.*`。prod 上线时转正为 v3.11.0 |
 | v3.10.0 | `^2.11.0` | `^0.10.0` | `^0.5.0` | **2**（轻应用 1）| 新增 `ptx audit`（23 条确定性自检规则，四维：安全 / AI 成本 / 效率 / 合理性；`--src`、`--json`、`PTX_LANG`；`npm run audit:doc` 从规则表生成 AGENTS.md「自检规则」一节；评审 rubric `scripts/audit-rubric.md` 供 Builder 与 skill 共用）。依赖区间不变 |
 | v3.9.0 | `^2.11.0` | `^0.10.0` | `^0.5.0` | **2**（轻应用 1）| 热图截图：前端 `PtApp.heatmap.capture / getCapture`（app-sdk 2.11），后端 `ctx.pt.heatmap.capture / getCapture`（app-backend 0.10），需 `analytics:read`；推送 `imageUrl` 也收本应用的热图截图。**`0.x` 的 caret 不跨 minor，旧项目要手改区间再 `npm install`** |
 | v3.8.0 | `^2.10.0` | `^0.9.0` | `^0.5.0` | **2**（轻应用 1）| 定时任务与推送（`jobs:run` / `notify:send`、`backend.jobs`、`ctx.pt.jobs.*` / `ctx.pt.notify.send`、`PtApp.subscriptions.open`）。另含即时通知声明 `backend.notify.instant`（app-sdk 2.10.0 起）。邮件推送在平台侧暂未开放 |
@@ -35,6 +35,10 @@
 | v1.0.1 | `^0.3.0` | — | — | 1 | 支持在平台内加载本地 dev server 联调 |
 | v1.0.0 | `^0.2.0` | — | — | 1 | 首个版本 |
 
+## [3.11.0-rc.2] - 2026-11-24
+
+> rc.2 = rc.1 + 合入 v3.10.1（SEC-003 三元字面量误报修复）。staging 沙箱镜像用 rc.2（staging 已在 v3.10.1，不能回退该修复）。
+
 ## [3.11.0-rc.1] - 2026-11-19
 
 > **预发 rc**：tag `next-3.11.0-rc.1`（不是 `v3.*`，外部 skill 不会拉到），依赖 `@ptengine/app-sdk ^2.12.0-rc.1` / `@ptengine/app-backend ^0.11.0-rc.1`
@@ -50,6 +54,15 @@
 - `AGENTS.md`：PtApp 契约、ctx 清单、scope 表加 `page:inspect`；新增「页面加载检测：检测 → 等结果 → ai.chat 总结 → notify.send」一节
   （`waitForInspection` 示例、错误码、结果不可信时喂给大模型的写法）；预览模式注明 `page.inspect` 真实检测并计配额。
   README / `backend/src/index.ts` 头注释同步。
+
+## [3.10.1] - 2026-11-20
+
+### 修复
+
+- `npm run audit` 的 SEC-003（D1 SQL 拼接）不再误报**两支都是字面量的三元表达式**：可选子句的标准写法
+  `'… WHERE a = ?' + (onlyStatus ? ' AND status = ?' : '')`、模板里的 `${desc ? ' ORDER BY ts DESC' : ' ORDER BY ts'}`，
+  以及三元里套 `?` 占位生成器，值仍走 `.bind()`，不算拼接。任一支带变量照报；`flag && ' WHERE …'` 照报（falsy 时拼进去的是 `false`）。
+  线上 App Builder 自检 shadow 期观察到 3 个应用因此被判为严重项。依赖区间不变。
 
 ## [3.10.0] - 2026-11-09
 
