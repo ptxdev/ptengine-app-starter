@@ -10,6 +10,7 @@
 
 | 脚手架版本 | `@ptengine/app-sdk` | `@ptengine/app-backend` | `@ptengine/design-components` | manifest `schemaVersion` | 说明 |
 |---|---|---|---|---|---|
+| v3.11.0 | `^2.12.0` | `^0.11.0` | `^0.5.0` | **2**（轻应用 1）| 页面加载检测（`page:inspect`、`PtApp.page.*` / `ctx.pt.page.*`），含 v3.10.1 修复。**`0.x` 的 caret 不跨 minor** |
 | v3.11.0-rc.2（预发，tag `next-3.11.0-rc.2`；= rc.1 + v3.10.1 修复）| `^2.12.0-rc.1` | `^0.11.0-rc.1` | `^0.5.0` | **2**（轻应用 1）| 页面加载检测（`page:inspect`、`PtApp.page.inspect / getInspection`、`ctx.pt.page.inspect / getInspection`）。**预发**：依赖钉 npm `next` 上的 rc，只供 dev / staging 平台使用；tag 刻意不叫 `v3.*`。prod 上线时转正为 v3.11.0 |
 | v3.10.0 | `^2.11.0` | `^0.10.0` | `^0.5.0` | **2**（轻应用 1）| 新增 `ptx audit`（23 条确定性自检规则，四维：安全 / AI 成本 / 效率 / 合理性；`--src`、`--json`、`PTX_LANG`；`npm run audit:doc` 从规则表生成 AGENTS.md「自检规则」一节；评审 rubric `scripts/audit-rubric.md` 供 Builder 与 skill 共用）。依赖区间不变 |
 | v3.9.0 | `^2.11.0` | `^0.10.0` | `^0.5.0` | **2**（轻应用 1）| 热图截图：前端 `PtApp.heatmap.capture / getCapture`（app-sdk 2.11），后端 `ctx.pt.heatmap.capture / getCapture`（app-backend 0.10），需 `analytics:read`；推送 `imageUrl` 也收本应用的热图截图。**`0.x` 的 caret 不跨 minor，旧项目要手改区间再 `npm install`** |
@@ -34,6 +35,11 @@
 | v1.1.0 | `^0.3.0` | — | `^0.3.0` | 1 | 预装 UI 组件库 + Tailwind，暗色跟随平台主题 |
 | v1.0.1 | `^0.3.0` | — | — | 1 | 支持在平台内加载本地 dev server 联调 |
 | v1.0.0 | `^0.2.0` | — | — | 1 | 首个版本 |
+
+## [3.11.0] - 2026-11-25
+
+> 页面加载检测转正：依赖 `@ptengine/app-sdk ^2.12.0` / `@ptengine/app-backend ^0.11.0`（npm latest），`PACKAGE_FLOORS` 同步；
+> 内容同下面的 rc.1 / rc.2（rc.2 已合入 v3.10.1 的 SEC-003 误报修复）。**`0.x` 的 caret 不跨 minor，旧项目要手改区间再 `npm install`**。
 
 ## [3.11.0-rc.2] - 2026-11-24
 
