@@ -1,7 +1,7 @@
 {
     "name": "ptengine-app-starter",
     "private": true,
-    "version": "3.10.1",
+    "version": "3.11.0",
     "type": "module",
     "scripts": {
         "dev": "node scripts/ptx.mjs dev",
@@ -16,8 +16,8 @@
         "ptx": "node scripts/ptx.mjs"
     },
     "dependencies": {
-        "@ptengine/app-backend": "^0.10.0",
-        "@ptengine/app-sdk": "^2.11.0",
+        "@ptengine/app-backend": "^0.11.0",
+        "@ptengine/app-sdk": "^2.12.0",
         "@ptengine/design-components": "^0.5.0",
         "react": "^19.1.1",
         "react-dom": "^19.1.1"
